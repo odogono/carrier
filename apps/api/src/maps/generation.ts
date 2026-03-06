@@ -1,6 +1,7 @@
 import {
   MAP_CHUNK_SIZE_TILES,
   MAP_GENERATOR,
+  MAP_GENERATOR_ISLANDS,
   MAP_METERS_PER_TILE,
   MAP_RENDER_UNITS_PER_TILE,
   type MapChunk,
@@ -29,6 +30,10 @@ const INITIAL_HEIGHT_VARIATION = 60;
 const INITIAL_SCALE = 40;
 const ROUGHNESS = 0.62;
 const HEIGHT_BIAS = -2;
+export const MAP_WATER_LEVEL = -10;
+
+const ISLAND_TARGET_WATER_RATIO = 0.62;
+const ISLAND_HEIGHT_SCALE = 36;
 
 type RandomSource = () => number;
 
@@ -83,6 +88,72 @@ const sampleIndex = (x: number, z: number, sampleWidth: number) =>
   z * sampleWidth + x;
 
 const readHeight = (heights: Float32Array, index: number) => heights[index]!;
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const lerp = (start: number, end: number, amount: number) =>
+  start + (end - start) * amount;
+
+const smoothstep = (edge0: number, edge1: number, value: number) => {
+  const amount = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return amount * amount * (3 - 2 * amount);
+};
+
+const coordNoise = (seed: string, x: number, z: number) => {
+  const random = createSeededRandom(`${seed}:${x}:${z}`);
+  return random() * 2 - 1;
+};
+
+const valueNoise = (seed: string, x: number, z: number, scale: number) => {
+  const scaledX = x / scale;
+  const scaledZ = z / scale;
+  const cellX = Math.floor(scaledX);
+  const cellZ = Math.floor(scaledZ);
+  const fracX = scaledX - cellX;
+  const fracZ = scaledZ - cellZ;
+  const fadeX = fracX * fracX * (3 - 2 * fracX);
+  const fadeZ = fracZ * fracZ * (3 - 2 * fracZ);
+
+  const top = lerp(
+    coordNoise(seed, cellX, cellZ),
+    coordNoise(seed, cellX + 1, cellZ),
+    fadeX
+  );
+  const bottom = lerp(
+    coordNoise(seed, cellX, cellZ + 1),
+    coordNoise(seed, cellX + 1, cellZ + 1),
+    fadeX
+  );
+
+  return lerp(top, bottom, fadeZ);
+};
+
+const fractalNoise = (
+  seed: string,
+  x: number,
+  z: number,
+  scales: readonly number[],
+  persistence: number
+) => {
+  let amplitude = 1;
+  let totalAmplitude = 0;
+  let total = 0;
+
+  for (const scale of scales) {
+    total += valueNoise(seed, x, z, scale) * amplitude;
+    totalAmplitude += amplitude;
+    amplitude *= persistence;
+  }
+
+  return totalAmplitude === 0 ? 0 : total / totalAmplitude;
+};
+
+const nthSortedValue = (values: Float32Array, ratio: number) => {
+  const sorted = Array.from(values).sort((left, right) => left - right);
+  const index = clamp(Math.floor((sorted.length - 1) * ratio), 0, sorted.length - 1);
+  return sorted[index]!;
+};
 
 export const generateDiamondSquareHeightfield = (
   widthTiles: number,
@@ -172,6 +243,147 @@ export const generateDiamondSquareHeightfield = (
   };
 };
 
+export const generateIslandHeightfield = (
+  widthTiles: number,
+  heightTiles: number,
+  seed: string
+): GeneratedHeightfield => {
+  const sampleWidth = widthTiles + 1;
+  const sampleHeight = heightTiles + 1;
+  const heights = new Float32Array(sampleWidth * sampleHeight);
+  const base = generateDiamondSquareHeightfield(widthTiles, heightTiles, `${seed}:base`);
+  const random = createSeededRandom(`${seed}:islands`);
+  const maxDimension = Math.max(widthTiles, heightTiles, 1);
+  const centerX = widthTiles * 0.5;
+  const centerZ = heightTiles * 0.5;
+
+  const landmassAttractors = Array.from({ length: 1 + Math.floor(random() * 3) }, () => ({
+    amplitude: lerp(0.9, 1.35, random()),
+    radius: lerp(maxDimension * 0.16, maxDimension * 0.28, random()),
+    x: lerp(widthTiles * 0.22, widthTiles * 0.78, random()),
+    z: lerp(heightTiles * 0.22, heightTiles * 0.78, random())
+  }));
+  const mediumAttractors = Array.from({ length: 5 + Math.floor(random() * 5) }, () => ({
+    amplitude: lerp(0.22, 0.55, random()),
+    radius: lerp(maxDimension * 0.05, maxDimension * 0.12, random()),
+    x: lerp(widthTiles * 0.12, widthTiles * 0.88, random()),
+    z: lerp(heightTiles * 0.12, heightTiles * 0.88, random())
+  }));
+  const microFeatures = Array.from({ length: 18 + Math.floor(random() * 12) }, () => ({
+    amplitude: lerp(0.08, 0.24, random()) * (random() > 0.42 ? 1 : -1),
+    radius: lerp(maxDimension * 0.018, maxDimension * 0.045, random()),
+    x: random() * widthTiles,
+    z: random() * heightTiles
+  }));
+  const ridgeAngle = random() * Math.PI;
+  const ridgeFrequency = lerp(1.7, 2.5, random());
+  const channelAngle = ridgeAngle + Math.PI * 0.5 + lerp(-0.2, 0.2, random());
+
+  for (let z = 0; z < sampleHeight; z += 1) {
+    const normalizedZ = heightTiles === 0 ? 0 : z / heightTiles;
+
+    for (let x = 0; x < sampleWidth; x += 1) {
+      const normalizedX = widthTiles === 0 ? 0 : x / widthTiles;
+      const dx = normalizedX - 0.5;
+      const dz = normalizedZ - 0.5;
+      const radialDistance = Math.sqrt(dx * dx + dz * dz) / 0.70710678118;
+      const coastalMask = 1 - smoothstep(0.34, 0.96, radialDistance);
+      const edgeSuppression = smoothstep(0.55, 1, radialDistance);
+
+      let attractorHeight = 0;
+
+      for (const attractor of landmassAttractors) {
+        const featureDx = x - attractor.x;
+        const featureDz = z - attractor.z;
+        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
+        const influence = Math.max(0, 1 - distance / attractor.radius);
+        attractorHeight += attractor.amplitude * influence * influence;
+      }
+
+      for (const attractor of mediumAttractors) {
+        const featureDx = x - attractor.x;
+        const featureDz = z - attractor.z;
+        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
+        const influence = Math.max(0, 1 - distance / attractor.radius);
+        attractorHeight += attractor.amplitude * influence * influence;
+      }
+
+      let microHeight = 0;
+
+      for (const feature of microFeatures) {
+        const featureDx = x - feature.x;
+        const featureDz = z - feature.z;
+        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
+        const influence = Math.max(0, 1 - distance / feature.radius);
+        microHeight += feature.amplitude * influence * influence;
+      }
+
+      const baseHeight =
+        readHeight(base.heights, sampleIndex(x, z, sampleWidth)) / INITIAL_HEIGHT_VARIATION;
+      const continentalNoise = fractalNoise(
+        `${seed}:continental`,
+        x,
+        z,
+        [maxDimension * 0.22, maxDimension * 0.11, maxDimension * 0.055],
+        0.5
+      );
+      const archipelagoNoise = fractalNoise(
+        `${seed}:archipelago`,
+        x,
+        z,
+        [maxDimension * 0.1, maxDimension * 0.05, maxDimension * 0.025],
+        0.52
+      );
+      const breakupNoise = fractalNoise(
+        `${seed}:breakup`,
+        x,
+        z,
+        [maxDimension * 0.045, maxDimension * 0.022],
+        0.55
+      );
+
+      const ridgeAxis =
+        ((x - centerX) * Math.cos(ridgeAngle) + (z - centerZ) * Math.sin(ridgeAngle)) /
+        maxDimension;
+      const ridgeNoise = Math.sin((ridgeAxis + continentalNoise * 0.18) * Math.PI * ridgeFrequency);
+      const ridgeContribution = (1 - Math.abs(ridgeNoise)) * 0.32;
+
+      const channelAxis =
+        ((x - centerX) * Math.cos(channelAngle) + (z - centerZ) * Math.sin(channelAngle)) /
+        maxDimension;
+      const channelNoise =
+        Math.sin((channelAxis + archipelagoNoise * 0.3) * Math.PI * (ridgeFrequency + 0.65));
+      const channelContribution = -Math.max(0, 1 - Math.abs(channelNoise) * 1.35) * 0.34;
+
+      const rawHeight =
+        baseHeight * 0.32 +
+        coastalMask * 0.86 +
+        attractorHeight * 0.72 +
+        continentalNoise * 0.26 +
+        archipelagoNoise * 0.21 +
+        breakupNoise * 0.08 +
+        ridgeContribution +
+        channelContribution +
+        microHeight -
+        edgeSuppression * 1.08;
+
+      heights[sampleIndex(x, z, sampleWidth)] = rawHeight;
+    }
+  }
+
+  const seaLevelBaseline = nthSortedValue(heights, ISLAND_TARGET_WATER_RATIO);
+
+  for (let index = 0; index < heights.length; index += 1) {
+    heights[index] = (heights[index]! - seaLevelBaseline) * ISLAND_HEIGHT_SCALE + MAP_WATER_LEVEL;
+  }
+
+  return {
+    heights,
+    sampleHeight,
+    sampleWidth
+  };
+};
+
 const getChunkHeightSamples = (
   heightfield: GeneratedHeightfield,
   originTileX: number,
@@ -210,15 +422,14 @@ export type GeneratedMapChunkRecord = Omit<MapChunk, 'heights' | 'layers'> & {
 export const buildGeneratedMapChunks = (
   map: ChunkSeed
 ): GeneratedMapChunkRecord[] => {
-  if (map.generator !== MAP_GENERATOR) {
-    throw new Error(`Unsupported map generator: ${map.generator}`);
-  }
-
-  const heightfield = generateDiamondSquareHeightfield(
-    map.widthTiles,
-    map.heightTiles,
-    map.seed
-  );
+  const heightfield =
+    map.generator === MAP_GENERATOR
+      ? generateDiamondSquareHeightfield(map.widthTiles, map.heightTiles, map.seed)
+      : map.generator === MAP_GENERATOR_ISLANDS
+        ? generateIslandHeightfield(map.widthTiles, map.heightTiles, map.seed)
+        : (() => {
+            throw new Error(`Unsupported map generator: ${map.generator}`);
+          })();
   const chunks: GeneratedMapChunkRecord[] = [];
 
   for (let originTileZ = 0; originTileZ < map.heightTiles; originTileZ += map.chunkSizeTiles) {

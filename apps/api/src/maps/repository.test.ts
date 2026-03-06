@@ -39,4 +39,31 @@ describe('map repository', () => {
       repository.close();
     }
   });
+
+  test('persists maps created with the island preset', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        generator: 'island-clusters',
+        heightTiles: 96,
+        name: 'Archipelago',
+        seed: 'archipelago-seed',
+        widthTiles: 128
+      });
+
+      expect(created.generator).toBe('island-clusters');
+
+      const fetched = repository.getMap(created.id);
+      expect(fetched?.generator).toBe('island-clusters');
+      expect(fetched?.seed).toBe('archipelago-seed');
+
+      const chunk = repository.getMapChunk(created.id, 1, 1);
+      expect(chunk).not.toBeNull();
+      expect(chunk?.mapId).toBe(created.id);
+      expect((chunk?.heights.length ?? 0) > 0).toBe(true);
+    } finally {
+      repository.close();
+    }
+  });
 });

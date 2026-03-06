@@ -4,12 +4,13 @@ import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
 
 export const MAP_GENERATOR = 'diamond-square' as const;
+export const MAP_GENERATOR_ISLANDS = 'island-clusters' as const;
 export const MAP_CHUNK_SIZE_TILES = 32;
 export const MAP_METERS_PER_TILE = 10;
 export const MAP_RENDER_UNITS_PER_TILE = 24;
 export const MAX_MAP_TILES = 4096;
 
-export const MapGenerator = z.enum([MAP_GENERATOR]);
+export const MapGenerator = z.enum([MAP_GENERATOR, MAP_GENERATOR_ISLANDS]);
 export type MapGenerator = z.infer<typeof MapGenerator>;
 
 export const MapHeightLayerSchema = z.object({

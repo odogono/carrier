@@ -75,4 +75,29 @@ describe('API server map routes', () => {
     const finalList = await request('GET', '/api/maps');
     expect((finalList.json as unknown[]).length).toBe(0);
   });
+
+  test('supports creating island preset maps through the public contract', async () => {
+    const createdResponse = await request('POST', '/api/maps', {
+      generator: 'island-clusters',
+      heightTiles: 96,
+      name: 'Island contract map',
+      seed: 'contract-islands',
+      widthTiles: 128
+    });
+    const created = createdResponse.json as Record<string, unknown>;
+
+    expect(created.generator).toBe('island-clusters');
+
+    const fetchedResponse = await request('GET', `/api/maps/${created.id as string}`);
+    const fetched = fetchedResponse.json as Record<string, unknown>;
+    expect(fetched.generator).toBe('island-clusters');
+
+    const chunkResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/chunks/1/1`
+    );
+    const chunk = chunkResponse.json as Record<string, unknown>;
+    expect(chunk.mapId).toBe(created.id);
+    expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+  });
 });
