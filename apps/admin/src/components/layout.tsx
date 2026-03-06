@@ -1,8 +1,10 @@
 import { type ReactNode } from 'react';
 
 import { Link, useRouterState } from '@tanstack/react-router';
-import { LayoutDashboard, Map } from 'lucide-react';
+import { LayoutDashboard, Map, Moon, Sun } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
+import { useTheme } from '@/contexts/theme/context';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -41,6 +43,25 @@ function NavLink({
   );
 }
 
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="w-full justify-start"
+      onClick={toggleTheme}
+    >
+      {theme === 'light' ? (
+        <Moon className="mr-2 h-4 w-4" />
+      ) : (
+        <Sun className="mr-2 h-4 w-4" />
+      )}
+      {theme === 'light' ? 'Dark mode' : 'Light mode'}
+    </Button>
+  );
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen">
@@ -54,6 +75,9 @@ export function Layout({ children }: { children: ReactNode }) {
               <NavLink key={item.href} {...item} />
             ))}
           </nav>
+          <div className="border-t p-4">
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
       <main className="flex-1 overflow-auto">

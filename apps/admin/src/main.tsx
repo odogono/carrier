@@ -7,6 +7,7 @@ import { Toaster } from 'sonner';
 
 import './index.css';
 
+import { ThemeProvider } from '@/contexts/theme/provider';
 import { router } from '@/router';
 
 const queryClient = new QueryClient({
@@ -24,8 +25,10 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster />
+      <ThemeProvider>
+        <RouterProvider router={router} />
+        <Toaster />
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>
 );
