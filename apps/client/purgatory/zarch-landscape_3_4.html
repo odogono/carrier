@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Zarch Landscape Engine – Three.js</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                background: #000;
+                overflow: hidden;
+                font-family: monospace;
+            }
+            canvas {
+                display: block;
+            }
+            #hud {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: #111;
+                border-bottom: 2px solid #c8a000;
+                display: flex;
+                align-items: center;
+                gap: 24px;
+                padding: 4px 12px;
+                color: #e8d060;
+                font-size: 13px;
+                z-index: 10;
+            }
+            #hud .title {
+                color: #60b8ff;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            #hud .score {
+                color: #ff6060;
+            }
+            #minimap {
+                position: fixed;
+                top: 36px;
+                left: 8px;
+                width: 140px;
+                height: 140px;
+                border: 2px solid #888;
+                background: #003;
+                z-index: 10;
+                image-rendering: pixelated;
+            }
+            #info {
+                position: fixed;
+                bottom: 8px;
+                right: 8px;
+                color: #555;
+                font-size: 11px;
+                text-align: right;
+                z-index: 10;
+                line-height: 1.6;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="hud">
+            <span class="score">Score: <span id="scoreVal">0</span></span>
+            <span>🚀</span>
+            <span class="title">Zarch</span>
+            <span>💣</span>
+            <span>Wave: 1</span>
+            <span style="margin-left: auto">Best: 652</span>
+        </div>
+
+        <canvas id="minimap"></canvas>
+
+        <div id="info">
+            WASD / Arrow keys – move<br />
+            Mouse drag – rotate<br />
+            Scroll – zoom
+        </div>
+
+        <script type="importmap">
+            {
+                "imports": {
+                    "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"
+                }
+            }
+        </script>
+
+        <script type="module">
+            import * as THREE from "three";
+
+            // ─── Constants ────────────────────────────────────────────────────────────────
+            const TILE = 24; // world-units per tile
+            const GRID = 32; // tiles in the heightmap (must be power-of-2)
+            const HALF = GRID / 2;
+            const VIEW_R_BASE = 6; // base tile render radius
+            const SEA = -2; // sea level offset
+
+            // ─── Scene ───────────────────────────────────────────────────────────────────
+            const renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setPixelRatio(1); // keep that crisp pixel look
+            renderer.localClippingEnabled = true;
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.BasicShadowMap; // hard-edged, matches Zarch pixel style
+            document.body.appendChild(renderer.domElement);
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            // Fixed isometric-ish camera like Zarch
+            const camera = new THREE.PerspectiveCamera(70, 1, 1, 5000);
+
+            // ─── Heightmap ───────────────────────────────────────────────────────────────
+            // Toroidal heightmap – we index with (x & (GRID-1), z & (GRID-1))
+            const heights = new Float32Array(GRID * GRID);
+
+            function hIdx(gx, gz) {
+                return (gz & (GRID - 1)) * GRID + (gx & (GRID - 1));
+            }
+            function h(gx, gz) {
+                return heights[hIdx(gx, gz)];
+            }
+
+            // Generate terrain with diamond-square fractal (much more natural than sine waves)
+            (function generateTerrain() {
+                // Diamond-square needs power-of-2 + 1 grid
+                const N = GRID + 1;
+                const buf = new Float32Array(N * N);
+                function idx(x, z) { return z * N + x; }
+
+                // Seed corners with larger values for more dramatic terrain
+                buf[idx(0,    0)]    = (Math.random() - 0.5) * 60;
+                buf[idx(GRID, 0)]    = (Math.random() - 0.5) * 60;
+                buf[idx(0,    GRID)] = (Math.random() - 0.5) * 60;
+                buf[idx(GRID, GRID)] = (Math.random() - 0.5) * 60;
+
+                let step = GRID;
+                let scale = 40;
+                while (step > 1) {
+                    const half = step >> 1;
+                    // Diamond step
+                    for (let z = 0; z < GRID; z += step) {
+                        for (let x = 0; x < GRID; x += step) {
+                            const avg = (buf[idx(x,z)] + buf[idx(x+step,z)] +
+                                         buf[idx(x,z+step)] + buf[idx(x+step,z+step)]) * 0.25;
+                            buf[idx(x+half, z+half)] = avg + (Math.random()-0.5)*scale;
+                        }
+                    }
+                    // Square step
+                    for (let z = 0; z <= GRID; z += half) {
+                        for (let x = (z + half) % step; x <= GRID; x += step) {
+                            let sum = 0, count = 0;
+                            if (z-half >= 0)   { sum += buf[idx(x, z-half)]; count++; }
+                            if (z+half <= GRID) { sum += buf[idx(x, z+half)]; count++; }
+                            if (x-half >= 0)   { sum += buf[idx(x-half, z)]; count++; }
+                            if (x+half <= GRID) { sum += buf[idx(x+half, z)]; count++; }
+                            buf[idx(x, z)] = sum / count + (Math.random()-0.5)*scale;
+                        }
+                    }
+                    step = half;
+                    scale *= 0.62; // higher = rougher, more varied hills
+                }
+
+                // Bias downward so ~35% of tiles become water, copy into heightmap
+                for (let gz = 0; gz < GRID; gz++) {
+                    for (let gx = 0; gx < GRID; gx++) {
+                        heights[hIdx(gx, gz)] = buf[idx(gx, gz)] - 2;
+                    }
+                }
+            })();
+
+            // ─── Tile colour (elevation-based with subtle per-tile hash variation) ──────────
+            // A small deterministic hash that returns 0..1 for any tile coord
+            function tileHash(gx, gz) {
+                const n = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
+                return n - Math.floor(n);
+            }
+
+            function tileColour(gx, gz, elevation) {
+                if (elevation < -10) {
+                    // Water: vary slightly by depth
+                    const d = tileHash(gx, gz) * 0.08;
+                    return new THREE.Color(0x1858a0).offsetHSL(0, 0, d - 0.04);
+                }
+                // Pick base colour from elevation bands, with small hash jitter
+                const jitter = (tileHash(gx, gz) - 0.5) * 6; // ±3 units of height jitter
+                const e = elevation + jitter;
+                let col;
+                if (e > 18)       col = new THREE.Color(0x8c7a58); // high rocky/sandy
+                else if (e > 10)  col = new THREE.Color(0x7a9848); // upper grass
+                else if (e > 2)   col = new THREE.Color(0x6aaa38); // mid grass
+                else if (e > -4)  col = new THREE.Color(0x88b850); // low grass
+                else              col = new THREE.Color(0xc8b878); // sandy shore
+                // Subtle per-tile brightness variation to break up uniformity
+                const vary = 0.88 + tileHash(gz * 3 + 5, gx * 7 + 3) * 0.24;
+                return col.clone().multiplyScalar(vary);
+            }
+
+            // ─── Landscape geometry pool ─────────────────────────────────────────────────
+            // We maintain a pool of tile quads. Each frame we reposition visible ones.
+            // This avoids GC churn.
+
+            const POOL_SIZE = (Math.round(VIEW_R_BASE * 2.5) * 2 + 1) ** 2;
+            const tilePool = [];
+
+            // Per-tile MeshBasicMaterial created in makeTileMesh below
+
+            // Build geometry: one quad per tile (two triangles, 4 verts)
+            // We'll update vertex Y each frame from heightmap.
+            function makeTileMesh() {
+                const geo = new THREE.BufferGeometry();
+                // Positions: 4 corners. We'll update them.
+                const pos = new Float32Array(4 * 3);
+                geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+                geo.setIndex([0, 2, 1, 1, 2, 3]);
+                const mat = new THREE.MeshLambertMaterial({
+                    color: 0xffffff,
+                    side: THREE.FrontSide,
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.frustumCulled = false;
+                mesh.receiveShadow = true;
+                return mesh;
+            }
+
+            for (let i = 0; i < POOL_SIZE; i++) {
+                const m = makeTileMesh();
+                scene.add(m);
+                tilePool.push(m);
+            }
+
+            // ─── Tree helpers ─────────────────────────────────────────────────────────────
+            function shouldHaveTree(gx, gz) {
+                const r = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
+                return r - Math.floor(r) < 0.10;
+            }
+            function treeType(gx, gz) {
+                // 0 = tall pine (white/pale), 1 = round canopy (brown trunk)
+                const r = Math.sin(gx * 311.7 + gz * 127.1) * 43758.5453;
+                return (r - Math.floor(r)) < 0.5 ? 0 : 1;
+            }
+            function tileIsWaterCheck(tx, tz) {
+                const e = (h(tx,tz)+h(tx+1,tz)+h(tx,tz+1)+h(tx+1,tz+1))*0.25;
+                return e < -10;
+            }
+
+            // ── Type 0: tall layered pine (3 stacked cones, pale green / white-ish) ───────
+            function makePineTree() {
+                const group = new THREE.Group();
+                group.frustumCulled = false;
+                const trunkGeo = new THREE.CylinderGeometry(0.8, 1.0, 5, 5);
+                const trunkMat = new THREE.MeshLambertMaterial({ color: 0xc8b89a });
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.castShadow = true;
+                group.add(trunk);
+                const tiers = [
+                    { r: 7, h: 10, y: 7,  col: 0xa8d8a8 },
+                    { r: 5, h: 9,  y: 13, col: 0xc0e8c0 },
+                    { r: 3, h: 8,  y: 18, col: 0xd8f0d8 },
+                ];
+                for (const t of tiers) {
+                    const geo = new THREE.ConeGeometry(t.r, t.h, 6);
+                    const mat = new THREE.MeshLambertMaterial({ color: t.col });
+                    const m = new THREE.Mesh(geo, mat);
+                    m.position.y = t.y;
+                    m.castShadow = true;
+                    group.add(m);
+                }
+                return group;
+            }
+
+            // ── Type 1: round canopy tree (brown trunk + sphere-ish top) ─────────────────
+            function makeRoundTree() {
+                const group = new THREE.Group();
+                group.frustumCulled = false;
+                const trunkGeo = new THREE.CylinderGeometry(1.2, 1.5, 8, 5);
+                const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b3a2a });
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 4;
+                trunk.castShadow = true;
+                group.add(trunk);
+                const c1Geo = new THREE.ConeGeometry(7, 10, 7);
+                const c1Mat = new THREE.MeshLambertMaterial({ color: 0x3a7a30 });
+                const c1 = new THREE.Mesh(c1Geo, c1Mat);
+                c1.position.y = 14;
+                c1.castShadow = true;
+                group.add(c1);
+                const c2Geo = new THREE.ConeGeometry(5, 8, 7);
+                const c2Mat = new THREE.MeshLambertMaterial({ color: 0x4a9a3a });
+                const c2 = new THREE.Mesh(c2Geo, c2Mat);
+                c2.position.y = 19;
+                c2.castShadow = true;
+                group.add(c2);
+                return group;
+            }
+
+            // ── Shadow: flat dark ellipse on the ground ───────────────────────────────────
+            function makeShadow() { return null; } // shadows now handled by Three.js shadow maps
+
+            const TREE_POOL_SIZE = 160;
+            const treeMeshes  = [];
+
+            for (let i = 0; i < TREE_POOL_SIZE; i++) {
+                const pine  = makePineTree();
+                const round = makeRoundTree();
+                pine.visible  = false;
+                round.visible = false;
+                [pine, round].forEach(g => g.children.forEach(child => {
+                    child.material._baseColor = child.material.color.getHex();
+                }));
+                scene.add(pine);
+                scene.add(round);
+                treeMeshes.push({ pine, round });
+            }
+
+            // ─── 4-plane clip diamond (the Zarch viewport crop) ──────────────────────────
+            // Zarch clips the landscape to a square rotated 45°. We implement this with
+            // four world-aligned clip planes that follow the camera's XZ position.
+            const clipPlanes = [
+                new THREE.Plane(new THREE.Vector3(1, 0, 0), 0),
+                new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0),
+                new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+                new THREE.Plane(new THREE.Vector3(0, 0, -1), 0),
+            ];
+            // CLIP_RADIUS and VIEW_R are computed dynamically each frame from camZoom
+
+            renderer.clippingPlanes = clipPlanes;
+
+            // ─── Lighting ────────────────────────────────────────────────────────────────
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            sunLight.position.set(200, 400, 100);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width  = 1024;
+            sunLight.shadow.mapSize.height = 1024;
+            sunLight.shadow.camera.near = 1;
+            sunLight.shadow.camera.far  = 2000;
+            const sc = VIEW_R_BASE * 2.5 * TILE * 1.2;
+            sunLight.shadow.camera.left   = -sc;
+            sunLight.shadow.camera.right  =  sc;
+            sunLight.shadow.camera.top    =  sc;
+            sunLight.shadow.camera.bottom = -sc;
+            sunLight.shadow.bias = -0.001;
+            scene.add(sunLight);
+
+            // ─── Camera / player state ───────────────────────────────────────────────────
+            let camX = 0,
+                camZ = 0;
+            let camYaw = 0;
+            let velX = 0,
+                velZ = 0; // smooth movement
+            let score = 0;
+
+            const keys = {};
+            window.addEventListener("keydown", (e) => {
+                keys[e.key] = true;
+            });
+            window.addEventListener("keyup", (e) => {
+                keys[e.key] = false;
+            });
+            let camZoom = 1.0; // 1 = default; >1 = more tiles visible (zoomed out)
+            window.addEventListener("wheel", (e) => {
+                camZoom = Math.max(0.4, Math.min(2.5, camZoom + e.deltaY * 0.001));
+            });
+
+            // Mouse drag to look
+            let drag = false,
+                lastMX = 0;
+            window.addEventListener("mousedown", (e) => {
+                drag = true;
+                lastMX = e.clientX;
+            });
+            window.addEventListener("mouseup", () => {
+                drag = false;
+            });
+            window.addEventListener("mousemove", (e) => {
+                if (!drag) return;
+                camYaw -= (e.clientX - lastMX) * 0.005;
+                lastMX = e.clientX;
+            });
+
+            // ─── Minimap ─────────────────────────────────────────────────────────────────
+            const miniCanvas = document.getElementById("minimap");
+            miniCanvas.width = miniCanvas.height = GRID;
+            const miniCtx = miniCanvas.getContext("2d");
+            const miniImg = miniCtx.createImageData(GRID, GRID);
+
+            function updateMinimap() {
+                for (let gz = 0; gz < GRID; gz++) {
+                    for (let gx = 0; gx < GRID; gx++) {
+                        const elev = h(gx, gz);
+                        let r, g, b;
+                        if (elev < -10) {
+                            r = 30;
+                            g = 80;
+                            b = 160;
+                        } else {
+                            const t = (elev + 25) / 50;
+                            r = Math.round(60 + t * 100);
+                            g = Math.round(120 + t * 80);
+                            b = Math.round(40);
+                        }
+                        const i = (gz * GRID + gx) * 4;
+                        miniImg.data[i] = r;
+                        miniImg.data[i + 1] = g;
+                        miniImg.data[i + 2] = b;
+                        miniImg.data[i + 3] = 255;
+                    }
+                }
+                miniCtx.putImageData(miniImg, 0, 0);
+                // Draw player dot
+                const px = (((camX / TILE) % GRID) + GRID) % GRID;
+                const pz = (((camZ / TILE) % GRID) + GRID) % GRID;
+                miniCtx.fillStyle = "#ff4040";
+                miniCtx.fillRect(Math.round(px) - 1, Math.round(pz) - 1, 3, 3);
+            }
+            updateMinimap();
+
+            // ─── Resize ───────────────────────────────────────────────────────────────────
+            function resize() {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+            }
+            window.addEventListener("resize", resize);
+            resize();
+
+            // ─── Main loop ───────────────────────────────────────────────────────────────
+            const clock = new THREE.Clock();
+
+            function updateLandscape(VIEW_R, CLIP_RADIUS) {
+                // Nearest tile to camera
+                const camTileX = Math.floor(camX / TILE);
+                const camTileZ = Math.floor(camZ / TILE);
+
+                let treeIdx = 0;
+                let tileIdx = 0;
+
+                for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
+                    for (let dx = -VIEW_R; dx <= VIEW_R; dx++) {
+                        const gx = camTileX + dx;
+                        const gz = camTileZ + dz;
+                        // World position: tile's actual world coords minus camera position,
+                        // so geometry is always centred on the camera — no sub-tile split needed.
+                        // This is purely continuous: wx changes smoothly as camX changes.
+                        const wx = gx * TILE - camX;
+                        const wz = gz * TILE - camZ;
+
+                        // Heights at four corners (toroidal lookup)
+                        const h00raw = h(gx, gz);
+                        const h10raw = h(gx + 1, gz);
+                        const h01raw = h(gx, gz + 1);
+                        const h11raw = h(gx + 1, gz + 1);
+
+                        const elev = (h00raw + h10raw + h01raw + h11raw) * 0.25;
+                        const colour = tileColour(gx, gz, elev);
+
+                        const isWater = elev < -10;
+                        const SEA_Y = -12;
+
+                        // A corner vertex is shared by up to 4 tiles. If ANY of those tiles
+                        // is water we clamp that corner to SEA_Y so the shoreline is seamless.
+                        function tileIsWater(tx, tz) {
+                            const e = (h(tx,tz)+h(tx+1,tz)+h(tx,tz+1)+h(tx+1,tz+1))*0.25;
+                            return e < -10;
+                        }
+                        // corner (gx,   gz  ) → tiles (gx-1,gz-1),(gx,gz-1),(gx-1,gz),(gx,gz)
+                        const c00water = tileIsWater(gx-1,gz-1)||tileIsWater(gx,gz-1)||tileIsWater(gx-1,gz)||tileIsWater(gx,gz);
+                        // corner (gx+1, gz  ) → tiles (gx,gz-1),(gx+1,gz-1),(gx,gz),(gx+1,gz)
+                        const c10water = tileIsWater(gx,gz-1)||tileIsWater(gx+1,gz-1)||tileIsWater(gx,gz)||tileIsWater(gx+1,gz);
+                        // corner (gx,   gz+1) → tiles (gx-1,gz),(gx,gz),(gx-1,gz+1),(gx,gz+1)
+                        const c01water = tileIsWater(gx-1,gz)||tileIsWater(gx,gz)||tileIsWater(gx-1,gz+1)||tileIsWater(gx,gz+1);
+                        // corner (gx+1, gz+1) → tiles (gx,gz),(gx+1,gz),(gx,gz+1),(gx+1,gz+1)
+                        const c11water = tileIsWater(gx,gz)||tileIsWater(gx+1,gz)||tileIsWater(gx,gz+1)||tileIsWater(gx+1,gz+1);
+
+                        const h00 = (isWater || c00water) ? SEA_Y : h00raw;
+                        const h10 = (isWater || c10water) ? SEA_Y : h10raw;
+                        const h01 = (isWater || c01water) ? SEA_Y : h01raw;
+                        const h11 = (isWater || c11water) ? SEA_Y : h11raw;
+
+                        // Distance-based darkening from the camera's 3D position.
+                        // camera.position is in geometry space (tiles are centred on origin).
+                        const tileCentreX = wx + TILE * 0.5;
+                        const tileCentreZ = wz + TILE * 0.5;
+                        const ddx = tileCentreX - camera.position.x;
+                        const ddy = elev - camera.position.y;
+                        const ddz = tileCentreZ - camera.position.z;
+                        const dist = Math.sqrt(
+                            ddx * ddx + ddy * ddy + ddz * ddz,
+                        );
+                        const maxDist = VIEW_R * TILE * 2.8;
+                        // Use a power curve for sharper near-bright / far-dark contrast
+                        const t = Math.min(1.0, dist / maxDist);
+                        const bright = Math.max(0.12, 1.0 - t * t * 0.88);
+                        colour.multiplyScalar(bright);
+
+                        // Update tile quad
+                        const mesh = tilePool[tileIdx++];
+                        mesh.material.color.copy(colour);
+                        const pos = mesh.geometry.attributes.position;
+                        pos.setXYZ(0, wx, h00, wz);
+                        pos.setXYZ(1, wx + TILE, h10, wz);
+                        pos.setXYZ(2, wx, h01, wz + TILE);
+                        pos.setXYZ(3, wx + TILE, h11, wz + TILE);
+                        pos.needsUpdate = true;
+                        mesh.geometry.computeVertexNormals();
+
+                        // Trees – only on land tiles where no corner touches water
+                        if (
+                            treeIdx < TREE_POOL_SIZE &&
+                            !isWater &&
+                            !tileIsWaterCheck(gx & (GRID-1), gz & (GRID-1)) &&
+                            !(c00water || c10water || c01water || c11water) &&
+                            shouldHaveTree(gx & (GRID - 1), gz & (GRID - 1))
+                        ) {
+                            const entry  = treeMeshes[treeIdx];
+                            treeIdx++;
+
+                            const wantType = treeType(gx & (GRID-1), gz & (GRID-1));
+                            const activeGroup  = wantType === 0 ? entry.pine  : entry.round;
+                            const inactiveGroup = wantType === 0 ? entry.round : entry.pine;
+
+                            inactiveGroup.visible = false;
+                            activeGroup.visible = true;
+
+                            const groundY = (h00 + h10 + h01 + h11) * 0.25;
+                            const tx = wx + TILE * 0.5;
+                            const tz = wz + TILE * 0.5;
+
+                            activeGroup.position.set(tx, groundY, tz);
+                            activeGroup.children.forEach(child => {
+                                child.material.color.setHex(child.material._baseColor);
+                                child.material.color.multiplyScalar(bright);
+                            });
+                        }
+                    }
+                }
+
+                // Hide unused trees
+                for (let i = treeIdx; i < TREE_POOL_SIZE; i++) {
+                    treeMeshes[i].pine.visible  = false;
+                    treeMeshes[i].round.visible = false;
+                }
+                // Reset colours to base for next frame
+                for (let i = 0; i < TREE_POOL_SIZE; i++) {
+                    [treeMeshes[i].pine, treeMeshes[i].round].forEach(g =>
+                        g.children.forEach(child =>
+                            child.material.color.setHex(child.material._baseColor)
+                        )
+                    );
+                }
+
+                // Clip planes are in geometry space which is centred on camX/camZ = origin
+                const r = CLIP_RADIUS;
+                clipPlanes[0].set(new THREE.Vector3(1, 0, 0), r);
+                clipPlanes[1].set(new THREE.Vector3(-1, 0, 0), r);
+                clipPlanes[2].set(new THREE.Vector3(0, 0, 1), r);
+                clipPlanes[3].set(new THREE.Vector3(0, 0, -1), r);
+            }
+
+            function animate() {
+                requestAnimationFrame(animate);
+                const dt = Math.min(clock.getDelta(), 0.05);
+
+                // ── Input ──
+                const speed = 120;
+                const fwd = new THREE.Vector3(
+                    -Math.sin(camYaw),
+                    0,
+                    -Math.cos(camYaw),
+                );
+                const rgt = new THREE.Vector3(
+                    Math.cos(camYaw),
+                    0,
+                    -Math.sin(camYaw),
+                );
+
+                let ax = 0,
+                    az = 0;
+                if (keys["ArrowUp"] || keys["w"] || keys["W"]) {
+                    ax -= fwd.x;
+                    az -= fwd.z;
+                }
+                if (keys["ArrowDown"] || keys["s"] || keys["S"]) {
+                    ax += fwd.x;
+                    az += fwd.z;
+                }
+                if (keys["ArrowLeft"] || keys["a"] || keys["A"]) {
+                    ax += rgt.x;
+                    az += rgt.z;
+                }
+                if (keys["ArrowRight"] || keys["d"] || keys["D"]) {
+                    ax -= rgt.x;
+                    az -= rgt.z;
+                }
+
+                const accel = 400,
+                    drag = 2.5;
+                velX += ax * accel * dt;
+                velZ += az * accel * dt;
+                velX -= velX * drag * dt;
+                velZ -= velZ * drag * dt;
+                camX += velX * dt;
+                camZ += velZ * dt;
+
+                score += (Math.round(Math.abs(velX) + Math.abs(velZ)) * dt) | 0;
+                document.getElementById("scoreVal").textContent = score;
+
+                // ── Update landscape geometry ──
+                const VIEW_R = Math.round(VIEW_R_BASE * camZoom);
+                const CLIP_RADIUS = (VIEW_R - 0.6) * TILE;
+                updateLandscape(VIEW_R, CLIP_RADIUS);
+
+                // ── Camera: angle stays fixed, pulls back proportionally to zoom ──
+                const pullBack = CLIP_RADIUS * 1.8;
+                const camHeight = CLIP_RADIUS * 1.35;
+                camera.fov = 70;
+                camera.updateProjectionMatrix();
+                camera.position.set(
+                    -Math.sin(camYaw) * pullBack,
+                    camHeight,
+                    -Math.cos(camYaw) * pullBack,
+                );
+                camera.lookAt(0, 0, 0);
+
+                // Minimap every 10 frames
+                if (Math.round(clock.elapsedTime * 60) % 10 === 0)
+                    updateMinimap();
+
+                renderer.render(scene, camera);
+            }
+
+            animate();
+        </script>
+    </body>
+</html>

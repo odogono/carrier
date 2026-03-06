@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+You are an expert in React, Vite, three.js, and React Three Fiber
+
+This project uses Bun not npm
