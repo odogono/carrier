@@ -272,18 +272,16 @@ export const encodeFloat32Heights = (heights: Float32Array) =>
 export const decodeFloat32Heights = (
   blob: ArrayBufferLike | ArrayBufferView
 ): Float32Array => {
-  const bytes =
-    ArrayBuffer.isView(blob)
-      ? new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength)
-      : new Uint8Array(blob);
+  if (ArrayBuffer.isView(blob)) {
+    const copy = blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength);
+    return new Float32Array(copy);
+  }
 
-  return new Float32Array(
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-  );
+  return new Float32Array(blob.slice(0));
 };
 
 export const toMapChunkResponse = (
-  record: GeneratedMapChunkRecord | (Omit<MapChunk, 'heights' | 'layers'> & { heights: Float32Array })
+  record: GeneratedMapChunkRecord
 ): MapChunk => ({
   ...record,
   heights: Array.from(record.heights),

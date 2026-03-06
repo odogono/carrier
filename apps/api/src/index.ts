@@ -71,7 +71,7 @@ export const createServer = async () => {
         schemaConverters: [new ZodToJsonSchemaConverter()],
         specGenerateOptions: {
           info: {
-            title: 'NowData Meta API',
+            title: 'Carrier API',
             version: '1.0.0'
           }
         }

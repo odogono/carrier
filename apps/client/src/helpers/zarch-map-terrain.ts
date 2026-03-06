@@ -110,7 +110,6 @@ export const createServerMapTerrain = ({
 }): ZarchTerrain => {
   const chunkLookupCache = new Map<string, MapChunk | null>();
   const heightLookupCache = new Map<string, number | null>();
-  let lastRequestedWindow = '';
 
   const sampleHeight = (sampleX: number, sampleZ: number) => {
     const heightKey = `${sampleX}:${sampleZ}`;
@@ -183,14 +182,10 @@ export const createServerMapTerrain = ({
         centerTileZ,
         viewRadiusTiles
       );
-      const signature = `${window.minChunkX}:${window.maxChunkX}:${window.minChunkZ}:${window.maxChunkZ}`;
 
-      if (signature === lastRequestedWindow) {
-        return;
-      }
-
-      lastRequestedWindow = signature;
-
+      // Always iterate the window and call prefetchChunk — React Query
+      // deduplicates in-flight requests and skips cached chunks internally,
+      // so there is no need to track the last requested window signature here.
       for (let chunkZ = window.minChunkZ; chunkZ <= window.maxChunkZ; chunkZ += 1) {
         for (let chunkX = window.minChunkX; chunkX <= window.maxChunkX; chunkX += 1) {
           prefetchChunk(chunkX, chunkZ);

@@ -31,6 +31,9 @@ export const useServerMapTerrain = () => {
     staleTime: MAP_METADATA_CACHE_MS
   });
 
+  // Two map selection paths:
+  // 1. Explicit: ?mapId=... query param → fetch metadata via selectedMapQuery
+  // 2. Fallback: no query param → use first map from the list query directly
   const fallbackMap = requestedMapId ? null : (mapsQuery.data?.[0] ?? null);
   const selectedMapId = requestedMapId ?? fallbackMap?.id ?? null;
 

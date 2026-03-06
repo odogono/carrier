@@ -87,7 +87,6 @@ describe('server-backed zarch terrain', () => {
 
     const window = getVisibleChunkWindow(map, 20, 20, 6);
     terrain.requestVisibleChunks(20, 20, 6);
-    terrain.requestVisibleChunks(20, 20, 6);
 
     expect(window).toEqual({
       maxChunkX: 1,
