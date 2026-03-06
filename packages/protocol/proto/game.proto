@@ -1,0 +1,10 @@
+message PlayerInput {
+  uint32 tick = 1;
+  float dx = 2;
+  float dy = 3;
+}
+
+message Snapshot {
+  uint32 tick = 1;
+  repeated Player players = 2;
+}

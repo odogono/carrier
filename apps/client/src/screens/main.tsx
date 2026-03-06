@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 
-import { Canvas } from '@react-three/fiber';
 import { BasicShadowMap } from 'three';
+import { Canvas } from '@react-three/fiber';
 
 import { createLog } from 'odgn-ts-helpers/log';
 
@@ -9,10 +9,10 @@ import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
 import { createZarchTerrain } from '@/helpers/zarch-terrain';
 
+import { useZarchRuntime } from './zarch/use-zarch-runtime';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { ZarchScene } from './zarch/zarch-scene';
-import { useZarchRuntime } from './zarch/use-zarch-runtime';
 
 const log = createLog('Main');
 
@@ -24,7 +24,7 @@ export const Main = () => {
   });
 
   useEffect(() => {
-    log.info('Zarch R3F');
+    log.info('Carrier');
 
     void connectApi();
   }, []);
@@ -32,7 +32,7 @@ export const Main = () => {
   return (
     <>
       <div
-        className="relative h-screen w-screen touch-none select-none overflow-hidden bg-black text-white"
+        className="relative h-screen w-screen touch-none overflow-hidden bg-black text-white select-none"
         ref={containerRef}
       >
         <Canvas
