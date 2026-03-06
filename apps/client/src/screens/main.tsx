@@ -6,6 +6,7 @@ import { BasicShadowMap } from 'three';
 import { createLog } from 'odgn-ts-helpers/log';
 
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
+import { connectApi } from '@/helpers/api-link';
 import { createZarchTerrain } from '@/helpers/zarch-terrain';
 
 import { ZarchHud } from './zarch/zarch-hud';
@@ -24,6 +25,8 @@ export const Main = () => {
 
   useEffect(() => {
     log.info('Zarch R3F');
+
+    void connectApi();
   }, []);
 
   return (

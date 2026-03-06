@@ -3,12 +3,19 @@ import tailwindcss from 'bun-plugin-tailwind';
 
 import pkg from './package.json' with { type: 'json' };
 
+// API URL: use API_URL at build time, or runtime via window.__backend_api_url
+const apiUrlDefine =
+  typeof process.env.API_URL === 'string' && process.env.API_URL.length > 0
+    ? JSON.stringify(process.env.API_URL)
+    : 'window.__backend_api_url';
+
 const result = await Bun.build({
   define: {
-    __API_URL__: 'window.__backend_api_url',
+    __API_URL__: apiUrlDefine,
     __APP_VERSION__: JSON.stringify(pkg.version)
   },
   entrypoints: ['./index.html'],
+  env: 'inline',
   minify: true,
   outdir: './dist',
   plugins: [tailwindcss],

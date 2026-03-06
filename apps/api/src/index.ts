@@ -218,7 +218,6 @@ const start = async () => {
     // with client certificate info in X-SSL-Client-* headers
     app.listen(SERVER_PORT);
     log.info(`HTTP server running on http://${SERVER_HOST}:${SERVER_PORT}`);
-    log.info('mTLS connections are handled by nginx on port 8443');
   } catch (error) {
     log.error('Failed to start server:', error);
     process.exit(1);
