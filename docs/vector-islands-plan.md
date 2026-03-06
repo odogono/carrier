@@ -1,283 +1,371 @@
-# Vector Island Map System — Research & Design
+# Vector Island Map System - Implementation Outline
 
 ## Context
 
-The current map system generates a full heightfield bitmap split into 32x32 tile chunks, all stored in SQLite. Every tile exists in storage — including ~62% ocean tiles. The goal is to explore representing islands as vector closed paths with height control points, enabling named regions, precise boundaries, and reduced storage.
+The current map system stores every generated chunk up front in SQLite. That works for bitmap-first generators, but it wastes storage on ocean and does not support named islands, precise boundaries, or editor-driven terrain authoring.
 
----
+This plan defines a minimal, implementation-ready v1 for vector-authored islands while keeping the existing chunk response shape used by the admin viewer and gameplay client.
 
-## 1. Height Interpolation from Sparse Control Points
+## 1. Decisions For v1
 
-### Recommended: Poisson/Laplace Solver
+- Add a new generator type: `vector-islands`.
+- Keep `maps` as the top-level resource. Do not introduce a separate `worlds` resource.
+- Keep `maps.getChunk` output unchanged. Clients continue to request `MapChunk` the same way they do today.
+- Add separate map-definition routes for vector authoring instead of overloading `maps.find` or `maps.update`.
+- Generate vector chunks lazily on first read, then persist them in `map_chunks`.
+- Version cached chunks with `definition_revision` so stale chunks are detectable after edits.
+- Invalidate the entire cached chunk set for a vector map on any definition edit in v1. Partial invalidation is deferred.
+- Ship a narrow terrain model first:
+  - single outer polygon per island
+  - no polygon holes
+  - no region hierarchy
+  - no erosion pass
+  - no CDT ridge overlay in v1
 
-The best fit for "closed boundary + interior control points" is solving the Laplace equation on a grid:
-- Set height=0 at all points on/outside the island boundary (Dirichlet boundary condition)
-- Set elevation constraints at grid cells nearest to control points (peaks, valleys)
-- Solve iteratively (Gauss-Seidel with SOR, or multigrid) — produces the smoothest possible surface
-- **No overshoot guaranteed** — max/min values only occur at constraints
-- Coastal falloff to water level happens automatically via boundary conditions
-- Cost: O(grid cells) to solve once, then O(1) per-sample lookup via bilinear interpolation
-- Must discretize to a grid per island (256x256 or 512x512 is sufficient), not evaluable per-sample on the fly
+## 2. Public API And Contracts
 
-### Strong alternative: RBF with Thin-Plate Spline kernel
+### Map metadata
 
-- Evaluable per-sample on demand — no grid needed
-- Sample the boundary polygon densely at height=0, add interior control points
-- Solve NxN linear system once (N = total control points), then evaluate at O(N) per sample
-- Can overshoot (produce negative heights in some configurations) — needs clamping
-- JS library: [thibauts/rbf](https://github.com/thibauts/rbf)
+Extend shared `MapMetadata` with:
 
-### Other methods considered
-
-| Method | Per-Sample Cost | Smooth? | Overshoot? | Ridge Support | Boundary Handling |
-|--------|----------------|---------|------------|---------------|-------------------|
-| **Poisson** | O(1) lookup | Yes (harmonic) | No | Good w/ gradient constraints | Excellent (native) |
-| **RBF (TPS)** | O(N) | Yes (C2) | Yes | Needs dense points | Manual (boundary sampling) |
-| **Delaunay+CDT** | O(log N) | No (faceted) | No | Excellent (constrained edges) | Natural with boundary edges |
-| **IDW** | O(N) | No (flat at points) | No | Poor | Manual |
-| **MBA B-Spline** | O(1) | Yes (C2) | Slight | Poor | Rectangular domain only |
-
-**All methods need fractal noise layers on top** — the base interpolation provides only large-scale shape. Add 4-6 octaves of simplex noise scaled by base elevation for natural detail.
-
-### Recommended composite approach
-
-1. **Poisson solver** for the smooth base shape (handles boundary + peaks naturally)
-2. **CDT overlay** for structural ridges/valleys (constrained edges create sharp features)
-3. **fBm noise** for surface detail, amplitude scaled by elevation and distance-from-coast
-4. **Coastal noise displacement** for natural shoreline irregularity (see section 2)
-
----
-
-## 2. Coastline Generation
-
-### The key architectural insight: two coastlines
-
-- **Gameplay boundary**: The clean vector polygon — used for "which island am I on?" point-in-polygon queries. Fast, simple, authoritative.
-- **Visual coastline**: The noisy displaced version — used for heightmap generation and rendering. Can be arbitrarily complex without affecting gameplay performance.
-
-Maximum noise amplitude defines the maximum visual deviation from the gameplay boundary.
-
-### Noise displacement technique
-
-Walk along the closed polygon vertices, displace each along its outward normal by a noise value. For seamless closure, map the 1D path parameter onto a circle in 2D noise space:
-
-```
-noise_x = cos(2 * PI * t / path_length) * noise_scale
-noise_y = sin(2 * PI * t / path_length) * noise_scale
-displacement = fbm2D(noise_x, noise_y) * amplitude
-```
-
-This guarantees continuity at the path closure point.
-
-### Controlling roughness
-
-- **Persistence** (0.3-0.7): Higher = rougher coastline. Real coastlines have fractal dimension ~1.1-1.3.
-- **Octaves** (3-6): More octaves = finer detail.
-- **Spatial modulation**: Multiply noise amplitude by a second low-frequency noise to create varied coast character (smooth bays vs. jagged headlands).
-- **Per-island parameters**: Each island definition can specify its own roughness, allowing rocky volcanic islands vs. smooth sandy atolls.
-
-### Erosion
-
-Full erosion simulation is too expensive for on-demand generation. Instead:
-- Classify coastal tiles by slope angle (beach < 15deg, cliff > 60deg)
-- Use noise-based material selection at the coast
-- Optionally run a lightweight erosion pass once during initial generation
-
----
-
-## 3. On-Demand Chunk Generation
-
-### Determinism is guaranteed
-
-Height at any point depends only on world-space coordinates + fixed vector data + seed. No chunk reads another chunk's output. Same inputs always produce same outputs.
-
-### Chunk border seamlessness
-
-If the height function is purely `f(worldX, worldZ, vectors, seed)`, borders are automatically seamless — two independently generated chunks sharing an edge produce identical values at shared sample points. Your existing 33x33 samples for 32x32 tiles (shared border samples) already handles this.
-
-For neighborhood-dependent operations (blur, erosion), use padding: generate extra samples beyond chunk boundaries equal to the operation's effect radius.
-
-### Performance estimate
-
-Per chunk (33x33 = 1,089 samples):
-- Point-in-polygon test: ~50-200ns per sample
-- Distance to polygon edge: ~200-500ns per sample
-- fBm noise (4 octaves): ~100-400ns per sample
-- **Total: ~1-2ms per chunk**
-
-This is well within real-time budgets (16.6ms frame at 60fps). Burst generation (many chunks at once) can use Web Workers for parallelism.
-
-### Recommended caching strategy: Generate Once, Cache Persistently
-
-This matches your current architecture with a small change:
-
-**Current**: Generate all chunks at map creation time → store in SQLite → serve via API
-**Proposed**: Generate each chunk on first API request if not stored → persist to SQLite → subsequent requests read from SQLite
-
-Benefits:
-- No upfront generation delay for large maps
-- Only visited areas consume storage
-- Client-side code doesn't change at all
-- If vector data changes (editor), invalidate affected chunks → regenerate on next request
-- Storage is tiny: 33x33 float32 chunk = ~4.3 KB. Even 200x200 chunks (40K tiles x 40K tiles) = ~1.7 MB
-
-The generation trigger moves from `buildGeneratedMapChunks()` to a lazy check inside `MapRepository.getChunk()`.
-
----
-
-## 4. Data Model Design
-
-### Island definition
-
-```typescript
-type IslandDefinition = {
+```ts
+type MapMetadata = {
   id: string;
-  name: string;
-  // Closed polygon boundary (gameplay boundary)
-  boundary: Array<{ x: number; z: number }>;
-  // Height control points within the boundary
-  controlPoints: Array<{
-    x: number;
-    z: number;
-    elevation: number;       // metres above water level
-    type: 'peak' | 'saddle' | 'valley' | 'ridge' | 'plain';
-    influence?: number;      // optional radius of influence
-  }>;
-  // Ridge/valley lines as polylines with elevation profiles
-  featureLines: Array<{
-    type: 'ridge' | 'valley';
-    points: Array<{ x: number; z: number; elevation: number }>;
-  }>;
-  // Coastline generation parameters
-  coastline: {
-    roughness: number;       // 0-1, fractal persistence
-    noiseScale: number;      // base frequency
-    maxDisplacement: number; // max deviation from boundary (metres)
-  };
-  // Arbitrary attributes
-  attributes: Record<string, unknown>;
-};
-```
-
-### Region hierarchy
-
-```typescript
-type Region = {
-  id: string;
-  name: string;
-  parentId: string | null;   // island ID or parent region ID
-  boundary: Array<{ x: number; z: number }>;  // closed polygon
-  attributes: Record<string, unknown>;
-};
-```
-
-Regions can nest: `World > Island > Mountain Range > Peak`. Point-in-polygon tests walk the hierarchy from most specific to least.
-
-### World definition (replaces current MapMetadata partially)
-
-```typescript
-type WorldDefinition = {
-  id: string;
-  name: string;
+  name: string | null;
+  generator: 'diamond-square' | 'island-clusters' | 'vector-islands';
   seed: string;
-  // World bounds (the ocean area)
+  widthTiles: number;
+  heightTiles: number;
   widthMeters: number;
   heightMeters: number;
   metersPerTile: number;
   renderUnitsPerTile: number;
   chunkSizeTiles: number;
-  // Island definitions
-  islands: IslandDefinition[];
-  // Nested regions within islands
-  regions: Region[];
-  // Ocean parameters
-  ocean: {
-    waterLevel: number;      // metres (current: -10)
-    deepOceanDepth: number;
-  };
+  createdAt: string;
+  updatedAt: string;
+  definitionRevision?: number;
+  hasVectorDefinition?: boolean;
 };
 ```
 
-### Storage
+`maps.list` and `maps.find` continue to return metadata only.
 
-- `worlds` table: world-level metadata + seed
-- `islands` table: island definitions as JSON blobs (boundary, control points, coastline params)
-- `regions` table: region hierarchy (id, parent_id, boundary, attributes)
-- `map_chunks` table: generated heightmap chunks (same as current, but lazily populated)
+### Vector definition document
 
-### Querying "which island am I on?"
+Add a new shared schema for the full vector-authored map definition:
 
-```typescript
-function findIsland(worldX: number, worldZ: number, islands: IslandDefinition[]): IslandDefinition | null {
-  // Quick bounding-box pre-filter, then point-in-polygon on boundary
-  for (const island of islands) {
-    if (!inBoundingBox(worldX, worldZ, island.bbox)) continue;
-    if (pointInPolygon(worldX, worldZ, island.boundary)) return island;
-  }
-  return null; // in the ocean
-}
+```ts
+type VectorMapDefinition = {
+  ocean: {
+    waterLevel: number;
+    deepOceanDepth: number;
+  };
+  islands: Array<{
+    id: string;
+    name: string;
+    boundary: Array<{ x: number; z: number }>;
+    controlPoints: Array<{
+      x: number;
+      z: number;
+      elevation: number;
+      kind: 'peak' | 'valley' | 'plain';
+      influenceMeters?: number;
+    }>;
+    coastline: {
+      roughness: number;
+      noiseScale: number;
+      maxDisplacementMeters: number;
+    };
+  }>;
+};
 ```
 
-For many islands, use a spatial index (R-tree or grid) for the bounding-box pre-filter.
+Validation rules:
 
----
+- `boundary` is closed implicitly. The API accepts unique vertices only and closes the loop on read/use.
+- All coordinates are in world metres, not tile indices.
+- Every island boundary must stay within map bounds.
+- Every control point must fall inside its island boundary.
+- `waterLevel` defaults to `-10` to match current terrain behavior.
 
-## 5. Generation Pipeline Summary
+### New routes
 
+Add:
+
+- `maps.getDefinition({ id }) -> { mapId, definitionRevision, definition }`
+- `maps.updateDefinition({ id, expectedRevision, definition }) -> MapMetadata`
+
+Behavior:
+
+- `maps.create` continues to create map metadata. When `generator === 'vector-islands'`, it also requires an initial `definition`.
+- `maps.update` remains metadata-only and continues to support name changes.
+- `maps.updateDefinition` replaces the full vector document in one write. There is no per-island CRUD in v1.
+- `expectedRevision` is required for optimistic concurrency. Reject mismatches with `CONFLICT`.
+
+## 3. Persistence Model
+
+### Tables
+
+Keep existing `maps` and `map_chunks` tables, and add a new `map_definitions` table.
+
+`maps`
+
+- existing columns
+- `definition_revision INTEGER NOT NULL DEFAULT 0`
+
+`map_definitions`
+
+- `map_id TEXT PRIMARY KEY`
+- `definition_json TEXT NOT NULL`
+- `updated_at TEXT NOT NULL`
+- `FOREIGN KEY (map_id) REFERENCES maps(id) ON DELETE CASCADE`
+
+`map_chunks`
+
+- existing chunk columns
+- `definition_revision INTEGER NOT NULL DEFAULT 0`
+
+### Chunk cache semantics
+
+- Legacy generators keep their current eager-generation behavior until the lazy path is proven.
+- `vector-islands` maps use lazy generation only.
+- A cached chunk is reusable only when `chunk.definition_revision === map.definition_revision`.
+- On `maps.updateDefinition`, increment `maps.definition_revision` and delete all cached chunks for that map in the same transaction.
+
+This keeps v1 invalidation simple and correct. Fine-grained chunk invalidation is a later optimization.
+
+## 4. Generation Architecture
+
+### Compile step
+
+Vector chunk generation must not solve each island from scratch on every chunk request. The server should compile the map definition into process-local artifacts keyed by `(mapId, definitionRevision)`.
+
+Compiled artifact contents:
+
+- island bounding boxes
+- island spatial index for quick candidate lookup
+- noisy coastline polygons derived from seed plus coastline params
+- per-island solve grid and bilinear sampler for base elevation
+
+Compiled artifacts are held in memory only. They are rebuilt after process restart on first vector chunk request.
+
+### Base terrain model
+
+Use a Poisson/Laplace solve for the base island surface.
+
+Per island:
+
+1. Expand the island bounding box by `maxDisplacementMeters`.
+2. Rasterize the displaced visual coastline into a solve mask.
+3. Create a solve grid over that box at roughly one solve cell per four map tiles on the longest axis, clamped to `129..513` samples.
+4. Set boundary and outside-mask cells to `waterLevel`.
+5. Pin control-point cells to `waterLevel + elevation`.
+6. Run Gauss-Seidel with SOR until the max delta is below a fixed epsilon or a max iteration count is reached.
+7. Sample the solved grid with bilinear interpolation during chunk generation.
+
+### Coastline model
+
+Maintain two coastlines:
+
+- gameplay boundary: clean polygon used for island membership and editor manipulation
+- visual coastline: displaced polygon used for land/water masking and terrain generation
+
+Displacement rules:
+
+- parameterize the closed path by arc length
+- sample seamless fBm noise in circularized 2D noise space
+- displace along the outward normal
+- clamp displacement to `maxDisplacementMeters`
+
+### Detail noise
+
+After sampling the base solve:
+
+- add 4 octaves of deterministic fBm noise
+- scale noise amplitude by normalized base elevation so beaches stay quieter than mountain interiors
+- taper detail down near the visual coastline so coast transitions remain readable
+
+### Chunk generation flow
+
+For `maps.getChunk(mapId, chunkX, chunkZ)` on a `vector-islands` map:
+
+1. Read map metadata and definition revision.
+2. Read the chunk row.
+3. If the chunk exists for the current revision, return it.
+4. Otherwise acquire a process-local single-flight lock for `(mapId, definitionRevision, chunkX, chunkZ)`.
+5. Recheck the row after the lock is acquired.
+6. Compile the vector definition if the compiled artifact is not already cached.
+7. Generate the chunk's `33 x 33` corner-sample grid from world coordinates.
+8. Persist the chunk with the current `definition_revision` using an upsert.
+9. Return the stored chunk payload.
+
+If generation fails, return an API error and do not write a partial chunk row.
+
+## 5. Runtime And Client Impact
+
+- `MapChunk` stays unchanged, so [apps/client/src/screens/zarch/use-server-map-terrain.ts](/Users/alex/work/carrier/apps/client/src/screens/zarch/use-server-map-terrain.ts) and the admin map viewer continue to read chunks the same way.
+- First access to a vector chunk is slower than current reads because it may trigger compile plus generation work.
+- The API route behavior changes even though the response shape does not. The repository must now support read-through cache population and revision-aware staleness checks.
+- The admin detail page needs a vector-definition editor flow in addition to metadata editing. It should fetch and save the full definition document through the new routes.
+
+## 6. Capacity And Performance
+
+- A normal `33 x 33` chunk contains `1,089` float32 samples.
+- Raw height payload per chunk is `1,089 * 4 = 4,356` bytes, about `4.25 KiB` before SQLite overhead.
+- `200 x 200` chunks means `40,000` chunks total.
+- Raw chunk storage for that full cache is about `174 MB` before indexes and row overhead.
+
+Implications:
+
+- lazy generation still reduces storage when players only visit a small fraction of the world
+- persistent caching is still worthwhile
+- the plan should not rely on tiny-cache assumptions
+
+Performance targets:
+
+- cached chunk read should remain dominated by SQLite read and decode costs
+- uncached vector chunk generation should target under `10 ms` for a warm compiled artifact
+- first chunk for a map revision may be slower because it includes compile time
+
+## 7. Tests And Verification
+
+### Contract and repository tests
+
+- creating a `vector-islands` map stores metadata plus initial definition
+- `maps.getDefinition` returns the exact saved document and revision
+- `maps.updateDefinition` increments `definition_revision`
+- stale chunk rows are not reused across revisions
+- concurrent requests for the same uncached chunk produce one stored row
+
+### Terrain correctness tests
+
+- simple square island with one peak keeps boundary samples at `waterLevel`
+- control-point elevations are honored at pinned cells
+- adjacent chunks share identical border samples
+- repeated generation for the same seed, definition, and revision is byte-identical
+- coast displacement is deterministic for a given seed
+
+### Integration checks
+
+- admin map viewer can open and render a vector map through existing chunk APIs
+- gameplay client can traverse a vector map without seam artifacts
+- process restart rebuilds compiled artifacts and still returns the same chunk bytes for the same revision
+
+## 8. Rollout Plan
+
+### Phase 1 - Cache infrastructure
+
+- add `definition_revision` fields and repository support for revision-aware chunk reads
+- keep legacy generators on the existing eager path
+- add single-flight chunk generation utilities
+
+### Phase 2 - Vector contracts and persistence
+
+- add `vector-islands` generator to shared contracts
+- add `map_definitions` storage
+- add `maps.getDefinition` and `maps.updateDefinition`
+- allow `maps.create` to accept an initial vector definition
+
+### Phase 3 - Vector terrain generation
+
+- implement compile cache
+- implement coastline displacement
+- implement Poisson base solve and chunk sampling
+- enable lazy generation for `vector-islands`
+
+### Phase 4 - Admin authoring
+
+- add vector-definition create/edit UI
+- add validation feedback for out-of-bounds polygons and invalid control points
+- keep metadata editing and chunk preview intact
+
+### Phase 5 - Follow-up enhancements
+
+- partial chunk invalidation for localized edits
+- region hierarchy and named subregions
+- holes, lakes, rivers, and ridge lines
+- optional persistence of compiled solve artifacts
+
+## Appendix A - Research Notes
+
+These notes are intentionally non-normative. They capture useful research and alternatives that informed the v1 plan, but they are not all in scope for the first implementation.
+
+### Interpolation options considered
+
+#### Recommended base approach: Poisson/Laplace solve
+
+- Good fit for closed boundary plus sparse interior elevation constraints
+- Handles coastal falloff naturally through boundary conditions
+- Avoids overshoot, so extrema remain at constrained values
+- Produces a smooth harmonic surface that can be sampled cheaply after solving
+- Requires discretizing each island into a solve grid rather than evaluating purely on demand
+
+#### Strong alternative: RBF with thin-plate spline kernel
+
+- Evaluates directly per sample without a precomputed grid
+- Can use densely sampled boundary points at water level plus interior control points
+- Solves a single `N x N` system up front, then evaluates in `O(N)` per sample
+- More flexible for sparse authoring, but can overshoot and may need clamping
+- Still worth reconsidering if the Poisson compile step proves too heavy for editing workflows
+
+#### Other methods considered
+
+| Method | Per-sample cost | Smoothness | Overshoot risk | Ridge support | Boundary handling |
+| --- | --- | --- | --- | --- | --- |
+| Poisson | `O(1)` lookup after solve | Smooth harmonic surface | No | Limited in v1 | Native |
+| RBF (TPS) | `O(N)` | `C2` smooth | Yes | Indirect | Manual boundary sampling |
+| Delaunay + CDT | `O(log N)` lookup | Faceted | No | Strong | Natural with constrained edges |
+| IDW | `O(N)` | Weak | No | Poor | Manual |
+| MBA B-spline | `O(1)` | `C2` smooth | Slight | Poor | Better for rectangular domains |
+
+### Composite terrain approach considered
+
+The broader research direction was:
+
+1. Poisson solver for the large-scale base shape
+2. CDT overlay for sharper ridge and valley structures
+3. fBm noise for surface detail
+4. Coastal displacement noise for shoreline irregularity
+
+The v1 implementation keeps only items 1, 3, and 4. CDT-based ridge overlays are deferred.
+
+### Coastline research
+
+The earlier research recommendation was to maintain two coastlines:
+
+- gameplay boundary: simple authoritative polygon for point-in-polygon queries
+- visual coastline: displaced polygon used for terrain generation and rendering
+
+The displacement technique uses arc-length parameterization around the closed path and samples seamless noise in circularized 2D space:
+
+```txt
+noise_x = cos(2 * PI * t / path_length) * noise_scale
+noise_y = sin(2 * PI * t / path_length) * noise_scale
+displacement = fbm2D(noise_x, noise_y) * amplitude
 ```
-IslandDefinition (vector data)
-  │
-  ├─ Boundary polygon ──────────────► Gameplay queries (point-in-polygon)
-  │
-  ├─ Noisy boundary (displaced) ────► Defines land/water per sample
-  │
-  ├─ Control points + feature lines ► Poisson solver → base heightmap
-  │                                    CDT → ridge/valley structure
-  │
-  └─ fBm noise layers ─────────────► Surface detail
-                                       │
-                                       ▼
-                              Final height per sample
-                                       │
-                                       ▼
-                              Chunk (33x33 Float32Array)
-                                       │
-                                       ▼
-                              SQLite (persisted on first generate)
-                                       │
-                                       ▼
-                              API → Client (unchanged)
-```
 
----
+That avoids a visible seam where the polygon loop closes.
 
-## 6. Key Libraries
+Roughness controls discussed during research:
 
-- **Poisson solver**: Custom implementation (~100 lines Gauss-Seidel iterator)
-- **RBF interpolation**: [thibauts/rbf](https://github.com/thibauts/rbf)
-- **Delaunay/CDT**: [Delaunator](https://github.com/mapbox/delaunator), [cdt2d](https://www.npmjs.com/package/cdt2d)
-- **Simplex noise**: [simplex-noise](https://www.npmjs.com/package/simplex-noise)
-- **Point-in-polygon**: trivial ray-casting implementation
+- persistence around `0.3..0.7`
+- `3..6` octaves
+- low-frequency modulation to vary coast character across one island
+- per-island roughness values for different island styles
 
----
+### Erosion notes
 
-## 7. Verification Plan
+Full erosion simulation was considered too expensive for on-demand chunk generation. The lower-cost alternatives discussed were:
 
-1. **Unit tests**: Generate height from a simple island (square boundary, single peak) and verify:
-   - Height is 0 at boundary, peak value at peak, smooth gradient between
-   - Adjacent chunks produce identical values at shared edges
-   - Same seed/vectors always produce identical output
-2. **Visual test**: Render generated islands in admin map viewer, compare against current heightmap output
-3. **Performance test**: Measure chunk generation time, verify < 5ms per chunk
-4. **Region queries**: Create test islands, verify point-in-polygon correctly identifies island membership
-5. **Coastline quality**: Visual inspection of noisy coastline at various roughness settings
+- classify coastal areas by slope and derive beaches versus cliffs from terrain gradients
+- use noise-based material selection near coasts
+- optionally run a lightweight one-time erosion pass as an offline or editor-time enhancement later
 
----
+### Library options discussed
 
-## 8. Migration Path
-
-Phase 1: Add vector island data model alongside existing system (non-breaking)
-Phase 2: Implement height generation from vector islands as new generator type
-Phase 3: Add region/naming system using island boundaries
-Phase 4: Build island editor in admin UI
-Phase 5: Optionally deprecate bitmap-first generators
+- Poisson solver: custom implementation is still the default recommendation
+- RBF interpolation: [thibauts/rbf](https://github.com/thibauts/rbf)
+- Delaunay triangulation: [Delaunator](https://github.com/mapbox/delaunator)
+- constrained triangulation: [cdt2d](https://www.npmjs.com/package/cdt2d)
+- simplex noise: [simplex-noise](https://www.npmjs.com/package/simplex-noise)
+- point-in-polygon: trivial ray-casting implementation is likely sufficient for v1
