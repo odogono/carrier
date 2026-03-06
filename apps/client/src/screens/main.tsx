@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { BasicShadowMap } from 'three';
 import { Canvas } from '@react-three/fiber';
@@ -18,10 +18,14 @@ import { ZarchScene } from './zarch/zarch-scene';
 const log = createLog('Main');
 
 export const Main = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerElement, setContainerElement] =
+    useState<HTMLDivElement | null>(null);
   const initializedMapIdRef = useRef<string | null>(null);
+  const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainerElement(node);
+  }, []);
   const { containerProps, inputRef, runtimeRef } = useZarchRuntime({
-    containerRef
+    containerElement
   });
   const { error, isLoading, map, terrain } = useServerMapTerrain();
 
@@ -79,7 +83,7 @@ export const Main = () => {
     <>
       <div
         className="relative h-screen w-screen touch-none overflow-hidden bg-black text-white select-none"
-        ref={containerRef}
+        ref={handleContainerRef}
         tabIndex={0}
         {...containerProps}
       >

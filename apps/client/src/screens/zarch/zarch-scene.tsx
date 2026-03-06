@@ -19,6 +19,7 @@ import {
 import type { PerspectiveCamera } from 'three';
 
 import {
+  clampZoom,
   SEA_Y,
   TILE,
   TILE_POOL_SIZE,
@@ -53,6 +54,7 @@ type ZarchSceneProps = {
 
 const TILE_BASE_COLOR = new Color();
 const TREE_BASE_COLOR = new Color();
+const KEYBOARD_ZOOM_SPEED = 1.4;
 const ZOOM_DAMPING = 7;
 
 const createClipPlanes = () => [
@@ -283,6 +285,16 @@ export const ZarchScene = ({
     if (input.keys.ArrowRight || input.keys.d || input.keys.D) {
       ax -= right.x;
       az -= right.z;
+    }
+    if (input.keys.q || input.keys.Q) {
+      runtime.camZoomTarget = clampZoom(
+        runtime.camZoomTarget - KEYBOARD_ZOOM_SPEED * dt
+      );
+    }
+    if (input.keys.e || input.keys.E) {
+      runtime.camZoomTarget = clampZoom(
+        runtime.camZoomTarget + KEYBOARD_ZOOM_SPEED * dt
+      );
     }
 
     runtime.velX += ax * 400 * dt;

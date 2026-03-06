@@ -1,4 +1,10 @@
-import { type KeyboardEvent, type PointerEvent, type RefObject, type WheelEvent, useMemo, useRef } from 'react';
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  useEffect,
+  useMemo,
+  useRef
+} from 'react';
 
 import { clampZoom } from '@/helpers/zarch-terrain';
 
@@ -15,13 +21,13 @@ export type ZarchRuntimeState = {
 
 export type ZarchInputState = {
   dragActive: boolean;
-  pointerId: number | null;
   keys: Record<string, boolean>;
   lastPointerX: number;
+  pointerId: number | null;
 };
 
 type UseZarchRuntimeArgs = {
-  containerRef: RefObject<HTMLElement | null>;
+  containerElement: HTMLElement | null;
 };
 
 const PREVENT_SCROLL_KEYS = new Set([
@@ -32,7 +38,9 @@ const PREVENT_SCROLL_KEYS = new Set([
   ' '
 ]);
 
-export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
+export const useZarchRuntime = ({
+  containerElement
+}: UseZarchRuntimeArgs) => {
   const runtimeRef = useRef<ZarchRuntimeState>({
     camX: 0,
     camYaw: 0,
@@ -45,10 +53,34 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
   });
   const inputRef = useRef<ZarchInputState>({
     dragActive: false,
-    pointerId: null,
     keys: {},
-    lastPointerX: 0
+    lastPointerX: 0,
+    pointerId: null
   });
+
+  useEffect(() => {
+    const container = containerElement;
+
+    if (!container) {
+      return;
+    }
+
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      runtimeRef.current.camZoomTarget = clampZoom(
+        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
+      );
+    };
+
+    container.addEventListener('wheel', handleWheel, {
+      capture: true,
+      passive: false
+    });
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel, true);
+    };
+  }, [containerElement]);
 
   const containerProps = useMemo(() => {
     const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -100,21 +132,13 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
       inputRef.current.pointerId = null;
     };
 
-    const handleWheel = (event: WheelEvent<HTMLElement>) => {
-      event.preventDefault();
-      runtimeRef.current.camZoomTarget = clampZoom(
-        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
-      );
-    };
-
     return {
       onKeyDown: handleKeyDown,
       onKeyUp: handleKeyUp,
       onPointerCancel: handlePointerUp,
       onPointerDown: handlePointerDown,
       onPointerMove: handlePointerMove,
-      onPointerUp: handlePointerUp,
-      onWheel: handleWheel
+      onPointerUp: handlePointerUp
     };
   }, []);
 

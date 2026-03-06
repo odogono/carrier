@@ -43,7 +43,7 @@ export const ZarchHud = ({ runtimeRef }: ZarchHudProps) => {
       <div className="pointer-events-none absolute bottom-2 right-2 z-10 text-right font-mono text-[11px] leading-relaxed text-[#555]">
         <div>WASD / Arrow keys - move</div>
         <div>Mouse drag - rotate</div>
-        <div>Scroll - zoom</div>
+        <div>Scroll / Q / E - zoom</div>
       </div>
     </>
   );
