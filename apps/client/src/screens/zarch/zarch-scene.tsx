@@ -53,6 +53,7 @@ type ZarchSceneProps = {
 
 const TILE_BASE_COLOR = new Color();
 const TREE_BASE_COLOR = new Color();
+const ZOOM_DAMPING = 7;
 
 const createClipPlanes = () => [
   new Plane(new Vector3(1, 0, 0), 0),
@@ -290,12 +291,19 @@ export const ZarchScene = ({
     runtime.velZ -= runtime.velZ * 2.5 * dt;
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
+    runtime.camZoom = MathUtils.damp(
+      runtime.camZoom,
+      runtime.camZoomTarget,
+      ZOOM_DAMPING,
+      dt
+    );
     runtime.score += Math.trunc(
       Math.round(Math.abs(runtime.velX) + Math.abs(runtime.velZ)) * dt
     );
 
-    const viewRadius = Math.round(VIEW_R_BASE * runtime.camZoom);
-    const clipRadius = (viewRadius - 0.6) * TILE;
+    const zoomRadius = VIEW_R_BASE * runtime.camZoom;
+    const viewRadius = Math.ceil(zoomRadius);
+    const clipRadius = Math.max((zoomRadius - 0.6) * TILE, TILE);
     const pullBack = clipRadius * 1.8;
     const cameraHeight = clipRadius * 1.35;
 
@@ -358,7 +366,7 @@ export const ZarchScene = ({
         );
         const brightness = Math.max(
           0.12,
-          1 - MathUtils.clamp(distance / (viewRadius * TILE * 2.8), 0, 1) ** 2 * 0.88
+          1 - MathUtils.clamp(distance / (clipRadius * 2.8), 0, 1) ** 2 * 0.88
         );
         const positions = tileMesh.geometry.attributes.position as BufferAttribute;
 

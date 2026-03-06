@@ -7,6 +7,7 @@ export type ZarchRuntimeState = {
   camYaw: number;
   camZ: number;
   camZoom: number;
+  camZoomTarget: number;
   score: number;
   velX: number;
   velZ: number;
@@ -36,6 +37,7 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
     camYaw: 0,
     camZ: 0,
     camZoom: 1,
+    camZoomTarget: 1,
     score: 0,
     velX: 0,
     velZ: 0
@@ -67,8 +69,8 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
-      runtimeRef.current.camZoom = clampZoom(
-        runtimeRef.current.camZoom + event.deltaY * 0.001
+      runtimeRef.current.camZoomTarget = clampZoom(
+        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
       );
     };
 
