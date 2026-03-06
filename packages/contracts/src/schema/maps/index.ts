@@ -103,6 +103,15 @@ export type ListMapsInput = z.infer<typeof ListMapsInput>;
 export const ListMapsOutput = z.array(MapMetadataSchema);
 export type ListMapsOutput = z.infer<typeof ListMapsOutput>;
 
+export const UpdateMapInput = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(120).nullable().optional()
+});
+export type UpdateMapInput = z.infer<typeof UpdateMapInput>;
+
+export const UpdateMapOutput = MapMetadataSchema;
+export type UpdateMapOutput = z.infer<typeof UpdateMapOutput>;
+
 export const CreateMapRoute: Route = {
   description: 'Create and persist a generated map',
   method: 'POST',
@@ -138,6 +147,13 @@ export const ListMapsRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const UpdateMapRoute: Route = {
+  description: 'Update map properties',
+  method: 'PATCH',
+  path: '/maps/{id}',
+  tags: ['maps']
+} as const;
+
 export const mapsContract = {
   create: oc.route(CreateMapRoute).input(CreateMapInput).output(CreateMapOutput),
   delete: oc.route(DeleteMapRoute).input(DeleteMapInput).output(DeleteMapOutput),
@@ -146,5 +162,6 @@ export const mapsContract = {
     .route(GetMapChunkRoute)
     .input(GetMapChunkInput)
     .output(GetMapChunkOutput),
-  list: oc.route(ListMapsRoute).input(ListMapsInput).output(ListMapsOutput)
+  list: oc.route(ListMapsRoute).input(ListMapsInput).output(ListMapsOutput),
+  update: oc.route(UpdateMapRoute).input(UpdateMapInput).output(UpdateMapOutput)
 };

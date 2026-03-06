@@ -87,6 +87,7 @@ export const createServer = async () => {
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         origin: [
           'http://localhost:5178',
+          'http://localhost:5179',
           'http://localhost:3000',
           'http://localhost:8080',
           'http://localhost',

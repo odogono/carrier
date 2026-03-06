@@ -8,7 +8,9 @@ import {
   GetMapInput,
   GetMapRoute,
   ListMapsInput,
-  ListMapsRoute
+  ListMapsRoute,
+  UpdateMapInput,
+  UpdateMapRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
 
 import { ORPCError, os } from '@orpc/server';
@@ -75,10 +77,28 @@ const list = os
   .input(ListMapsInput)
   .handler(async () => getMapRepository().listMaps());
 
+const update = os
+  .route(UpdateMapRoute)
+  .input(UpdateMapInput)
+  .handler(async ({ input }) => {
+    const map = getMapRepository().updateMap(input.id, {
+      name: input.name
+    });
+
+    if (!map) {
+      throw new ORPCError('NOT_FOUND', {
+        message: `Map ${input.id} was not found`
+      });
+    }
+
+    return map;
+  });
+
 export const maps = {
   create,
   delete: remove,
   find,
   getChunk,
-  list
+  list,
+  update
 };

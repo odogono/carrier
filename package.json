@@ -9,6 +9,7 @@
     "typescript": "^5"
   },
   "workspaces": [
+    "apps/admin",
     "apps/client",
     "apps/api",
     "packages/*"

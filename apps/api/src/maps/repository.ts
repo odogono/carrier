@@ -238,6 +238,20 @@ export class MapRepository {
     });
   }
 
+  updateMap(id: string, input: { name?: string | null }): MapMetadata | null {
+    const now = new Date().toISOString();
+
+    const result = this.db
+      .prepare('UPDATE maps SET name = ?, updated_at = ? WHERE id = ?')
+      .run(input.name ?? null, now, id);
+
+    if (result.changes === 0) {
+      return null;
+    }
+
+    return this.getMap(id);
+  }
+
   listMaps() {
     const rows = this.db
       .query<MapRow, []>(`
