@@ -104,7 +104,7 @@ export const Main = () => {
           />
         </Canvas>
 
-        <ZarchHud runtimeRef={runtimeRef} />
+        <ZarchHud runtimeRef={runtimeRef} terrain={terrain} />
         <ZarchMinimap runtimeRef={runtimeRef} terrain={terrain} />
       </div>
       <ThemeTogglePortal />
