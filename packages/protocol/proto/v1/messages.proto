@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package carrier.v1;
+
+option go_package = "carrier/game/internal/pb";
+
+// Envelope wraps all client-server messages.
+// Every WebSocket frame is a serialized Envelope.
+message Envelope {
+  uint64 seq = 1;
+  int64 timestamp = 2;
+
+  oneof payload {
+    // Connection lifecycle
+    JoinRequest   join_request   = 10;
+    JoinResponse  join_response  = 11;
+    LeaveNotice   leave_notice   = 12;
+
+    // Player state
+    PlayerInput   player_input   = 20;
+    PlayerState   player_state   = 21;
+    WorldSnapshot world_snapshot = 22;
+
+    // System
+    Ping         ping          = 30;
+    Pong         pong          = 31;
+    ErrorMessage error_message = 40;
+  }
+}
+
+// Client -> Server: request to join the game
+message JoinRequest {
+  string player_name = 1;
+}
+
+// Server -> Client: confirmation of join with assigned ID
+message JoinResponse {
+  string player_id   = 1;
+  uint32 tick_rate   = 2;
+  int64  server_time = 3;
+}
+
+// Server -> Client: a player left
+message LeaveNotice {
+  string player_id = 1;
+}
+
+// Client -> Server: player input state
+message PlayerInput {
+  float  cam_x     = 1;
+  float  cam_z     = 2;
+  float  cam_yaw   = 3;
+  float  vel_x     = 4;
+  float  vel_z     = 5;
+  float  cam_zoom  = 6;
+  uint64 input_seq = 7;
+}
+
+// Server -> Client: authoritative state for one player
+message PlayerState {
+  string player_id = 1;
+  float  cam_x     = 2;
+  float  cam_z     = 3;
+  float  cam_yaw   = 4;
+  float  vel_x     = 5;
+  float  vel_z     = 6;
+  float  cam_zoom  = 7;
+  int32  score     = 8;
+}
+
+// Server -> Client: snapshot of all players
+message WorldSnapshot {
+  repeated PlayerState players = 1;
+  uint64 tick = 2;
+}
+
+// Bidirectional: latency measurement
+message Ping {
+  int64 client_time = 1;
+}
+
+message Pong {
+  int64 client_time = 1;
+  int64 server_time = 2;
+}
+
+// Server -> Client: error notification
+message ErrorMessage {
+  uint32 code    = 1;
+  string message = 2;
+}
