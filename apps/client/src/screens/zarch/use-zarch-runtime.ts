@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef } from 'react';
+import { type KeyboardEvent, type PointerEvent, type RefObject, type WheelEvent, useMemo, useRef } from 'react';
 
 import { clampZoom } from '@/helpers/zarch-terrain';
 
@@ -15,6 +15,7 @@ export type ZarchRuntimeState = {
 
 export type ZarchInputState = {
   dragActive: boolean;
+  pointerId: number | null;
   keys: Record<string, boolean>;
   lastPointerX: number;
 };
@@ -44,18 +45,13 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
   });
   const inputRef = useRef<ZarchInputState>({
     dragActive: false,
+    pointerId: null,
     keys: {},
     lastPointerX: 0
   });
 
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
+  const containerProps = useMemo(() => {
+    const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
       inputRef.current.keys[event.key] = true;
 
       if (PREVENT_SCROLL_KEYS.has(event.key)) {
@@ -63,32 +59,27 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
       }
     };
 
-    const handleKeyUp = (event: KeyboardEvent) => {
+    const handleKeyUp = (event: KeyboardEvent<HTMLElement>) => {
       inputRef.current.keys[event.key] = false;
     };
 
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      runtimeRef.current.camZoomTarget = clampZoom(
-        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
-      );
-    };
-
-    const handlePointerDown = (event: PointerEvent) => {
+    const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
       if ((event.target as HTMLElement | null)?.closest('button')) {
         return;
       }
 
+      event.currentTarget.focus();
+      event.currentTarget.setPointerCapture(event.pointerId);
       inputRef.current.dragActive = true;
       inputRef.current.lastPointerX = event.clientX;
+      inputRef.current.pointerId = event.pointerId;
     };
 
-    const handlePointerUp = () => {
-      inputRef.current.dragActive = false;
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!inputRef.current.dragActive) {
+    const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
+      if (
+        !inputRef.current.dragActive ||
+        inputRef.current.pointerId !== event.pointerId
+      ) {
         return;
       }
 
@@ -97,24 +88,38 @@ export const useZarchRuntime = ({ containerRef }: UseZarchRuntimeArgs) => {
       inputRef.current.lastPointerX = event.clientX;
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    container.addEventListener('pointerdown', handlePointerDown);
-    container.addEventListener('wheel', handleWheel, { passive: false });
+    const handlePointerUp = (event: PointerEvent<HTMLElement>) => {
+      if (
+        inputRef.current.pointerId !== null &&
+        event.currentTarget.hasPointerCapture(inputRef.current.pointerId)
+      ) {
+        event.currentTarget.releasePointerCapture(inputRef.current.pointerId);
+      }
 
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      container.removeEventListener('pointerdown', handlePointerDown);
-      container.removeEventListener('wheel', handleWheel);
+      inputRef.current.dragActive = false;
+      inputRef.current.pointerId = null;
     };
-  }, [containerRef]);
+
+    const handleWheel = (event: WheelEvent<HTMLElement>) => {
+      event.preventDefault();
+      runtimeRef.current.camZoomTarget = clampZoom(
+        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
+      );
+    };
+
+    return {
+      onKeyDown: handleKeyDown,
+      onKeyUp: handleKeyUp,
+      onPointerCancel: handlePointerUp,
+      onPointerDown: handlePointerDown,
+      onPointerMove: handlePointerMove,
+      onPointerUp: handlePointerUp,
+      onWheel: handleWheel
+    };
+  }, []);
 
   return {
+    containerProps,
     inputRef,
     runtimeRef
   };

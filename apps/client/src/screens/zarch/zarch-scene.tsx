@@ -291,6 +291,16 @@ export const ZarchScene = ({
     runtime.velZ -= runtime.velZ * 2.5 * dt;
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
+    runtime.camX = MathUtils.clamp(
+      runtime.camX,
+      0,
+      Math.max((terrain.widthTiles - 1) * TILE, 0)
+    );
+    runtime.camZ = MathUtils.clamp(
+      runtime.camZ,
+      0,
+      Math.max((terrain.heightTiles - 1) * TILE, 0)
+    );
     runtime.camZoom = MathUtils.damp(
       runtime.camZoom,
       runtime.camZoomTarget,
@@ -317,6 +327,8 @@ export const ZarchScene = ({
     const camTileX = Math.floor(runtime.camX / TILE);
     const camTileZ = Math.floor(runtime.camZ / TILE);
 
+    terrain.requestVisibleChunks(camTileX, camTileZ, viewRadius);
+
     let tileIndex = 0;
     let treeIndex = 0;
 
@@ -326,11 +338,26 @@ export const ZarchScene = ({
         const gz = camTileZ + dz;
         const worldX = gx * TILE - runtime.camX;
         const worldZ = gz * TILE - runtime.camZ;
+
+        if (!terrain.containsTile(gx, gz)) {
+          continue;
+        }
+
         const tileMesh = pools.tilePool[tileIndex];
         const h00Raw = terrain.sampleHeight(gx, gz);
         const h10Raw = terrain.sampleHeight(gx + 1, gz);
         const h01Raw = terrain.sampleHeight(gx, gz + 1);
         const h11Raw = terrain.sampleHeight(gx + 1, gz + 1);
+
+        if (
+          h00Raw === null ||
+          h10Raw === null ||
+          h01Raw === null ||
+          h11Raw === null
+        ) {
+          continue;
+        }
+
         const elevation = (h00Raw + h10Raw + h01Raw + h11Raw) * 0.25;
         const isWater = terrain.isWaterTile(gx, gz);
         const c00Water =
@@ -369,6 +396,7 @@ export const ZarchScene = ({
           1 - MathUtils.clamp(distance / (clipRadius * 2.8), 0, 1) ** 2 * 0.88
         );
         const positions = tileMesh.geometry.attributes.position as BufferAttribute;
+        const tileKey = `${gx}:${gz}`;
 
         terrain.tileColor(gx, gz, elevation, TILE_BASE_COLOR);
         tileMesh.material.color.copy(TILE_BASE_COLOR).multiplyScalar(brightness);
@@ -378,7 +406,11 @@ export const ZarchScene = ({
         positions.setXYZ(2, worldX, h01, worldZ + TILE);
         positions.setXYZ(3, worldX + TILE, h11, worldZ + TILE);
         positions.needsUpdate = true;
-        tileMesh.geometry.computeVertexNormals();
+
+        if (tileMesh.userData.tileKey !== tileKey) {
+          tileMesh.geometry.computeVertexNormals();
+          tileMesh.userData.tileKey = tileKey;
+        }
 
         tileIndex += 1;
 
@@ -386,6 +418,7 @@ export const ZarchScene = ({
           treeIndex < TREE_POOL_SIZE &&
           !isWater &&
           !(c00Water || c10Water || c01Water || c11Water) &&
+          terrain.isTileLoaded(gx, gz) &&
           terrain.shouldHaveTree(gx, gz);
 
         if (!canPlaceTree) {

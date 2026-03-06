@@ -224,4 +224,6 @@ const start = async () => {
   }
 };
 
-start();
+if (import.meta.main) {
+  void start();
+}

@@ -18,10 +18,19 @@ export const TILE_POOL_SIZE = (MAX_VIEW_RADIUS * 2 + 1) ** 2;
 export type ZarchTreeType = 0 | 1;
 
 export type ZarchTerrain = {
-  getTileAverageHeight: (gx: number, gz: number) => number;
-  heights: Float32Array;
+  chunkSizeTiles: number;
+  containsTile: (gx: number, gz: number) => boolean;
+  getTileAverageHeight: (gx: number, gz: number) => number | null;
+  heightTiles: number;
+  id: string;
+  isTileLoaded: (gx: number, gz: number) => boolean;
   isWaterTile: (gx: number, gz: number) => boolean;
-  sampleHeight: (gx: number, gz: number) => number;
+  requestVisibleChunks: (
+    centerTileX: number,
+    centerTileZ: number,
+    viewRadiusTiles: number
+  ) => void;
+  sampleHeight: (gx: number, gz: number) => number | null;
   shouldHaveTree: (gx: number, gz: number) => boolean;
   tileColor: (
     gx: number,
@@ -30,10 +39,8 @@ export type ZarchTerrain = {
     target?: Color
   ) => Color;
   treeType: (gx: number, gz: number) => ZarchTreeType;
+  widthTiles: number;
 };
-
-type RandomSource = () => number;
-
 const BASE_WATER_COLOR = 0x18_58_a0;
 const HIGH_ROCK_COLOR = 0x8c_7a_58;
 const UPPER_GRASS_COLOR = 0x7a_98_48;
@@ -87,7 +94,7 @@ export const getTreeType = (gx: number, gz: number): ZarchTreeType => {
 };
 
 export const applyTileColor = (
-  target: Color,
+  target: Color = new Color(),
   gx: number,
   gz: number,
   elevation: number
@@ -113,99 +120,4 @@ export const applyTileColor = (
 
   const brightnessVariation = 0.88 + tileHash(gz * 3 + 5, gx * 7 + 3) * 0.24;
   return target.multiplyScalar(brightnessVariation);
-};
-
-export const generateTerrainHeights = (
-  grid = GRID,
-  random: RandomSource = Math.random
-) => {
-  if (grid < 2 || (grid & (grid - 1)) !== 0) {
-    throw new Error('grid must be a power of two');
-  }
-
-  const sampleGrid = grid + 1;
-  const buffer = new Float32Array(sampleGrid * sampleGrid);
-  const heights = new Float32Array(grid * grid);
-  const index = (x: number, z: number) => z * sampleGrid + x;
-
-  buffer[index(0, 0)] = (random() - 0.5) * 60;
-  buffer[index(grid, 0)] = (random() - 0.5) * 60;
-  buffer[index(0, grid)] = (random() - 0.5) * 60;
-  buffer[index(grid, grid)] = (random() - 0.5) * 60;
-
-  let step = grid;
-  let scale = 40;
-
-  while (step > 1) {
-    const halfStep = step >> 1;
-
-    for (let z = 0; z < grid; z += step) {
-      for (let x = 0; x < grid; x += step) {
-        const average =
-          (buffer[index(x, z)] +
-            buffer[index(x + step, z)] +
-            buffer[index(x, z + step)] +
-            buffer[index(x + step, z + step)]) *
-          0.25;
-
-        buffer[index(x + halfStep, z + halfStep)] =
-          average + (random() - 0.5) * scale;
-      }
-    }
-
-    for (let z = 0; z <= grid; z += halfStep) {
-      for (let x = (z + halfStep) % step; x <= grid; x += step) {
-        let sum = 0;
-        let count = 0;
-
-        if (z - halfStep >= 0) {
-          sum += buffer[index(x, z - halfStep)];
-          count += 1;
-        }
-        if (z + halfStep <= grid) {
-          sum += buffer[index(x, z + halfStep)];
-          count += 1;
-        }
-        if (x - halfStep >= 0) {
-          sum += buffer[index(x - halfStep, z)];
-          count += 1;
-        }
-        if (x + halfStep <= grid) {
-          sum += buffer[index(x + halfStep, z)];
-          count += 1;
-        }
-
-        buffer[index(x, z)] = sum / count + (random() - 0.5) * scale;
-      }
-    }
-
-    step = halfStep;
-    scale *= 0.62;
-  }
-
-  for (let gz = 0; gz < grid; gz += 1) {
-    for (let gx = 0; gx < grid; gx += 1) {
-      heights[toroidalIndex(gx, gz, grid)] = buffer[index(gx, gz)] - 2;
-    }
-  }
-
-  return heights;
-};
-
-export const createZarchTerrain = (
-  random: RandomSource = Math.random
-): ZarchTerrain => {
-  const heights = generateTerrainHeights(GRID, random);
-
-  return {
-    getTileAverageHeight: (gx, gz) =>
-      getTileAverageHeightFromHeights(heights, gx, gz),
-    heights,
-    isWaterTile: (gx, gz) => isWaterTileFromHeights(heights, gx, gz),
-    sampleHeight: (gx, gz) => sampleHeightFromHeights(heights, gx, gz),
-    shouldHaveTree: (gx, gz) => shouldHaveTree(gx & (GRID - 1), gz & (GRID - 1)),
-    tileColor: (gx, gz, elevation, target = new Color()) =>
-      applyTileColor(target, gx, gz, elevation),
-    treeType: (gx, gz) => getTreeType(gx & (GRID - 1), gz & (GRID - 1))
-  };
 };

@@ -1,11 +1,6 @@
 import { type RefObject, useEffect, useRef } from 'react';
 
-import {
-  GRID,
-  MINIMAP_POLL_MS,
-  TILE,
-  type ZarchTerrain
-} from '@/helpers/zarch-terrain';
+import { MINIMAP_POLL_MS, TILE, type ZarchTerrain } from '@/helpers/zarch-terrain';
 
 import type { ZarchRuntimeState } from './use-zarch-runtime';
 
@@ -24,53 +19,102 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
       return;
     }
 
-    canvas.width = GRID;
-    canvas.height = GRID;
+    const drawSize = 140;
+    const backgroundCanvas = document.createElement('canvas');
+    let animationFrameId = 0;
+    let lastBackgroundRefresh = -Infinity;
+
+    canvas.width = drawSize;
+    canvas.height = drawSize;
+    backgroundCanvas.width = drawSize;
+    backgroundCanvas.height = drawSize;
 
     const context = canvas.getContext('2d');
+    const backgroundContext = backgroundCanvas.getContext('2d');
 
-    if (!context) {
+    if (!context || !backgroundContext) {
       return;
     }
 
-    const minimapImage = context.createImageData(GRID, GRID);
+    const renderBackground = () => {
+      const image = backgroundContext.createImageData(drawSize, drawSize);
 
-    for (let gz = 0; gz < GRID; gz += 1) {
-      for (let gx = 0; gx < GRID; gx += 1) {
-        const elevation = terrain.sampleHeight(gx, gz);
-        const index = (gz * GRID + gx) * 4;
+      for (let pixelY = 0; pixelY < drawSize; pixelY += 1) {
+        const gz = Math.min(
+          Math.floor((pixelY / drawSize) * terrain.heightTiles),
+          terrain.heightTiles - 1
+        );
 
-        if (elevation < -10) {
-          minimapImage.data[index] = 30;
-          minimapImage.data[index + 1] = 80;
-          minimapImage.data[index + 2] = 160;
-        } else {
-          const tint = (elevation + 25) / 50;
-          minimapImage.data[index] = Math.round(60 + tint * 100);
-          minimapImage.data[index + 1] = Math.round(120 + tint * 80);
-          minimapImage.data[index + 2] = 40;
+        for (let pixelX = 0; pixelX < drawSize; pixelX += 1) {
+          const gx = Math.min(
+            Math.floor((pixelX / drawSize) * terrain.widthTiles),
+            terrain.widthTiles - 1
+          );
+          const elevation = terrain.getTileAverageHeight(gx, gz);
+          const index = (pixelY * drawSize + pixelX) * 4;
+
+          if (elevation === null) {
+            image.data[index] = 8;
+            image.data[index + 1] = 19;
+            image.data[index + 2] = 31;
+          } else if (elevation < -10) {
+            image.data[index] = 30;
+            image.data[index + 1] = 80;
+            image.data[index + 2] = 160;
+          } else {
+            const tint = Math.max(0, Math.min((elevation + 25) / 50, 1));
+            image.data[index] = Math.round(60 + tint * 100);
+            image.data[index + 1] = Math.round(120 + tint * 80);
+            image.data[index + 2] = 40;
+          }
+
+          image.data[index + 3] = 255;
         }
-
-        minimapImage.data[index + 3] = 255;
       }
-    }
-
-    const draw = () => {
-      context.putImageData(minimapImage, 0, 0);
-
-      const px = ((((runtimeRef.current?.camX ?? 0) / TILE) % GRID) + GRID) % GRID;
-      const pz = ((((runtimeRef.current?.camZ ?? 0) / TILE) % GRID) + GRID) % GRID;
-
-      context.fillStyle = '#ff4040';
-      context.fillRect(Math.round(px) - 1, Math.round(pz) - 1, 3, 3);
+      backgroundContext.putImageData(image, 0, 0);
     };
 
-    draw();
+    const draw = (now: number) => {
+      if (now - lastBackgroundRefresh >= MINIMAP_POLL_MS * 4) {
+        renderBackground();
+        lastBackgroundRefresh = now;
+      }
 
-    const intervalId = window.setInterval(draw, MINIMAP_POLL_MS);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(backgroundCanvas, 0, 0);
+
+      const px = Math.min(
+        drawSize - 1,
+        Math.max(
+          0,
+          Math.round(
+            ((runtimeRef.current?.camX ?? 0) / Math.max(terrain.widthTiles * TILE, TILE)) *
+              drawSize
+          )
+        )
+      );
+      const pz = Math.min(
+        drawSize - 1,
+        Math.max(
+          0,
+          Math.round(
+            ((runtimeRef.current?.camZ ?? 0) / Math.max(terrain.heightTiles * TILE, TILE)) *
+              drawSize
+          )
+        )
+      );
+
+      context.fillStyle = '#ff4040';
+      context.fillRect(px - 1, pz - 1, 3, 3);
+
+      animationFrameId = window.requestAnimationFrame(draw);
+    };
+
+    renderBackground();
+    animationFrameId = window.requestAnimationFrame(draw);
 
     return () => {
-      window.clearInterval(intervalId);
+      window.cancelAnimationFrame(animationFrameId);
     };
   }, [runtimeRef, terrain]);
 
