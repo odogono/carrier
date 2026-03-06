@@ -13,19 +13,22 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"],
-      "@components/*": ["./src/components/*"],
-      "@contexts/*": ["./src/contexts/*"],
-      "@helpers/*": ["./src/helpers/*"],
-      "@hooks/*": ["./src/hooks/*"],
-      "@screens/*": ["./src/screens/*"],
-      "@types": ["./src/types"]
+      "@/*": [
+        "./src/*"
+      ],
     },
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "esModuleInterop": true
   },
-  "include": ["src", "build.ts"]
+  "include": [
+    "src",
+    "build.ts"
+  ]
 }

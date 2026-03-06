@@ -1,0 +1,38 @@
+{
+  "name": "carrier-contracts",
+  "version": "0.1.0",
+  "type": "module",
+  "private": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js"
+    },
+    "./types": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    },
+    "./types/*": {
+      "types": "./dist/schema/*.d.ts",
+      "import": "./dist/schema/*.js"
+    }
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@orpc/contract": "^1.13.4",
+    "@orpc/server": "^1.13.4",
+    "zod": "^4.3.6"
+  }
+}
