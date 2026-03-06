@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { MapViewer } from '@/components/map-viewer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -212,6 +213,18 @@ export function MapDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Map Preview</CardTitle>
+          <CardDescription>
+            Drag to pan, scroll to zoom
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MapViewer mapId={id} map={map} />
+        </CardContent>
+      </Card>
 
       <Dialog open={showDelete} onOpenChange={setShowDelete}>
         <DialogContent>
