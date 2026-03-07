@@ -6,10 +6,10 @@ import {
   useContext,
   useEffect,
   useRef,
-  useState
-} from 'react';
+  useState,
+} from "react";
 
-import { cn } from '@/lib/utils';
+import { cn } from "@/lib/utils";
 
 type DialogContextValue = {
   open: boolean;
@@ -18,13 +18,13 @@ type DialogContextValue = {
 
 const DialogContext = createContext<DialogContextValue>({
   open: false,
-  setOpen: () => {}
+  setOpen: () => {},
 });
 
 export function Dialog({
   children,
   open: controlledOpen,
-  onOpenChange
+  onOpenChange,
 }: {
   children: ReactNode;
   open?: boolean;
@@ -59,7 +59,7 @@ export function DialogTrigger({
 
 export function DialogContent({
   children,
-  className
+  className,
 }: {
   children: ReactNode;
   className?: string;
@@ -73,16 +73,16 @@ export function DialogContent({
         setOpen(false);
       }
     },
-    [setOpen]
+    [setOpen],
   );
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === "Escape") setOpen(false);
     };
     if (open) {
-      document.addEventListener('keydown', handleEsc);
-      return () => document.removeEventListener('keydown', handleEsc);
+      document.addEventListener("keydown", handleEsc);
+      return () => document.removeEventListener("keydown", handleEsc);
     }
   }, [open, setOpen]);
 
@@ -96,8 +96,8 @@ export function DialogContent({
     >
       <div
         className={cn(
-          'relative w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg',
-          className
+          "relative w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg",
+          className,
         )}
       >
         <button
@@ -122,7 +122,7 @@ export function DialogContent({
 
 export function DialogHeader({
   children,
-  className
+  className,
 }: {
   children: ReactNode;
   className?: string;
@@ -130,8 +130,8 @@ export function DialogHeader({
   return (
     <div
       className={cn(
-        'flex flex-col space-y-1.5 text-center sm:text-left',
-        className
+        "flex flex-col space-y-1.5 text-center sm:text-left",
+        className,
       )}
     >
       {children}
@@ -141,7 +141,7 @@ export function DialogHeader({
 
 export function DialogTitle({
   children,
-  className
+  className,
 }: {
   children: ReactNode;
   className?: string;
@@ -149,8 +149,8 @@ export function DialogTitle({
   return (
     <h2
       className={cn(
-        'text-lg font-semibold leading-none tracking-tight',
-        className
+        "text-lg font-semibold leading-none tracking-tight",
+        className,
       )}
     >
       {children}
@@ -160,19 +160,19 @@ export function DialogTitle({
 
 export function DialogDescription({
   children,
-  className
+  className,
 }: {
   children: ReactNode;
   className?: string;
 }) {
   return (
-    <p className={cn('text-sm text-muted-foreground', className)}>{children}</p>
+    <p className={cn("text-sm text-muted-foreground", className)}>{children}</p>
   );
 }
 
 export function DialogFooter({
   children,
-  className
+  className,
 }: {
   children: ReactNode;
   className?: string;
@@ -180,8 +180,8 @@ export function DialogFooter({
   return (
     <div
       className={cn(
-        'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2',
-        className
+        "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+        className,
       )}
     >
       {children}

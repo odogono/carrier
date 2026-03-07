@@ -1,9 +1,9 @@
-import type { MapChunk } from 'carrier-contracts/types';
+import type { MapChunk } from "carrier-contracts/types";
 
-import { tileColorRgb } from '@/lib/terrain-colors';
+import { tileColorRgb } from "@/lib/terrain-colors";
 
 type ChunkBitmapEntry = {
-  bitmap: OffscreenCanvas;
+  bitmap: HTMLCanvasElement;
   dataRef: MapChunk;
 };
 
@@ -12,11 +12,13 @@ const cache = new Map<string, ChunkBitmapEntry>();
 const cacheKey = (mapId: string, chunkX: number, chunkZ: number) =>
   `${mapId}:${chunkX}:${chunkZ}`;
 
-const renderChunkToCanvas = (chunk: MapChunk): OffscreenCanvas => {
+const renderChunkToCanvas = (chunk: MapChunk): HTMLCanvasElement => {
   const w = chunk.tileWidth;
   const h = chunk.tileHeight;
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext('2d')!;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
   const imageData = ctx.createImageData(w, h);
   const pixels = imageData.data;
 
@@ -44,7 +46,7 @@ const renderChunkToCanvas = (chunk: MapChunk): OffscreenCanvas => {
   return canvas;
 };
 
-export const getChunkBitmap = (chunk: MapChunk): OffscreenCanvas => {
+export const getChunkBitmap = (chunk: MapChunk): HTMLCanvasElement => {
   const key = cacheKey(chunk.mapId, chunk.chunkX, chunk.chunkZ);
   const existing = cache.get(key);
 

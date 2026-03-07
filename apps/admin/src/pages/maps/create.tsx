@@ -1,25 +1,27 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useState } from "react";
 
-import { useNavigate } from '@tanstack/react-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { useNavigate } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { client } from '@/lib/api-client';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { client } from "@/lib/api-client";
 
 export function CreateMapPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [name, setName] = useState('');
-  const [widthTiles, setWidthTiles] = useState('128');
-  const [heightTiles, setHeightTiles] = useState('128');
-  const [generator, setGenerator] = useState<'diamond-square' | 'island-clusters'>('diamond-square');
-  const [seed, setSeed] = useState('');
+  const [name, setName] = useState("");
+  const [widthTiles, setWidthTiles] = useState("128");
+  const [heightTiles, setHeightTiles] = useState("128");
+  const [generator, setGenerator] = useState<
+    "diamond-square" | "island-clusters"
+  >("diamond-square");
+  const [seed, setSeed] = useState("");
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -28,16 +30,16 @@ export function CreateMapPage() {
         heightTiles: Number(heightTiles),
         name: name.trim() || undefined,
         seed: seed.trim() || undefined,
-        widthTiles: Number(widthTiles)
+        widthTiles: Number(widthTiles),
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['maps'] });
-      toast.success('Map created');
-      void navigate({ to: '/maps' });
+      void queryClient.invalidateQueries({ queryKey: ["maps"] });
+      toast.success("Map created");
+      void navigate({ to: "/maps" });
     },
     onError: () => {
-      toast.error('Failed to create map');
-    }
+      toast.error("Failed to create map");
+    },
   });
 
   const handleSubmit = (e: FormEvent) => {
@@ -63,7 +65,7 @@ export function CreateMapPage() {
               <Input
                 id="name"
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={(e) => setName(e.target.value)}
                 placeholder="My Map"
                 maxLength={120}
               />
@@ -76,7 +78,7 @@ export function CreateMapPage() {
                   id="widthTiles"
                   type="number"
                   value={widthTiles}
-                  onChange={e => setWidthTiles(e.target.value)}
+                  onChange={(e) => setWidthTiles(e.target.value)}
                   min={1}
                   max={4096}
                   required
@@ -88,7 +90,7 @@ export function CreateMapPage() {
                   id="heightTiles"
                   type="number"
                   value={heightTiles}
-                  onChange={e => setHeightTiles(e.target.value)}
+                  onChange={(e) => setHeightTiles(e.target.value)}
                   min={1}
                   max={4096}
                   required
@@ -101,9 +103,9 @@ export function CreateMapPage() {
               <Select
                 id="generator"
                 value={generator}
-                onChange={e =>
+                onChange={(e) =>
                   setGenerator(
-                    e.target.value as 'diamond-square' | 'island-clusters'
+                    e.target.value as "diamond-square" | "island-clusters",
                   )
                 }
               >
@@ -117,23 +119,20 @@ export function CreateMapPage() {
               <Input
                 id="seed"
                 value={seed}
-                onChange={e => setSeed(e.target.value)}
+                onChange={(e) => setSeed(e.target.value)}
                 placeholder="Random if left empty"
                 maxLength={120}
               />
             </div>
 
             <div className="flex gap-2 pt-4">
-              <Button
-                type="submit"
-                disabled={createMutation.isPending}
-              >
-                {createMutation.isPending ? 'Creating...' : 'Create Map'}
+              <Button type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating..." : "Create Map"}
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void navigate({ to: '/maps' })}
+                onClick={() => void navigate({ to: "/maps" })}
               >
                 Cancel
               </Button>

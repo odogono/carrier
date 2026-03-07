@@ -369,3 +369,174 @@ Full erosion simulation was considered too expensive for on-demand chunk generat
 - constrained triangulation: [cdt2d](https://www.npmjs.com/package/cdt2d)
 - simplex noise: [simplex-noise](https://www.npmjs.com/package/simplex-noise)
 - point-in-polygon: trivial ray-casting implementation is likely sufficient for v1
+
+## Appendix B - Admin Editor Expansion Notes
+
+The current admin viewer is a good base for an editor:
+
+- [apps/admin/src/components/map-viewer/map-viewer.tsx](/Users/alex/work/carrier/apps/admin/src/components/map-viewer/map-viewer.tsx) already owns container sizing, zoom controls, and chunk loading
+- [apps/admin/src/components/map-viewer/map-canvas.tsx](/Users/alex/work/carrier/apps/admin/src/components/map-viewer/map-canvas.tsx) already renders chunk bitmaps into a single canvas
+- [apps/admin/src/hooks/use-map-viewport.ts](/Users/alex/work/carrier/apps/admin/src/hooks/use-map-viewport.ts) already provides pan and pointer-relative zoom behavior
+
+What it lacks is a vector-aware overlay, hit testing, and editing modes.
+
+### Recommended editor architecture
+
+Keep the existing raster terrain rendering path as the background layer and add an editor overlay above it.
+
+Preferred composition:
+
+1. Base terrain canvas: keep the current chunk-bitmap rendering for map context
+2. Overlay layer: add either an SVG overlay or a second transparent canvas for editable geometry
+3. Right-side inspector: selected island, polygon vertex list, control-point form fields, coastline parameters
+4. Top toolbar: mode switching such as pan, select, draw island, edit vertices, add control point, delete point, preview terrain
+
+This is lower risk than replacing the viewer outright, because chunk rendering can stay exactly as it is.
+
+### Rendering model for editing
+
+The editor should render several visual layers at once:
+
+- terrain bitmap from generated chunks
+- gameplay boundary polygon for each island
+- visual coastline preview generated from the boundary plus coastline noise params
+- control points with different colors or glyphs by type
+- optional influence-radius circles for selected control points
+- hover and selection states for islands, segments, and points
+- optional solve-grid or invalidation debug overlays in a developer mode
+
+At low zoom:
+
+- show only island fills, outlines, and selected control points
+- hide fine vertex handles
+
+At medium and high zoom:
+
+- show per-vertex handles
+- show insert-point affordances on edges
+- show control-point influence radii for the active island only
+
+### Coordinate system changes needed
+
+The current viewport is tile-based. The vector plan uses world-metre coordinates. The editor should standardize on world metres internally and convert to screen space at render time.
+
+Recommended helpers:
+
+- `worldMetersToScreenPx(x, z, viewport, map)`
+- `screenPxToWorldMeters(x, y, viewport, map)`
+- `tileToWorldMeters(tile, metersPerTile)`
+- `worldMetersToTile(world, metersPerTile)`
+
+The viewport hook can still keep the same shape, but its center values should become world-space values once vector editing is added.
+
+### Editing modes
+
+Recommended initial mode set:
+
+- pan: current viewer interaction only
+- select: click island, polygon edge, or control point
+- draw-island: place polygon vertices, close loop explicitly
+- edit-boundary: drag vertices, insert vertex on edge, delete vertex
+- add-control-point: place a peak, valley, or plain point inside the selected island
+- edit-control-point: drag position, adjust elevation and influence in the inspector
+- preview: show regenerated coastline and terrain preview without edit handles
+
+Important interaction rules:
+
+- keep panning available via space-drag or middle mouse even in edit modes
+- require explicit selection before destructive actions like vertex delete
+- debounce expensive preview recomputations while dragging
+- do optimistic local rendering first, then persist definition changes through the API
+
+### Terrain preview behavior
+
+The editor should not wait for persisted chunk regeneration after every drag if that makes the interaction sluggish.
+
+Recommended preview strategy:
+
+- local overlay preview while editing: redraw gameplay boundary, coastline preview, and control points immediately
+- lightweight local terrain preview: optionally render only the selected island's preview on the overlay
+- persisted terrain preview: trigger `updateDefinition`, bump revision, and refetch chunks on pointer-up or explicit save
+
+That gives fast editing feedback without forcing full server regeneration on every pointer move.
+
+### Suggested component split
+
+- `MapEditorViewport`: wraps the existing viewport state plus screen/world conversions
+- `MapTerrainLayer`: current chunk-backed raster drawing
+- `MapVectorOverlay`: polygons, handles, hover states, selections
+- `MapEditorToolbar`: mode switching and preview toggles
+- `MapEditorInspector`: form-driven editing for selected objects
+- `useMapEditorState`: selected island, hovered handle, draft edits, dirty state
+- `useVectorDefinition`: fetch/save for `maps.getDefinition` and `maps.updateDefinition`
+
+### Library options for vector editing
+
+#### Best fit if keeping the current custom renderer: D3 utilities
+
+Useful modules:
+
+- `d3-drag` for pointer drag behavior
+- `d3-polygon` for geometry helpers such as point containment, centroid, and perimeter calculations
+
+Why it fits:
+
+- lightweight and composable
+- works with SVG, HTML, or canvas
+- lets the existing viewer stay mostly custom
+
+Tradeoff:
+
+- no ready-made scene graph or editor widgets, so handles and hit testing still need app code
+
+#### Best fit if willing to move the overlay to a richer canvas scene graph: `react-konva`
+
+Why it fits:
+
+- React-friendly canvas scene graph
+- built-in drag events
+- good support for polygons, anchor handles, and zoomable stages
+- strong example coverage for pointer-relative zoom and editable anchor points
+
+Tradeoff:
+
+- larger migration from the current hand-drawn canvas
+- best if the overlay or the whole viewer moves into Konva, not as a tiny helper
+
+#### Good vector-graphics toolkit if we want path editing primitives: Paper.js
+
+Why it helps:
+
+- strong path and segment model
+- built-in hit testing
+- useful if coastlines or future curved paths become more sophisticated
+
+Tradeoff:
+
+- more opinionated scene/document model
+- less natural fit for the current React component structure than D3 or Konva
+
+#### Less preferred for this use case: Fabric.js
+
+Why it was considered:
+
+- supports custom controls and polygon editing
+- has examples for editable polygon points
+
+Why it is less attractive here:
+
+- optimized more for general object-canvas editing than map-specific geometry workflows
+- likely heavier than needed for polygon and control-point editing
+
+### Recommendation
+
+For v1 editor work:
+
+- keep the current terrain canvas
+- add an SVG overlay for vectors and handles
+- use lightweight geometry and drag helpers rather than adopting a full editor framework immediately
+
+Best practical choices:
+
+- use custom overlay logic plus `d3-drag` and `d3-polygon` if minimal change is the priority
+- use `react-konva` only if the team wants a more ambitious rewrite of the overlay interaction layer

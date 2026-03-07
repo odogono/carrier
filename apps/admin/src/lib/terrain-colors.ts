@@ -11,7 +11,7 @@ export type RgbTuple = [r: number, g: number, b: number];
 const hexToRgb = (hex: number): RgbTuple => [
   (hex >> 16) & 0xff,
   (hex >> 8) & 0xff,
-  hex & 0xff
+  hex & 0xff,
 ];
 
 const clamp255 = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
@@ -25,7 +25,11 @@ export const tileHash = (gx: number, gz: number) => {
   return value - Math.floor(value);
 };
 
-const rgbToHsl = (r: number, g: number, b: number): [h: number, s: number, l: number] => {
+const rgbToHsl = (
+  r: number,
+  g: number,
+  b: number,
+): [h: number, s: number, l: number] => {
   const rf = r / 255;
   const gf = g / 255;
   const bf = b / 255;
@@ -74,7 +78,7 @@ const hslToRgb = (h: number, s: number, l: number): RgbTuple => {
   return [
     clamp255(hue2rgb(p, q, h + 1 / 3) * 255),
     clamp255(hue2rgb(p, q, h) * 255),
-    clamp255(hue2rgb(p, q, h - 1 / 3) * 255)
+    clamp255(hue2rgb(p, q, h - 1 / 3) * 255),
   ];
 };
 
@@ -82,7 +86,11 @@ const hslToRgb = (h: number, s: number, l: number): RgbTuple => {
  * Compute the RGB color for a tile at (gx, gz) with the given average elevation.
  * Matches the client's applyTileColor (apps/client/src/helpers/zarch-terrain.ts:96-123).
  */
-export const tileColorRgb = (gx: number, gz: number, elevation: number): RgbTuple => {
+export const tileColorRgb = (
+  gx: number,
+  gz: number,
+  elevation: number,
+): RgbTuple => {
   if (elevation < WATER_LEVEL) {
     const depthVariation = tileHash(gx, gz) * 0.08;
     const [r, g, b] = hexToRgb(BASE_WATER_COLOR);
@@ -112,6 +120,6 @@ export const tileColorRgb = (gx: number, gz: number, elevation: number): RgbTupl
   return [
     clamp255(r * brightnessVariation),
     clamp255(g * brightnessVariation),
-    clamp255(b * brightnessVariation)
+    clamp255(b * brightnessVariation),
   ];
 };

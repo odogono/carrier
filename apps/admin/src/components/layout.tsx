@@ -1,21 +1,21 @@
-import { type ReactNode } from 'react';
+import { type ReactNode } from "react";
 
-import { Link, useRouterState } from '@tanstack/react-router';
-import { LayoutDashboard, Map, Moon, Sun } from 'lucide-react';
+import { Link, useRouterState } from "@tanstack/react-router";
+import { LayoutDashboard, Map, Moon, Sun } from "lucide-react";
 
-import { Button } from '@/components/ui/button';
-import { useTheme } from '@/contexts/theme/context';
-import { cn } from '@/lib/utils';
+import { Button } from "@/components/ui/button";
+import { useTheme } from "@/contexts/theme/context";
+import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/maps', icon: Map, label: 'Maps' }
+  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/maps", icon: Map, label: "Maps" },
 ];
 
 function NavLink({
   href,
   icon: Icon,
-  label
+  label,
 }: {
   href: string;
   icon: typeof LayoutDashboard;
@@ -23,18 +23,16 @@ function NavLink({
 }) {
   const router = useRouterState();
   const isActive =
-    href === '/'
-      ? router.location.pathname === '/'
+    href === "/"
+      ? router.location.pathname === "/"
       : router.location.pathname.startsWith(href);
 
   return (
     <Link
       to={href}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
-        isActive
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground'
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+        isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground",
       )}
     >
       <Icon className="h-4 w-4" />
@@ -52,12 +50,12 @@ function ThemeToggle() {
       className="w-full justify-start"
       onClick={toggleTheme}
     >
-      {theme === 'light' ? (
+      {theme === "light" ? (
         <Moon className="mr-2 h-4 w-4" />
       ) : (
         <Sun className="mr-2 h-4 w-4" />
       )}
-      {theme === 'light' ? 'Dark mode' : 'Light mode'}
+      {theme === "light" ? "Dark mode" : "Light mode"}
     </Button>
   );
 }
@@ -71,7 +69,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <h1 className="text-lg font-semibold">Carrier Admin</h1>
           </div>
           <nav className="flex-1 space-y-1 p-4">
-            {navItems.map(item => (
+            {navItems.map((item) => (
               <NavLink key={item.href} {...item} />
             ))}
           </nav>

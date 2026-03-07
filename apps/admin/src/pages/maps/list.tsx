@@ -1,29 +1,29 @@
-import { useState } from 'react';
+import { useState } from "react";
 
-import { Link } from '@tanstack/react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreHorizontal, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog';
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
-  TableRow
-} from '@/components/ui/table';
-import { client } from '@/lib/api-client';
+  TableRow,
+} from "@/components/ui/table";
+import { client } from "@/lib/api-client";
 
 export function MapsListPage() {
   const queryClient = useQueryClient();
@@ -31,32 +31,30 @@ export function MapsListPage() {
 
   const mapsQuery = useQuery({
     queryFn: () => client.maps.list({}),
-    queryKey: ['maps']
+    queryKey: ["maps"],
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => client.maps.delete({ id }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['maps'] });
-      toast.success('Map deleted');
+      void queryClient.invalidateQueries({ queryKey: ["maps"] });
+      toast.success("Map deleted");
       setDeleteId(null);
     },
     onError: () => {
-      toast.error('Failed to delete map');
-    }
+      toast.error("Failed to delete map");
+    },
   });
 
   const maps = mapsQuery.data ?? [];
-  const mapToDelete = maps.find(m => m.id === deleteId);
+  const mapToDelete = maps.find((m) => m.id === deleteId);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Maps</h2>
-          <p className="text-muted-foreground">
-            Manage maps in the system
-          </p>
+          <p className="text-muted-foreground">Manage maps in the system</p>
         </div>
         <Link to="/maps/new">
           <Button>
@@ -92,7 +90,7 @@ export function MapsListPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {maps.map(map => (
+            {maps.map((map) => (
               <TableRow key={map.id}>
                 <TableCell>
                   <Link
@@ -100,7 +98,11 @@ export function MapsListPage() {
                     params={{ id: map.id }}
                     className="font-medium hover:underline"
                   >
-                    {map.name ?? <span className="text-muted-foreground italic">Unnamed</span>}
+                    {map.name ?? (
+                      <span className="text-muted-foreground italic">
+                        Unnamed
+                      </span>
+                    )}
                   </Link>
                 </TableCell>
                 <TableCell>
@@ -141,13 +143,16 @@ export function MapsListPage() {
         </Table>
       )}
 
-      <Dialog open={!!deleteId} onOpenChange={open => !open && setDeleteId(null)}>
+      <Dialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Map</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete{' '}
-              <strong>{mapToDelete?.name ?? 'this map'}</strong>? This will
+              Are you sure you want to delete{" "}
+              <strong>{mapToDelete?.name ?? "this map"}</strong>? This will
               permanently remove the map and all its chunks. This action cannot
               be undone.
             </DialogDescription>
@@ -161,7 +166,7 @@ export function MapsListPage() {
               disabled={deleteMutation.isPending}
               onClick={() => deleteId && deleteMutation.mutate(deleteId)}
             >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
