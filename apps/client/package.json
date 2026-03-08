@@ -32,6 +32,7 @@
     "carrier-contracts": "workspace:*",
     "clsx": "^2.1.1",
     "jotai": "^2.18.0",
+    "leva": "^0.10.1",
     "mitt": "^3.0.1",
     "odgn-ts-helpers": "^0.2.0",
     "react": "^19.2.4",

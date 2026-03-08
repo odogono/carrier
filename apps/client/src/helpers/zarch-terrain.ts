@@ -49,8 +49,8 @@ export type ZarchTerrain = {
   treeType: (gx: number, gz: number) => ZarchTreeType;
   widthTiles: number;
 };
-export const clampZoom = (zoom: number) =>
-  Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+export const clampZoom = (zoom: number, min = ZOOM_MIN, max = ZOOM_MAX) =>
+  Math.max(min, Math.min(max, zoom));
 
 export const toroidalIndex = (gx: number, gz: number, grid = GRID) =>
   (gz & (grid - 1)) * grid + (gx & (grid - 1));
