@@ -103,10 +103,11 @@ export const useMapViewport = (
     pointerZ: number;
   } | null>(null);
 
-  const isDragging = dragRef.current !== null;
+  const [isDragging, setIsDragging] = useState(false);
 
   const endDrag = useCallback((target: EventTarget | null, pointerId: number) => {
     dragRef.current = null;
+    setIsDragging(false);
 
     if (!(target instanceof Element) || !target.hasPointerCapture(pointerId)) {
       return;
@@ -117,6 +118,7 @@ export const useMapViewport = (
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    setIsDragging(true);
     setViewport((v) => {
       dragRef.current = {
         pointerX: e.clientX,
