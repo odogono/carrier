@@ -4,7 +4,7 @@ import { Image, Layer, Rect, Stage } from "react-konva";
 
 import type { MapChunk, MapMetadata } from "carrier-contracts/types";
 
-import { getChunkBitmap } from "@/lib/chunk-bitmap";
+import { clearBitmapCache, getChunkBitmap } from "@/lib/chunk-bitmap";
 
 import type { Viewport } from "@/hooks/use-map-viewport";
 
@@ -37,7 +37,13 @@ export function MapStage({
     if (!layer) return;
     const ctx = layer.getCanvas().getContext();
     ctx.imageSmoothingEnabled = false;
-  });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearBitmapCache(map.id);
+    };
+  }, [map.id]);
 
   const chunkImages = useMemo(() => {
     return Array.from(chunks.values()).map((chunk) => ({

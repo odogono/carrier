@@ -22,6 +22,7 @@ type MapViewerProps = {
 
 export function MapViewer({ map, mapId }: MapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ height: 0, width: 0 });
 
   const handleWheelCapture = useCallback((e: WheelEvent<HTMLDivElement>) => {
@@ -59,7 +60,9 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     fitToView,
     isDragging,
     onKeyDown,
+    onPointerCancel,
     onPointerDown,
+    onPointerLeave,
     onPointerMove,
     onPointerUp,
     onWheel,
@@ -67,6 +70,14 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     zoomIn,
     zoomOut,
   } = useMapViewport(map, size.width, size.height);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      interactionRef.current?.focus();
+      onPointerDown(e);
+    },
+    [onPointerDown],
+  );
 
   // Refit when canvas size first becomes available
   const hasFitted = useRef(false);
@@ -96,8 +107,11 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
       >
         {size.width > 0 && size.height > 0 && (
           <div
-            onPointerDown={onPointerDown}
+            ref={interactionRef}
+            onPointerDown={handlePointerDown}
             onPointerMove={onPointerMove}
+            onPointerCancel={onPointerCancel}
+            onPointerLeave={onPointerLeave}
             onPointerUp={onPointerUp}
             onWheelCapture={handleWheelCapture}
             onWheel={onWheel}
@@ -109,6 +123,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
               display: "block",
               height: size.height,
               overscrollBehavior: "contain",
+              touchAction: "none",
               width: size.width,
             }}
           >

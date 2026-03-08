@@ -105,6 +105,16 @@ export const useMapViewport = (
 
   const isDragging = dragRef.current !== null;
 
+  const endDrag = useCallback((target: EventTarget | null, pointerId: number) => {
+    dragRef.current = null;
+
+    if (!(target instanceof Element) || !target.hasPointerCapture(pointerId)) {
+      return;
+    }
+
+    target.releasePointerCapture(pointerId);
+  }, []);
+
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     setViewport((v) => {
@@ -133,10 +143,27 @@ export const useMapViewport = (
     [map],
   );
 
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLElement>) => {
-    dragRef.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  }, []);
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      endDrag(e.currentTarget, e.pointerId);
+    },
+    [endDrag],
+  );
+
+  const onPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      endDrag(e.currentTarget, e.pointerId);
+    },
+    [endDrag],
+  );
+
+  const onPointerLeave = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      if (!dragRef.current) return;
+      endDrag(e.currentTarget, e.pointerId);
+    },
+    [endDrag],
+  );
 
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLElement>) => {
@@ -285,6 +312,8 @@ export const useMapViewport = (
     onKeyDown,
     onPointerDown,
     onPointerMove,
+    onPointerCancel,
+    onPointerLeave,
     onPointerUp,
     onWheel,
     viewport,
