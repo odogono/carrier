@@ -9,6 +9,7 @@ import type {
 } from 'carrier-contracts';
 
 import {
+  HEIGHT_LAYER,
   buildGeneratedMapChunks,
   decodeFloat32Heights,
   encodeFloat32Heights,
@@ -209,8 +210,12 @@ export class MapRepository {
     return mapRowToMetadata(row);
   }
 
-  getMapChunk(mapId: string, chunkX: number, chunkZ: number): MapChunk | null {
-    const row = this.db
+  private getChunkRow(
+    mapId: string,
+    chunkX: number,
+    chunkZ: number
+  ): ChunkRow | null {
+    return this.db
       .query<ChunkRow, [string, number, number]>(`
         SELECT
           chunk_x AS chunkX,
@@ -227,6 +232,10 @@ export class MapRepository {
         WHERE map_id = ? AND chunk_x = ? AND chunk_z = ?
       `)
       .get(mapId, chunkX, chunkZ);
+  }
+
+  getMapChunk(mapId: string, chunkX: number, chunkZ: number): MapChunk | null {
+    const row = this.getChunkRow(mapId, chunkX, chunkZ);
 
     if (!row) {
       return null;
@@ -236,6 +245,19 @@ export class MapRepository {
       ...row,
       heights: decodeFloat32Heights(row.heights)
     });
+  }
+
+  getMapChunkBinary(mapId: string, chunkX: number, chunkZ: number) {
+    const row = this.getChunkRow(mapId, chunkX, chunkZ);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      layers: { height: HEIGHT_LAYER }
+    };
   }
 
   updateMap(id: string, input: { name?: string | null }): MapMetadata | null {

@@ -4,6 +4,7 @@ import {
   DeleteMapInput,
   DeleteMapRoute,
   GetMapChunkInput,
+  GetMapChunkBinaryRoute,
   GetMapChunkRoute,
   GetMapInput,
   GetMapRoute,
@@ -72,6 +73,30 @@ const getChunk = os
     return chunk;
   });
 
+const getChunkBinary = os
+  .route(GetMapChunkBinaryRoute)
+  .input(GetMapChunkInput)
+  .handler(async ({ input }) => {
+    const chunk = getMapRepository().getMapChunkBinary(
+      input.mapId,
+      input.chunkX,
+      input.chunkZ
+    );
+
+    if (!chunk) {
+      throw new ORPCError('NOT_FOUND', {
+        message: `Chunk ${input.chunkX},${input.chunkZ} was not found for map ${input.mapId}`
+      });
+    }
+
+    return {
+      ...chunk,
+      heights: new Blob([chunk.heights], {
+        type: 'application/octet-stream'
+      })
+    };
+  });
+
 const list = os
   .route(ListMapsRoute)
   .input(ListMapsInput)
@@ -99,6 +124,7 @@ export const maps = {
   delete: remove,
   find,
   getChunk,
+  getChunkBinary,
   list,
   update
 };

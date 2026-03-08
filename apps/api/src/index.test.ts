@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { contract } from 'carrier-contracts/contract';
+import { decodeMapChunkBinary } from 'carrier-contracts/types';
+
+import { createORPCClient } from '@orpc/client';
+import { type ContractRouterClient } from '@orpc/contract';
+import type { JsonifiedClient } from '@orpc/openapi-client';
+import { OpenAPILink } from '@orpc/openapi-client/fetch';
 
 import { resetMapRepository } from '@/maps/repository';
 
@@ -22,6 +29,23 @@ const request = async (
     json: await response.json(),
     response
   };
+};
+
+const createTestClient = async () => {
+  const { app } = await createServer();
+  const link = new OpenAPILink(contract, {
+    fetch: (request, init) =>
+      app.handle(
+        new Request(request, {
+          ...init
+        })
+      ),
+    url: 'http://localhost/api'
+  });
+
+  return createORPCClient(link) as JsonifiedClient<
+    ContractRouterClient<typeof contract>
+  >;
 };
 
 describe('API server map routes', () => {
@@ -99,5 +123,30 @@ describe('API server map routes', () => {
     const chunk = chunkResponse.json as Record<string, unknown>;
     expect(chunk.mapId).toBe(created.id);
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+  });
+
+  test('supports binary chunk downloads through the oRPC client', async () => {
+    const createdResponse = await request('POST', '/api/maps', {
+      generator: 'diamond-square',
+      heightTiles: 64,
+      name: 'Binary map',
+      seed: 'binary-seed',
+      widthTiles: 64
+    });
+    const created = createdResponse.json as Record<string, unknown>;
+    const client = await createTestClient();
+
+    const chunk = await decodeMapChunkBinary(
+      await client.maps.getChunkBinary({
+        chunkX: 0,
+        chunkZ: 0,
+        mapId: created.id as string
+      })
+    );
+
+    expect(chunk.samplesWide).toBe(33);
+    expect(chunk.samplesHigh).toBe(33);
+    expect(chunk.heights).toBeInstanceOf(Float32Array);
+    expect(chunk.heights.length).toBe(33 * 33);
   });
 });

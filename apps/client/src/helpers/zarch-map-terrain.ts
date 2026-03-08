@@ -1,6 +1,6 @@
 /* eslint-disable import-x/no-unresolved */
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import type { MapChunk, MapMetadata } from 'carrier-contracts/types';
+import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 
 import {
   WATER_LEVEL,
@@ -75,12 +75,13 @@ const getChunkForSample = (
   );
 
   return (
-    queryClient.getQueryData<MapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ?? null
+    queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
+    null
   );
 };
 
 const sampleHeightFromChunk = (
-  chunk: MapChunk,
+  chunk: RuntimeMapChunk,
   sampleX: number,
   sampleZ: number
 ) => {
@@ -108,7 +109,7 @@ export const createServerMapTerrain = ({
   prefetchChunk: ChunkPrefetcher;
   queryClient: QueryClient;
 }): ZarchTerrain => {
-  const chunkLookupCache = new Map<string, MapChunk | null>();
+  const chunkLookupCache = new Map<string, RuntimeMapChunk | null>();
   const heightLookupCache = new Map<string, number | null>();
 
   const sampleHeight = (sampleX: number, sampleZ: number) => {

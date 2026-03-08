@@ -2,7 +2,7 @@ import Konva from "konva";
 import { useEffect, useMemo, useRef } from "react";
 import { Image, Layer, Rect, Stage } from "react-konva";
 
-import type { MapChunk, MapMetadata } from "carrier-contracts/types";
+import type { MapMetadata, RuntimeMapChunk } from "carrier-contracts/types";
 
 import { clearBitmapCache, getChunkBitmap } from "@/lib/chunk-bitmap";
 
@@ -15,7 +15,7 @@ const BACKGROUND_COLOR = "#0a1320";
 type MapStageProps = {
   canvasHeight: number;
   canvasWidth: number;
-  chunks: Map<string, MapChunk>;
+  chunks: Map<string, RuntimeMapChunk>;
   map: MapMetadata;
   viewport: Viewport;
 };

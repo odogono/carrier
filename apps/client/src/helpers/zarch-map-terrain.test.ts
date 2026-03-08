@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { QueryClient } from '@tanstack/react-query';
-import type { MapChunk, MapMetadata } from 'carrier-contracts/types';
+import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 
 import {
   createServerMapTerrain,
@@ -27,10 +27,10 @@ const map: MapMetadata = {
   widthTiles: 64
 };
 
-const chunk00: MapChunk = {
+const chunk00: RuntimeMapChunk = {
   chunkX: 0,
   chunkZ: 0,
-  heights: Array.from({ length: 33 * 33 }, (_, index) => index),
+  heights: Float32Array.from({ length: 33 * 33 }, (_, index) => index),
   layers: {
     height: {
       encoding: 'float32',

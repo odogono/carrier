@@ -2,7 +2,7 @@
 import { useEffectEvent, useMemo } from 'react';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { MapMetadata } from 'carrier-contracts/types';
+import { decodeMapChunkBinary, type MapMetadata } from 'carrier-contracts/types';
 
 import { client } from '@/helpers/api-link';
 import {
@@ -50,7 +50,10 @@ export const useServerMapTerrain = () => {
   const prefetchChunk = useEffectEvent((activeMap: MapMetadata, chunkX: number, chunkZ: number) => {
     void queryClient.prefetchQuery({
       gcTime: MAP_CHUNK_GC_MS,
-      queryFn: () => client.maps.getChunk({ chunkX, chunkZ, mapId: activeMap.id }),
+      queryFn: async () =>
+        decodeMapChunkBinary(
+          await client.maps.getChunkBinary({ chunkX, chunkZ, mapId: activeMap.id })
+        ),
       queryKey: getMapChunkQueryKey(activeMap.id, chunkX, chunkZ),
       staleTime: MAP_CHUNK_CACHE_MS
     });

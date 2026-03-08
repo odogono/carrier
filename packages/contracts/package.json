@@ -33,6 +33,7 @@
   "dependencies": {
     "@orpc/contract": "^1.13.4",
     "@orpc/server": "^1.13.4",
+    "@orpc/zod": "^1.13.6",
     "zod": "^4.3.6"
   }
 }

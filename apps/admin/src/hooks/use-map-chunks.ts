@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { useQueries } from "@tanstack/react-query";
-import type { MapChunk } from "carrier-contracts/types";
+import { decodeMapChunkBinary, type RuntimeMapChunk } from "carrier-contracts/types";
 
 import { client } from "@/lib/api-client";
 
@@ -26,14 +26,17 @@ export const useMapChunks = (mapId: string, range: ViewportChunkRange) => {
   const queries = useQueries({
     queries: chunkCoords.map(({ chunkX, chunkZ }) => ({
       gcTime: CHUNK_GC_MS,
-      queryFn: () => client.maps.getChunk({ chunkX, chunkZ, mapId }),
+      queryFn: async () =>
+        decodeMapChunkBinary(
+          await client.maps.getChunkBinary({ chunkX, chunkZ, mapId })
+        ),
       queryKey: ["map-chunk", mapId, chunkX, chunkZ] as const,
       staleTime: CHUNK_STALE_MS,
     })),
   });
 
   const chunks = useMemo(() => {
-    const map = new Map<string, MapChunk>();
+    const map = new Map<string, RuntimeMapChunk>();
 
     for (const query of queries) {
       if (query.data) {

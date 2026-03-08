@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
+import { oz } from '@orpc/zod';
 
 export const MAP_GENERATOR = 'diamond-square' as const;
 export const MAP_GENERATOR_ISLANDS = 'island-clusters' as const;
@@ -66,6 +67,16 @@ export const MapChunkSchema = z.object({
 });
 export type MapChunk = z.infer<typeof MapChunkSchema>;
 
+export const MapChunkMetadataSchema = MapChunkSchema.omit({
+  heights: true
+});
+export type MapChunkMetadata = z.infer<typeof MapChunkMetadataSchema>;
+
+export const MapChunkBinarySchema = MapChunkMetadataSchema.extend({
+  heights: oz.blob()
+});
+export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
+
 export const CreateMapInput = z.object({
   generator: MapGenerator.default(MAP_GENERATOR),
   heightTiles: z.number().int().min(1).max(MAX_MAP_TILES),
@@ -106,6 +117,9 @@ export type GetMapChunkInput = z.infer<typeof GetMapChunkInput>;
 
 export const GetMapChunkOutput = MapChunkSchema;
 export type GetMapChunkOutput = z.infer<typeof GetMapChunkOutput>;
+
+export const GetMapChunkBinaryOutput = MapChunkBinarySchema;
+export type GetMapChunkBinaryOutput = z.infer<typeof GetMapChunkBinaryOutput>;
 
 export const ListMapsInput = z.object({});
 export type ListMapsInput = z.infer<typeof ListMapsInput>;
@@ -150,6 +164,13 @@ export const GetMapChunkRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const GetMapChunkBinaryRoute: Route = {
+  description: 'Retrieve a single map chunk with binary float32 heights',
+  method: 'GET',
+  path: '/maps/{mapId}/chunks/{chunkX}/{chunkZ}/binary',
+  tags: ['maps']
+} as const;
+
 export const ListMapsRoute: Route = {
   description: 'List maps ordered by most recently updated first',
   method: 'GET',
@@ -172,6 +193,16 @@ export const mapsContract = {
     .route(GetMapChunkRoute)
     .input(GetMapChunkInput)
     .output(GetMapChunkOutput),
+  getChunkBinary: oc
+    .route(GetMapChunkBinaryRoute)
+    .input(GetMapChunkInput)
+    .output(GetMapChunkBinaryOutput),
   list: oc.route(ListMapsRoute).input(ListMapsInput).output(ListMapsOutput),
   update: oc.route(UpdateMapRoute).input(UpdateMapInput).output(UpdateMapOutput)
 };
+
+export {
+  decodeFloat32HeightsBlob,
+  decodeMapChunkBinary,
+  type RuntimeMapChunk
+} from './binary';
