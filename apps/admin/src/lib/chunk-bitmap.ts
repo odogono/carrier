@@ -32,8 +32,8 @@ const renderChunkToCanvas = (chunk: RuntimeMapChunk): HTMLCanvasElement => {
       const h01 = chunk.heights[(localZ + 1) * chunk.samplesWide + localX];
       const h11 = chunk.heights[(localZ + 1) * chunk.samplesWide + localX + 1];
       const elevation = (h00 + h10 + h01 + h11) * 0.25;
-
-      const [r, g, b] = tileColorRgb(gx, gz, elevation);
+      const material = chunk.materials?.[localZ * w + localX] ?? null;
+      const [r, g, b] = tileColorRgb(gx, gz, elevation, material);
       const idx = (localZ * w + localX) * 4;
       pixels[idx] = r;
       pixels[idx + 1] = g;

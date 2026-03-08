@@ -145,9 +145,11 @@ describe('API server map routes', () => {
     );
 
     expect(chunk.layers.height.encoding).toBe('uint16');
+    expect(chunk.layers.material?.encoding).toBe('uint8');
     expect(chunk.samplesWide).toBe(33);
     expect(chunk.samplesHigh).toBe(33);
     expect(chunk.heights).toBeInstanceOf(Float32Array);
     expect(chunk.heights.length).toBe(33 * 33);
+    expect(chunk.materials?.length).toBe(32 * 32);
   });
 });

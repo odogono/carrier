@@ -13,10 +13,13 @@ export const MAX_MAP_TILES = 4096;
 
 export {
   classifySurfaceMaterialFromElevation,
+  getSurfaceMaterialById,
+  getSurfaceMaterialId,
   getSurfaceMaterialColorRgb,
   MAP_SURFACE_MATERIALS,
   resolveSurfaceMaterial,
   tileHash,
+  type MapSurfaceMaterialId,
   type MapSurfaceMaterial,
   type RgbTuple
 } from './surface';
@@ -45,7 +48,13 @@ export const MapHeightLayerSchema = z.discriminatedUnion('encoding', [
 export type MapHeightLayer = z.infer<typeof MapHeightLayerSchema>;
 
 export const MapChunkLayersSchema = z.object({
-  height: MapHeightLayerSchema
+  height: MapHeightLayerSchema,
+  material: z
+    .object({
+      encoding: z.literal('uint8'),
+      unit: z.literal('surface-material')
+    })
+    .optional()
 });
 export type MapChunkLayers = z.infer<typeof MapChunkLayersSchema>;
 
@@ -71,6 +80,7 @@ export const MapChunkSchema = z.object({
   chunkZ: z.number().int().min(0),
   heights: z.array(z.number()),
   layers: MapChunkLayersSchema,
+  materials: z.array(z.number().int().min(0)).optional(),
   mapId: z.string().min(1),
   originTileX: z.number().int().min(0),
   originTileZ: z.number().int().min(0),
@@ -87,7 +97,8 @@ export const MapChunkMetadataSchema = MapChunkSchema.omit({
 export type MapChunkMetadata = z.infer<typeof MapChunkMetadataSchema>;
 
 export const MapChunkBinarySchema = MapChunkMetadataSchema.extend({
-  heights: oz.blob()
+  heights: oz.blob(),
+  materials: oz.blob().optional()
 });
 export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
 

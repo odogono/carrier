@@ -1,12 +1,19 @@
-import type { MapChunkMetadata } from './index';
+import {
+  getSurfaceMaterialById,
+  type MapChunkMetadata,
+  type MapSurfaceMaterial
+} from './index';
 
 export const decodeFloat32HeightsBlob = async (blob: Blob) => {
   const arrayBuffer = await blob.arrayBuffer();
   return new Float32Array(arrayBuffer);
 };
 
-export type RuntimeMapChunk = MapChunkMetadata & {
+type RuntimeChunkMetadata = Omit<MapChunkMetadata, 'materials'>;
+
+export type RuntimeMapChunk = RuntimeChunkMetadata & {
   heights: Float32Array;
+  materials?: MapSurfaceMaterial[];
 };
 
 const asNumber = (value: number | string) =>
@@ -53,8 +60,14 @@ export const decodeUint16HeightsBlob = async (
   return heights;
 };
 
+export const decodeMaterialBlob = async (blob: Blob) => {
+  const arrayBuffer = await blob.arrayBuffer();
+  const ids = new Uint8Array(arrayBuffer);
+  return Array.from(ids, materialId => getSurfaceMaterialById(materialId));
+};
+
 export const decodeMapChunkBinary = async (
-  chunk: MapChunkMetadata & { heights: Blob }
+  chunk: MapChunkMetadata & { heights: Blob; materials?: Blob }
 ): Promise<RuntimeMapChunk> => {
   const metadata = normalizeMetadata(chunk);
 
@@ -67,6 +80,7 @@ export const decodeMapChunkBinary = async (
             metadata.layers.height.minHeight,
             metadata.layers.height.step
           )
-        : await decodeFloat32HeightsBlob(chunk.heights)
+        : await decodeFloat32HeightsBlob(chunk.heights),
+    materials: chunk.materials ? await decodeMaterialBlob(chunk.materials) : undefined
   };
 };

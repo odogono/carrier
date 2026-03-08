@@ -40,7 +40,7 @@ export type ZarchSceneConfig = {
 export const DEFAULT_SCENE_CONFIG: ZarchSceneConfig = {
   cameraFov: 70,
   cameraHeightMultiplier: 0.85,
-  cameraPullbackMultiplier: 1.9,
+  cameraPullbackMultiplier: 2.5,
 
   keyboardZoomSpeed: 1.4,
   viewRadiusBase: 6,
@@ -50,12 +50,12 @@ export const DEFAULT_SCENE_CONFIG: ZarchSceneConfig = {
 
   ambientIntensity: 0.6,
   directionalIntensity: 0.8,
-  directionalPosition: [200, 400, 100],
+  directionalPosition: [0, 400, 0],
   shadowBias: -0.001,
   shadowMapSize: 1024,
 
   backgroundColor: '#000000',
-  brightnessDistanceFactor: 2.8,
+  brightnessDistanceFactor: 3.2,
   brightnessFalloffPower: 2,
   brightnessFalloffScale: 0.88,
   brightnessMin: 0.12,

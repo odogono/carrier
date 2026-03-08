@@ -4,6 +4,8 @@ import {
   MAP_GENERATOR_ISLANDS,
   MAP_METERS_PER_TILE,
   MAP_RENDER_UNITS_PER_TILE,
+  classifySurfaceMaterialFromElevation,
+  getSurfaceMaterialId,
   type MapChunk,
   type MapGenerator,
   type MapMetadata
@@ -536,6 +538,38 @@ export const decodeUint16Heights = (
   }
 
   return heights;
+};
+
+export const encodeMaterialIds = (materials: number[]) => Uint8Array.from(materials);
+
+export const deriveChunkMaterialIds = (
+  heights: Float32Array,
+  samplesWide: number,
+  tileWidth: number,
+  tileHeight: number,
+  originTileX: number,
+  originTileZ: number
+) => {
+  const materials = new Array<number>(tileWidth * tileHeight);
+
+  for (let localZ = 0; localZ < tileHeight; localZ += 1) {
+    for (let localX = 0; localX < tileWidth; localX += 1) {
+      const h00 = heights[localZ * samplesWide + localX]!;
+      const h10 = heights[localZ * samplesWide + localX + 1]!;
+      const h01 = heights[(localZ + 1) * samplesWide + localX]!;
+      const h11 = heights[(localZ + 1) * samplesWide + localX + 1]!;
+      const elevation = (h00 + h10 + h01 + h11) * 0.25;
+      const material = classifySurfaceMaterialFromElevation(
+        originTileX + localX,
+        originTileZ + localZ,
+        elevation
+      );
+
+      materials[localZ * tileWidth + localX] = getSurfaceMaterialId(material);
+    }
+  }
+
+  return materials;
 };
 
 export const toMapChunkResponse = (

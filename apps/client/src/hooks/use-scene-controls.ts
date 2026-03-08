@@ -15,7 +15,6 @@ import {
  * Render this component only in dev mode.
  */
 export const DevSceneControls = () => {
-
   const cameraValues = useControls('Camera', {
     cameraFov: {
       label: 'FOV',
@@ -95,7 +94,8 @@ export const DevSceneControls = () => {
     },
     directionalPosition: {
       label: 'Dir position',
-      value: DEFAULT_SCENE_CONFIG.directionalPosition
+      value: DEFAULT_SCENE_CONFIG.directionalPosition,
+      joystick: true
     },
     shadowBias: {
       label: 'Shadow bias',

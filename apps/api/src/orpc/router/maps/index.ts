@@ -93,7 +93,12 @@ const getChunkBinary = os
       ...chunk,
       heights: new Blob([chunk.heights], {
         type: 'application/octet-stream'
-      })
+      }),
+      materials: chunk.materials
+        ? new Blob([chunk.materials], {
+            type: 'application/octet-stream'
+          })
+        : undefined
     };
   });
 

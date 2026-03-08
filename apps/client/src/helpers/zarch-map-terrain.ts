@@ -1,6 +1,10 @@
 /* eslint-disable import-x/no-unresolved */
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
+import {
+  resolveSurfaceMaterial,
+  type MapMetadata,
+  type RuntimeMapChunk
+} from 'carrier-contracts/types';
 
 import {
   WATER_LEVEL,
@@ -100,6 +104,30 @@ const sampleHeightFromChunk = (
   return chunk.heights[localZ * chunk.samplesWide + localX] ?? null;
 };
 
+const getMaterialFromChunk = (
+  chunk: RuntimeMapChunk,
+  gx: number,
+  gz: number
+) => {
+  if (!chunk.materials) {
+    return null;
+  }
+
+  const localX = gx - chunk.originTileX;
+  const localZ = gz - chunk.originTileZ;
+
+  if (
+    localX < 0 ||
+    localZ < 0 ||
+    localX >= chunk.tileWidth ||
+    localZ >= chunk.tileHeight
+  ) {
+    return null;
+  }
+
+  return chunk.materials[localZ * chunk.tileWidth + localX] ?? null;
+};
+
 export const createServerMapTerrain = ({
   map,
   prefetchChunk,
@@ -156,6 +184,12 @@ export const createServerMapTerrain = ({
     return (h00 + h10 + h01 + h11) * 0.25;
   };
 
+  const resolveTileMaterial = (gx: number, gz: number, elevation: number) => {
+    const chunk = getChunkForSample(queryClient, map, gx, gz);
+    const material = chunk ? getMaterialFromChunk(chunk, gx, gz) : null;
+    return resolveSurfaceMaterial(gx, gz, elevation, material);
+  };
+
   return {
     chunkSizeTiles: map.chunkSizeTiles,
     containsTile: (gx, gz) =>
@@ -193,6 +227,7 @@ export const createServerMapTerrain = ({
         }
       }
     },
+    resolveTileMaterial,
     sampleHeight,
     shouldHaveTree: (gx, gz) =>
       gx >= 0 &&
@@ -201,7 +236,7 @@ export const createServerMapTerrain = ({
       gz < map.heightTiles &&
       shouldHaveTree(gx, gz),
     tileColor: (gx, gz, elevation, target) =>
-      applyTileColor(target, gx, gz, elevation),
+      applyTileColor(target, gx, gz, elevation, resolveTileMaterial(gx, gz, elevation)),
     treeType: (gx, gz) => getTreeType(gx, gz),
     widthTiles: map.widthTiles
   };

@@ -11,6 +11,7 @@ export const MAP_SURFACE_MATERIALS = [
 ] as const;
 
 export type MapSurfaceMaterial = (typeof MAP_SURFACE_MATERIALS)[number];
+export type MapSurfaceMaterialId = number;
 
 const WATER_LEVEL = -10;
 
@@ -171,3 +172,12 @@ export const resolveSurfaceMaterial = (
   elevation: number,
   material?: MapSurfaceMaterial | null
 ) => material ?? classifySurfaceMaterialFromElevation(gx, gz, elevation);
+
+export const getSurfaceMaterialId = (
+  material: MapSurfaceMaterial
+): MapSurfaceMaterialId => MAP_SURFACE_MATERIALS.indexOf(material);
+
+export const getSurfaceMaterialById = (
+  materialId: MapSurfaceMaterialId
+): MapSurfaceMaterial =>
+  MAP_SURFACE_MATERIALS[materialId] ?? 'default';

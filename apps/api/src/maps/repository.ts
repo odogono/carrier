@@ -12,7 +12,9 @@ import {
   HEIGHT_LAYER,
   buildGeneratedMapChunks,
   decodeFloat32Heights,
+  deriveChunkMaterialIds,
   encodeFloat32Heights,
+  encodeMaterialIds,
   getDefaultMapConfig,
   quantizeUint16Heights,
   toMapChunkResponse
@@ -257,13 +259,28 @@ export class MapRepository {
 
     const heights = decodeFloat32Heights(row.heights);
     const quantized = quantizeUint16Heights(heights);
+    const materials = deriveChunkMaterialIds(
+      heights,
+      row.samplesWide,
+      row.tileWidth,
+      row.tileHeight,
+      row.originTileX,
+      row.originTileZ
+    );
 
     return {
       chunkX: row.chunkX,
       chunkZ: row.chunkZ,
       heights: quantized.data,
-      layers: { height: quantized.layer },
+      layers: {
+        height: quantized.layer,
+        material: {
+          encoding: 'uint8' as const,
+          unit: 'surface-material' as const
+        }
+      },
       mapId: row.mapId,
+      materials: encodeMaterialIds(materials),
       originTileX: row.originTileX,
       originTileZ: row.originTileZ,
       samplesHigh: row.samplesHigh,

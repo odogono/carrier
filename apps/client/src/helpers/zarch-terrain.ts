@@ -38,6 +38,7 @@ export type ZarchTerrain = {
     centerTileZ: number,
     viewRadiusTiles: number
   ) => void;
+  resolveTileMaterial: (gx: number, gz: number, elevation: number) => MapSurfaceMaterial;
   sampleHeight: (gx: number, gz: number) => number | null;
   shouldHaveTree: (gx: number, gz: number) => boolean;
   tileColor: (
