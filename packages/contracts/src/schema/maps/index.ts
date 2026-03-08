@@ -10,6 +10,16 @@ export const MAP_METERS_PER_TILE = 10;
 export const MAP_RENDER_UNITS_PER_TILE = 24;
 export const MAX_MAP_TILES = 4096;
 
+export {
+  classifySurfaceMaterialFromElevation,
+  getSurfaceMaterialColorRgb,
+  MAP_SURFACE_MATERIALS,
+  resolveSurfaceMaterial,
+  tileHash,
+  type MapSurfaceMaterial,
+  type RgbTuple
+} from './surface';
+
 export const MapGenerator = z.enum([MAP_GENERATOR, MAP_GENERATOR_ISLANDS]);
 export type MapGenerator = z.infer<typeof MapGenerator>;
 

@@ -1,4 +1,12 @@
 import { Color } from 'three';
+import {
+  getSurfaceMaterialColorRgb,
+  resolveSurfaceMaterial,
+  tileHash,
+  type MapSurfaceMaterial
+} from 'carrier-contracts';
+
+export { tileHash } from 'carrier-contracts';
 
 export const TILE = 24;
 export const GRID = 32;
@@ -41,13 +49,6 @@ export type ZarchTerrain = {
   treeType: (gx: number, gz: number) => ZarchTreeType;
   widthTiles: number;
 };
-const BASE_WATER_COLOR = 0x18_58_a0;
-const HIGH_ROCK_COLOR = 0x8c_7a_58;
-const UPPER_GRASS_COLOR = 0x7a_98_48;
-const MID_GRASS_COLOR = 0x6a_aa_38;
-const LOW_GRASS_COLOR = 0x88_b8_50;
-const SHORE_COLOR = 0xc8_b8_78;
-
 export const clampZoom = (zoom: number) =>
   Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
 
@@ -80,11 +81,6 @@ export const isWaterTileFromHeights = (
   grid = GRID
 ) => getTileAverageHeightFromHeights(heights, gx, gz, grid) < WATER_LEVEL;
 
-export const tileHash = (gx: number, gz: number) => {
-  const value = Math.sin(gx * 127.1 + gz * 311.7) * 43_758.5453;
-  return value - Math.floor(value);
-};
-
 export const shouldHaveTree = (gx: number, gz: number) =>
   tileHash(gx, gz) < 0.1;
 
@@ -97,27 +93,10 @@ export const applyTileColor = (
   target: Color = new Color(),
   gx: number,
   gz: number,
-  elevation: number
+  elevation: number,
+  material?: MapSurfaceMaterial | null
 ) => {
-  if (elevation < WATER_LEVEL) {
-    const depthVariation = tileHash(gx, gz) * 0.08;
-    return target.setHex(BASE_WATER_COLOR).offsetHSL(0, 0, depthVariation - 0.04);
-  }
-
-  const jitteredElevation = elevation + (tileHash(gx, gz) - 0.5) * 6;
-
-  if (jitteredElevation > 18) {
-    target.setHex(HIGH_ROCK_COLOR);
-  } else if (jitteredElevation > 10) {
-    target.setHex(UPPER_GRASS_COLOR);
-  } else if (jitteredElevation > 2) {
-    target.setHex(MID_GRASS_COLOR);
-  } else if (jitteredElevation > -4) {
-    target.setHex(LOW_GRASS_COLOR);
-  } else {
-    target.setHex(SHORE_COLOR);
-  }
-
-  const brightnessVariation = 0.88 + tileHash(gz * 3 + 5, gx * 7 + 3) * 0.24;
-  return target.multiplyScalar(brightnessVariation);
+  const resolvedMaterial = resolveSurfaceMaterial(gx, gz, elevation, material);
+  const [r, g, b] = getSurfaceMaterialColorRgb(resolvedMaterial, gx, gz);
+  return target.setRGB(r / 255, g / 255, b / 255);
 };

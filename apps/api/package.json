@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "bun run --hot src/index.ts",
+    "evaluate:map-data": "bun src/maps/height-encoding-report.ts",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
     "lint": "eslint --cache src",
