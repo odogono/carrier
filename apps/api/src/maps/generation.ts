@@ -26,6 +26,34 @@ export const HEIGHT_LAYER = {
   unit: 'metres'
 } as const;
 
+export const quantizeUint16Heights = (heights: Float32Array) => {
+  let minHeight = Number.POSITIVE_INFINITY;
+  let maxHeight = Number.NEGATIVE_INFINITY;
+
+  for (const height of heights) {
+    minHeight = Math.min(minHeight, height);
+    maxHeight = Math.max(maxHeight, height);
+  }
+
+  const range = maxHeight - minHeight;
+  const step = range === 0 ? 0 : range / 65_535;
+  const quantized = new Uint16Array(heights.length);
+
+  for (let index = 0; index < heights.length; index += 1) {
+    quantized[index] = step === 0 ? 0 : Math.round((heights[index]! - minHeight) / step);
+  }
+
+  return {
+    data: new Uint8Array(quantized.buffer.slice(0)),
+    layer: {
+      encoding: 'uint16' as const,
+      minHeight,
+      step,
+      unit: 'metres' as const
+    }
+  };
+};
+
 const INITIAL_HEIGHT_VARIATION = 60;
 const INITIAL_SCALE = 40;
 const ROUGHNESS = 0.62;
@@ -489,6 +517,25 @@ export const decodeFloat32Heights = (
   }
 
   return new Float32Array(blob.slice(0));
+};
+
+export const decodeUint16Heights = (
+  blob: ArrayBufferLike | ArrayBufferView,
+  minHeight: number,
+  step: number
+): Float32Array => {
+  const values = ArrayBuffer.isView(blob)
+    ? new Uint16Array(
+        blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength)
+      )
+    : new Uint16Array(blob.slice(0));
+  const heights = new Float32Array(values.length);
+
+  for (let index = 0; index < values.length; index += 1) {
+    heights[index] = minHeight + values[index]! * step;
+  }
+
+  return heights;
 };
 
 export const toMapChunkResponse = (

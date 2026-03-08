@@ -14,6 +14,7 @@ import {
   decodeFloat32Heights,
   encodeFloat32Heights,
   getDefaultMapConfig,
+  quantizeUint16Heights,
   toMapChunkResponse
 } from './generation';
 
@@ -254,9 +255,21 @@ export class MapRepository {
       return null;
     }
 
+    const heights = decodeFloat32Heights(row.heights);
+    const quantized = quantizeUint16Heights(heights);
+
     return {
-      ...row,
-      layers: { height: HEIGHT_LAYER }
+      chunkX: row.chunkX,
+      chunkZ: row.chunkZ,
+      heights: quantized.data,
+      layers: { height: quantized.layer },
+      mapId: row.mapId,
+      originTileX: row.originTileX,
+      originTileZ: row.originTileZ,
+      samplesHigh: row.samplesHigh,
+      samplesWide: row.samplesWide,
+      tileHeight: row.tileHeight,
+      tileWidth: row.tileWidth
     };
   }
 

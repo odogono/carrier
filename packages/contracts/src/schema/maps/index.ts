@@ -24,10 +24,24 @@ export {
 export const MapGenerator = z.enum([MAP_GENERATOR, MAP_GENERATOR_ISLANDS]);
 export type MapGenerator = z.infer<typeof MapGenerator>;
 
-export const MapHeightLayerSchema = z.object({
+export const MapHeightFloat32LayerSchema = z.object({
   encoding: z.literal('float32'),
   unit: z.literal('metres')
 });
+export type MapHeightFloat32Layer = z.infer<typeof MapHeightFloat32LayerSchema>;
+
+export const MapHeightUint16LayerSchema = z.object({
+  encoding: z.literal('uint16'),
+  minHeight: z.number(),
+  step: z.number().nonnegative(),
+  unit: z.literal('metres')
+});
+export type MapHeightUint16Layer = z.infer<typeof MapHeightUint16LayerSchema>;
+
+export const MapHeightLayerSchema = z.discriminatedUnion('encoding', [
+  MapHeightFloat32LayerSchema,
+  MapHeightUint16LayerSchema
+]);
 export type MapHeightLayer = z.infer<typeof MapHeightLayerSchema>;
 
 export const MapChunkLayersSchema = z.object({
@@ -165,7 +179,7 @@ export const GetMapChunkRoute: Route = {
 } as const;
 
 export const GetMapChunkBinaryRoute: Route = {
-  description: 'Retrieve a single map chunk with binary float32 heights',
+  description: 'Retrieve a single map chunk with binary height data',
   method: 'GET',
   path: '/maps/{mapId}/chunks/{chunkX}/{chunkZ}/binary',
   tags: ['maps']
