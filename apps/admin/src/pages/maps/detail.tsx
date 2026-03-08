@@ -126,7 +126,7 @@ export function MapDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Map Preview ??</CardTitle>
+          <CardTitle>Map Preview</CardTitle>
           <CardDescription>Drag to pan, scroll to zoom</CardDescription>
         </CardHeader>
         <CardContent>

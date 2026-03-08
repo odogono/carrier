@@ -4,7 +4,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
-import { FIVE_MINUTES, ONE_DAY, TEN_MINUTES } from 'odgn-ts-helpers/time';
+import { TEN_MINUTES } from 'odgn-ts-helpers/time';
 
 const ReactQueryDevtoolsProduction = React.lazy(() =>
   import('@tanstack/react-query-devtools/build/modern/production.js').then(
@@ -33,6 +33,17 @@ const localStoragePersister = createAsyncStoragePersister({
   storage: window.localStorage,
 });
 
+const persistOptions = {
+  buster: 'carrier-admin-2026-03-08',
+  dehydrateOptions: {
+    shouldDehydrateQuery: (query: { queryKey: readonly unknown[]; state: { status: string } }) => {
+      if (query.queryKey[0] === 'map-chunk') return false;
+      return query.state.status === 'success';
+    },
+  },
+  persister: localStoragePersister,
+};
+
 export const QueryProvider = ({ children }: { children: React.ReactNode }) => {
   const [showDevtools, setShowDevtools] = useState(false);
 
@@ -45,14 +56,7 @@ export const QueryProvider = ({ children }: { children: React.ReactNode }) => {
   return (
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{
-        buster: 'carrier-admin-2026-03-08',
-        persister: localStoragePersister,
-        // Optional: Set max age for persisted data (e.g., 1 day)
-        // maxAge: 1000 * 60 * 60 * 24,
-        // Optional: Bust cache based on a version string
-        // buster: 'my-app-version-1',
-      }}>
+      persistOptions={persistOptions}>
       {children}
       <ReactQueryDevtools buttonPosition="bottom-left" initialIsOpen={false} />
       {showDevtools && (
