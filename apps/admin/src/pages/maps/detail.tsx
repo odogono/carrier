@@ -1,20 +1,20 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from 'react';
 
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Save, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { MapViewer } from "@/components/map-viewer";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { MapViewer } from '@/components/map-viewer';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -22,29 +22,29 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { client } from "@/lib/api-client";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { client } from '@/lib/api-client';
 
 export function MapDetailPage() {
-  const { id } = useParams({ from: "/maps/$id" });
+  const { id } = useParams({ from: '/maps/$id' });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState('');
   const [nameLoaded, setNameLoaded] = useState(false);
 
   const mapQuery = useQuery({
     queryFn: () => client.maps.find({ id }),
-    queryKey: ["maps", id],
+    queryKey: ['maps', id],
   });
 
   const map = mapQuery.data;
 
   useEffect(() => {
     if (map && !nameLoaded) {
-      setName(map.name ?? "");
+      setName(map.name ?? '');
       setNameLoaded(true);
     }
   }, [map, nameLoaded]);
@@ -56,23 +56,23 @@ export function MapDetailPage() {
         name: name.trim() || null,
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["maps"] });
-      toast.success("Map updated");
+      void queryClient.invalidateQueries({ queryKey: ['maps'] });
+      toast.success('Map updated');
     },
     onError: () => {
-      toast.error("Failed to update map");
+      toast.error('Failed to update map');
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => client.maps.delete({ id }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["maps"] });
-      toast.success("Map deleted");
-      void navigate({ to: "/maps" });
+      void queryClient.invalidateQueries({ queryKey: ['maps'] });
+      toast.success('Map deleted');
+      void navigate({ to: '/maps' });
     },
     onError: () => {
-      toast.error("Failed to delete map");
+      toast.error('Failed to delete map');
     },
   });
 
@@ -99,7 +99,7 @@ export function MapDetailPage() {
     );
   }
 
-  const hasChanges = name !== (map.name ?? "");
+  const hasChanges = name !== (map.name ?? '');
 
   return (
     <div className="space-y-6">
@@ -111,19 +111,28 @@ export function MapDetailPage() {
         </Link>
         <div className="flex-1">
           <h2 className="text-3xl font-bold tracking-tight">
-            {map.name ?? "Unnamed Map"}
+            {map.name ?? 'Unnamed Map'}
           </h2>
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
         <Button
           variant="destructive"
           size="sm"
-          onClick={() => setShowDelete(true)}
-        >
+          onClick={() => setShowDelete(true)}>
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Map Preview ??</CardTitle>
+          <CardDescription>Drag to pan, scroll to zoom</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MapViewer mapId={id} map={map} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -145,10 +154,9 @@ export function MapDetailPage() {
               </div>
               <Button
                 type="submit"
-                disabled={updateMutation.isPending || !hasChanges}
-              >
+                disabled={updateMutation.isPending || !hasChanges}>
                 <Save className="mr-2 h-4 w-4" />
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </form>
           </CardContent>
@@ -210,23 +218,13 @@ export function MapDetailPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Map Preview</CardTitle>
-          <CardDescription>Drag to pan, scroll to zoom</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <MapViewer mapId={id} map={map} />
-        </CardContent>
-      </Card>
-
       <Dialog open={showDelete} onOpenChange={setShowDelete}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Map</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete{" "}
-              <strong>{map.name ?? "this map"}</strong>? This will permanently
+              Are you sure you want to delete{' '}
+              <strong>{map.name ?? 'this map'}</strong>? This will permanently
               remove the map and all its chunks. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -237,9 +235,8 @@ export function MapDetailPage() {
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}
-              onClick={() => deleteMutation.mutate()}
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              onClick={() => deleteMutation.mutate()}>
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,9 +1,9 @@
-import { useMemo } from "react";
-import { Line, Text } from "react-konva";
+import { useMemo } from 'react';
+import { Line, Text } from 'react-konva';
 
-import type { MapMetadata } from "carrier-contracts/types";
+import type { MapMetadata } from 'carrier-contracts/types';
 
-import type { Viewport } from "@/hooks/use-map-viewport";
+import type { Viewport } from '@/hooks/use-map-viewport';
 
 type GridLevel = {
   label: string;
@@ -11,17 +11,17 @@ type GridLevel = {
 };
 
 const GRID_LEVELS: GridLevel[] = [
-  { label: "500m", spacingTiles: 50 },
-  { label: "1km", spacingTiles: 100 },
-  { label: "5km", spacingTiles: 500 },
-  { label: "10km", spacingTiles: 1000 },
-  { label: "100km", spacingTiles: 10000 },
+  { label: '500m', spacingTiles: 50 },
+  { label: '1km', spacingTiles: 100 },
+  { label: '5km', spacingTiles: 500 },
+  { label: '10km', spacingTiles: 1000 },
+  { label: '100km', spacingTiles: 10000 },
 ];
 
-const GRID_STROKE = "rgba(255, 255, 255, 0.08)";
-const LABEL_FILL = "rgba(255, 255, 255, 0.3)";
+const GRID_STROKE = 'rgba(255, 255, 255, 0.3)';
+const LABEL_FILL = 'rgba(255, 255, 255, 0.3)';
 
-function chooseGridLevel(visibleTiles: number): GridLevel {
+const chooseGridLevel = (visibleTiles: number): GridLevel => {
   for (const level of GRID_LEVELS) {
     const count = visibleTiles / level.spacingTiles;
     if (count >= 3 && count <= 12) return level;
@@ -33,13 +33,13 @@ function chooseGridLevel(visibleTiles: number): GridLevel {
     const count = visibleTiles / level.spacingTiles;
     return Math.abs(count - 5) < Math.abs(bestCount - 5) ? level : best;
   });
-}
+};
 
-function formatLabel(tilePos: number, metersPerTile: number): string {
+const formatLabel = (tilePos: number, metersPerTile: number): string => {
   const meters = tilePos * metersPerTile;
   if (meters >= 1000) return `${meters / 1000}km`;
   return `${meters}m`;
-}
+};
 
 type GridLinesProps = {
   canvasHeight: number;
