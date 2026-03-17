@@ -161,7 +161,6 @@ describe('map generation', () => {
       heightTiles: 64,
       id: 'map-1',
       metersPerTile: 10,
-      renderUnitsPerTile: 24,
       seed: 'chunk-seams',
       widthTiles: 64
     });
@@ -186,7 +185,6 @@ describe('map generation', () => {
       heightTiles: 96,
       id: 'map-islands',
       metersPerTile: 10,
-      renderUnitsPerTile: 24,
       seed: 'chunk-seams-islands',
       widthTiles: 96
     });
@@ -211,7 +209,6 @@ describe('map generation', () => {
       heightTiles: 45,
       id: 'map-edge',
       metersPerTile: 10,
-      renderUnitsPerTile: 24,
       seed: 'edge-shape',
       widthTiles: 70
     }).find(candidate => candidate.chunkX === 2 && candidate.chunkZ === 1);

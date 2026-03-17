@@ -61,6 +61,7 @@ describe('API server map routes', () => {
 
   test('supports create/list/find/getChunk/delete through the public contract', async () => {
     const createdResponse = await request('POST', '/api/maps', {
+      kind: 'wrapped-classic',
       generator: 'diamond-square',
       heightTiles: 64,
       name: 'Contract map',
@@ -102,6 +103,7 @@ describe('API server map routes', () => {
 
   test('supports creating island preset maps through the public contract', async () => {
     const createdResponse = await request('POST', '/api/maps', {
+      kind: 'wrapped-classic',
       generator: 'island-clusters',
       heightTiles: 96,
       name: 'Island contract map',
@@ -127,6 +129,7 @@ describe('API server map routes', () => {
 
   test('supports binary chunk downloads through the oRPC client', async () => {
     const createdResponse = await request('POST', '/api/maps', {
+      kind: 'wrapped-classic',
       generator: 'diamond-square',
       heightTiles: 64,
       name: 'Binary map',

@@ -324,16 +324,20 @@ export const ZarchScene = ({
     runtime.velZ -= runtime.velZ * 2.5 * dt;
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
-    runtime.camX = MathUtils.clamp(
-      runtime.camX,
-      0,
-      Math.max((terrain.widthTiles - 1) * TILE, 0)
-    );
-    runtime.camZ = MathUtils.clamp(
-      runtime.camZ,
-      0,
-      Math.max((terrain.heightTiles - 1) * TILE, 0)
-    );
+    if (terrain.widthTiles !== null) {
+      runtime.camX = MathUtils.clamp(
+        runtime.camX,
+        0,
+        Math.max((terrain.widthTiles - 1) * TILE, 0)
+      );
+    }
+    if (terrain.heightTiles !== null) {
+      runtime.camZ = MathUtils.clamp(
+        runtime.camZ,
+        0,
+        Math.max((terrain.heightTiles - 1) * TILE, 0)
+      );
+    }
     runtime.camZoom = MathUtils.damp(
       runtime.camZoom,
       runtime.camZoomTarget,

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Line, Text } from 'react-konva';
 
-import type { MapMetadata } from 'carrier-contracts/types';
+import { isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
 
 import type { Viewport } from '@/hooks/use-map-viewport';
 
@@ -37,7 +37,7 @@ const chooseGridLevel = (visibleTiles: number): GridLevel => {
 
 const formatLabel = (tilePos: number, metersPerTile: number): string => {
   const meters = tilePos * metersPerTile;
-  if (meters >= 1000) return `${meters / 1000}km`;
+  if (Math.abs(meters) >= 1000) return `${meters / 1000}km`;
   return `${meters}m`;
 };
 
@@ -55,6 +55,11 @@ export function GridLines({
   viewport,
 }: GridLinesProps) {
   const elements = useMemo(() => {
+    const finite = isFiniteMap(map);
+    const metersPerTile = map.resolution.metersPerTile;
+    const boundsW = finite ? map.extent.widthTiles : null;
+    const boundsH = finite ? map.extent.heightTiles : null;
+
     const visibleTilesX = canvasWidth / viewport.zoom;
     const visibleTilesZ = canvasHeight / viewport.zoom;
     const maxVisible = Math.max(visibleTilesX, visibleTilesZ);
@@ -76,42 +81,42 @@ export function GridLines({
     const labels: Array<{ key: string; text: string; x: number; y: number }> =
       [];
 
+    // Clamp helpers — for finite maps, clamp to bounds; for infinite, use viewport edges
+    const clampMinX = boundsW !== null ? Math.max(0, minTileX) : minTileX;
+    const clampMaxX = boundsW !== null ? Math.min(boundsW, maxTileX) : maxTileX;
+    const clampMinZ = boundsH !== null ? Math.max(0, minTileZ) : minTileZ;
+    const clampMaxZ = boundsH !== null ? Math.min(boundsH, maxTileZ) : maxTileZ;
+
     // Vertical lines
-    const firstX = Math.ceil(Math.max(0, minTileX) / spacing) * spacing;
-    const lastX =
-      Math.floor(Math.min(map.widthTiles, maxTileX) / spacing) * spacing;
+    const firstX = Math.ceil(clampMinX / spacing) * spacing;
+    const lastX = Math.floor(clampMaxX / spacing) * spacing;
 
     for (let x = firstX; x <= lastX; x += spacing) {
-      const lineMinZ = Math.max(0, minTileZ);
-      const lineMaxZ = Math.min(map.heightTiles, maxTileZ);
       lines.push({
         key: `v${x}`,
-        points: [x, lineMinZ, x, lineMaxZ],
+        points: [x, clampMinZ, x, clampMaxZ],
       });
       labels.push({
         key: `lv${x}`,
-        text: formatLabel(x, map.metersPerTile),
+        text: formatLabel(x, metersPerTile),
         x: x + labelPadding,
-        y: Math.max(0, minTileZ) + labelPadding,
+        y: clampMinZ + labelPadding,
       });
     }
 
     // Horizontal lines
-    const firstZ = Math.ceil(Math.max(0, minTileZ) / spacing) * spacing;
-    const lastZ =
-      Math.floor(Math.min(map.heightTiles, maxTileZ) / spacing) * spacing;
+    const firstZ = Math.ceil(clampMinZ / spacing) * spacing;
+    const lastZ = Math.floor(clampMaxZ / spacing) * spacing;
 
     for (let z = firstZ; z <= lastZ; z += spacing) {
-      const lineMinX = Math.max(0, minTileX);
-      const lineMaxX = Math.min(map.widthTiles, maxTileX);
       lines.push({
         key: `h${z}`,
-        points: [lineMinX, z, lineMaxX, z],
+        points: [clampMinX, z, clampMaxX, z],
       });
       labels.push({
         key: `lh${z}`,
-        text: formatLabel(z, map.metersPerTile),
-        x: Math.max(0, minTileX) + labelPadding,
+        text: formatLabel(z, metersPerTile),
+        x: clampMinX + labelPadding,
         y: z + labelPadding,
       });
     }
@@ -120,9 +125,7 @@ export function GridLines({
   }, [
     canvasHeight,
     canvasWidth,
-    map.heightTiles,
-    map.metersPerTile,
-    map.widthTiles,
+    map,
     viewport.centerTileX,
     viewport.centerTileZ,
     viewport.zoom,

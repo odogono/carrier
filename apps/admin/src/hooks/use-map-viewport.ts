@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 
-import type { MapMetadata } from "carrier-contracts/types";
+import { isFiniteMap, type MapMetadata } from "carrier-contracts/types";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 32;
+const DEFAULT_ZOOM = 4;
 const ZOOM_FACTOR = 1.15;
 
 export type Viewport = {
@@ -25,10 +26,15 @@ const clampCenter = (
   centerX: number,
   centerZ: number,
   map: MapMetadata,
-): [number, number] => [
-  Math.max(0, Math.min(map.widthTiles, centerX)),
-  Math.max(0, Math.min(map.heightTiles, centerZ)),
-];
+): [number, number] => {
+  if (!isFiniteMap(map)) {
+    return [centerX, centerZ];
+  }
+  return [
+    Math.max(0, Math.min(map.extent.widthTiles, centerX)),
+    Math.max(0, Math.min(map.extent.heightTiles, centerZ)),
+  ];
+};
 
 export const getVisibleChunkRange = (
   viewport: Viewport,
@@ -39,44 +45,82 @@ export const getVisibleChunkRange = (
 ): ViewportChunkRange => {
   const halfW = canvasWidth / viewport.zoom / 2;
   const halfH = canvasHeight / viewport.zoom / 2;
+  const chunkSize = map.resolution.chunkSizeTiles;
 
-  const minTileX = Math.max(0, Math.floor(viewport.centerTileX - halfW));
-  const maxTileX = Math.min(
-    map.widthTiles - 1,
-    Math.ceil(viewport.centerTileX + halfW),
-  );
-  const minTileZ = Math.max(0, Math.floor(viewport.centerTileZ - halfH));
-  const maxTileZ = Math.min(
-    map.heightTiles - 1,
-    Math.ceil(viewport.centerTileZ + halfH),
-  );
+  if (isFiniteMap(map)) {
+    const minTileX = Math.max(0, Math.floor(viewport.centerTileX - halfW));
+    const maxTileX = Math.min(
+      map.extent.widthTiles - 1,
+      Math.ceil(viewport.centerTileX + halfW),
+    );
+    const minTileZ = Math.max(0, Math.floor(viewport.centerTileZ - halfH));
+    const maxTileZ = Math.min(
+      map.extent.heightTiles - 1,
+      Math.ceil(viewport.centerTileZ + halfH),
+    );
 
-  const maxChunkX = Math.max(
-    Math.ceil(map.widthTiles / map.chunkSizeTiles) - 1,
-    0,
-  );
-  const maxChunkZ = Math.max(
-    Math.ceil(map.heightTiles / map.chunkSizeTiles) - 1,
-    0,
-  );
+    const maxChunkX = Math.max(
+      Math.ceil(map.extent.widthTiles / chunkSize) - 1,
+      0,
+    );
+    const maxChunkZ = Math.max(
+      Math.ceil(map.extent.heightTiles / chunkSize) - 1,
+      0,
+    );
+
+    return {
+      maxChunkX: Math.min(
+        Math.floor(maxTileX / chunkSize) + extraRing,
+        maxChunkX,
+      ),
+      maxChunkZ: Math.min(
+        Math.floor(maxTileZ / chunkSize) + extraRing,
+        maxChunkZ,
+      ),
+      minChunkX: Math.max(
+        Math.floor(minTileX / chunkSize) - extraRing,
+        0,
+      ),
+      minChunkZ: Math.max(
+        Math.floor(minTileZ / chunkSize) - extraRing,
+        0,
+      ),
+    };
+  }
+
+  // Infinite map: no bounds clamping
+  const minTileX = Math.floor(viewport.centerTileX - halfW);
+  const maxTileX = Math.ceil(viewport.centerTileX + halfW);
+  const minTileZ = Math.floor(viewport.centerTileZ - halfH);
+  const maxTileZ = Math.ceil(viewport.centerTileZ + halfH);
 
   return {
-    maxChunkX: Math.min(
-      Math.floor(maxTileX / map.chunkSizeTiles) + extraRing,
-      maxChunkX,
-    ),
-    maxChunkZ: Math.min(
-      Math.floor(maxTileZ / map.chunkSizeTiles) + extraRing,
-      maxChunkZ,
-    ),
-    minChunkX: Math.max(
-      Math.floor(minTileX / map.chunkSizeTiles) - extraRing,
-      0,
-    ),
-    minChunkZ: Math.max(
-      Math.floor(minTileZ / map.chunkSizeTiles) - extraRing,
-      0,
-    ),
+    maxChunkX: Math.floor(maxTileX / chunkSize) + extraRing,
+    maxChunkZ: Math.floor(maxTileZ / chunkSize) + extraRing,
+    minChunkX: Math.floor(minTileX / chunkSize) - extraRing,
+    minChunkZ: Math.floor(minTileZ / chunkSize) - extraRing,
+  };
+};
+
+const computeFitViewport = (
+  map: MapMetadata,
+  canvasWidth: number,
+  canvasHeight?: number,
+): Viewport => {
+  if (isFiniteMap(map)) {
+    const wZoom = canvasWidth > 0 ? canvasWidth / map.extent.widthTiles : 1;
+    const hZoom = canvasHeight && canvasHeight > 0 ? canvasHeight / map.extent.heightTiles : wZoom;
+    return {
+      centerTileX: map.extent.widthTiles / 2,
+      centerTileZ: map.extent.heightTiles / 2,
+      zoom: clampZoom(Math.min(wZoom, hZoom)),
+    };
+  }
+
+  return {
+    centerTileX: 0,
+    centerTileZ: 0,
+    zoom: DEFAULT_ZOOM,
   };
 };
 
@@ -85,16 +129,9 @@ export const useMapViewport = (
   canvasWidth: number,
   canvasHeight: number,
 ) => {
-  const [viewport, setViewport] = useState<Viewport>(() => {
-    const fitZoom =
-      canvasWidth > 0 ? clampZoom(canvasWidth / map.widthTiles) : 1;
-
-    return {
-      centerTileX: map.widthTiles / 2,
-      centerTileZ: map.heightTiles / 2,
-      zoom: fitZoom,
-    };
-  });
+  const [viewport, setViewport] = useState<Viewport>(() =>
+    computeFitViewport(map, canvasWidth),
+  );
 
   const dragRef = useRef<{
     startX: number;
@@ -272,16 +309,7 @@ export const useMapViewport = (
         case "Home":
         case "0": {
           e.preventDefault();
-          setViewport({
-            centerTileX: map.widthTiles / 2,
-            centerTileZ: map.heightTiles / 2,
-            zoom: clampZoom(
-              Math.min(
-                canvasWidth / map.widthTiles,
-                canvasHeight / map.heightTiles,
-              ),
-            ),
-          });
+          setViewport(computeFitViewport(map, canvasWidth));
           break;
         }
       }
@@ -291,13 +319,7 @@ export const useMapViewport = (
 
   const fitToView = useCallback(() => {
     if (canvasWidth <= 0 || canvasHeight <= 0) return;
-    setViewport({
-      centerTileX: map.widthTiles / 2,
-      centerTileZ: map.heightTiles / 2,
-      zoom: clampZoom(
-        Math.min(canvasWidth / map.widthTiles, canvasHeight / map.heightTiles),
-      ),
-    });
+    setViewport(computeFitViewport(map, canvasWidth, canvasHeight));
   }, [map, canvasWidth, canvasHeight]);
 
   const zoomIn = useCallback(() => {

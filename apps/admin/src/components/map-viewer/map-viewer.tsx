@@ -168,8 +168,10 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {map.widthTiles}&times;{map.heightTiles} tiles &middot; Zoom{" "}
-          {zoomPercent}%
+          {map.extent.kind === 'finite'
+            ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles} tiles</>
+            : 'Infinite'}{" "}
+          &middot; Zoom {zoomPercent}%
         </span>
         <span>Drag to pan &middot; Scroll to zoom &middot; Home to reset</span>
       </div>

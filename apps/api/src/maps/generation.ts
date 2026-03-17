@@ -3,25 +3,21 @@ import {
   MAP_GENERATOR,
   MAP_GENERATOR_ISLANDS,
   MAP_METERS_PER_TILE,
-  MAP_RENDER_UNITS_PER_TILE,
   classifySurfaceMaterialFromElevation,
   getSurfaceMaterialId,
   type MapChunk,
-  type MapGenerator,
-  type MapMetadata
+  type MapGenerator
 } from '../../../../packages/contracts/src/schema/maps';
 
-type ChunkSeed = Pick<
-  MapMetadata,
-  | 'chunkSizeTiles'
-  | 'generator'
-  | 'heightTiles'
-  | 'id'
-  | 'metersPerTile'
-  | 'renderUnitsPerTile'
-  | 'seed'
-  | 'widthTiles'
->;
+type ChunkSeed = {
+  chunkSizeTiles: number;
+  generator: MapGenerator;
+  heightTiles: number;
+  id: string;
+  metersPerTile: number;
+  seed: string;
+  widthTiles: number;
+};
 
 export const HEIGHT_LAYER = {
   encoding: 'float32',
@@ -585,6 +581,5 @@ export const toMapChunkResponse = (
 export const getDefaultMapConfig = () => ({
   chunkSizeTiles: MAP_CHUNK_SIZE_TILES,
   generator: MAP_GENERATOR satisfies MapGenerator,
-  metersPerTile: MAP_METERS_PER_TILE,
-  renderUnitsPerTile: MAP_RENDER_UNITS_PER_TILE
+  metersPerTile: MAP_METERS_PER_TILE
 });

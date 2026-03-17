@@ -12,19 +12,26 @@ import {
 import { ZOOM_MAX, ZOOM_MIN, clampZoom, getTreeType, tileHash } from '@/helpers/zarch-terrain';
 
 const map: MapMetadata = {
-  chunkSizeTiles: 32,
-  createdAt: '2026-03-06T00:00:00.000Z',
-  generator: 'diamond-square',
-  heightMeters: 640,
-  heightTiles: 64,
   id: 'map-1',
-  metersPerTile: 10,
   name: 'Test map',
-  renderUnitsPerTile: 24,
+  kind: 'wrapped-classic',
+  extent: {
+    kind: 'finite',
+    widthMeters: 640,
+    heightMeters: 640,
+    widthTiles: 64,
+    heightTiles: 64,
+    wrapX: false,
+    wrapZ: false
+  },
+  resolution: {
+    metersPerTile: 10,
+    chunkSizeTiles: 32
+  },
+  generator: 'diamond-square',
   seed: 'map-seed',
-  updatedAt: '2026-03-06T00:00:00.000Z',
-  widthMeters: 640,
-  widthTiles: 64
+  createdAt: '2026-03-06T00:00:00.000Z',
+  updatedAt: '2026-03-06T00:00:00.000Z'
 };
 
 const chunk00: RuntimeMapChunk = {
@@ -69,7 +76,7 @@ describe('server-backed zarch terrain', () => {
     expect(terrain.sampleHeight(1, 0)).toBe(1);
     expect(terrain.getTileAverageHeight(0, 0)).toBe((0 + 1 + 33 + 34) * 0.25);
     expect(terrain.sampleHeight(-1, 0)).toBeNull();
-    expect(terrain.sampleHeight(map.widthTiles + 1, 0)).toBeNull();
+    expect(terrain.sampleHeight(65, 0)).toBeNull();
     expect(terrain.containsTile(-1, 0)).toBe(false);
     expect(terrain.containsTile(63, 63)).toBe(true);
   });

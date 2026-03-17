@@ -2,7 +2,7 @@ import Konva from "konva";
 import { useEffect, useMemo, useRef } from "react";
 import { Image, Layer, Rect, Stage } from "react-konva";
 
-import type { MapMetadata, RuntimeMapChunk } from "carrier-contracts/types";
+import { isFiniteMap, type MapMetadata, type RuntimeMapChunk } from "carrier-contracts/types";
 
 import { clearBitmapCache, getChunkBitmap } from "@/lib/chunk-bitmap";
 
@@ -89,15 +89,17 @@ export function MapStage({
         />
       </Layer>
       <Layer>
-        <Rect
-          x={0}
-          y={0}
-          width={map.widthTiles}
-          height={map.heightTiles}
-          stroke="rgba(255, 255, 255, 0.15)"
-          strokeWidth={1 / viewport.zoom}
-          listening={false}
-        />
+        {isFiniteMap(map) && (
+          <Rect
+            x={0}
+            y={0}
+            width={map.extent.widthTiles}
+            height={map.extent.heightTiles}
+            stroke="rgba(255, 255, 255, 0.15)"
+            strokeWidth={1 / viewport.zoom}
+            listening={false}
+          />
+        )}
       </Layer>
     </Stage>
   );

@@ -53,7 +53,9 @@ export function DashboardPage() {
                   {latestMap.name ?? "Unnamed"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {latestMap.widthTiles}&times;{latestMap.heightTiles} tiles
+                  {latestMap.extent.kind === 'finite'
+                    ? <>{latestMap.extent.widthTiles}&times;{latestMap.extent.heightTiles} tiles</>
+                    : 'Infinite'}
                 </p>
               </>
             ) : (
@@ -103,8 +105,10 @@ export function DashboardPage() {
                   <div>
                     <div className="font-medium">{map.name ?? "Unnamed"}</div>
                     <div className="text-sm text-muted-foreground">
-                      {map.widthTiles}&times;{map.heightTiles} tiles &middot;{" "}
-                      {map.generator}
+                      {map.extent.kind === 'finite'
+                        ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles} tiles</>
+                        : 'Infinite'}{" "}
+                      &middot; {map.kind}
                     </div>
                   </div>
                   <div className="text-sm text-muted-foreground">

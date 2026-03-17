@@ -1,6 +1,9 @@
 /* eslint-disable import-x/no-unresolved */
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import {
+  isFiniteMap,
+  getMapWidthTiles,
+  getMapHeightTiles,
   resolveSurfaceMaterial,
   type MapMetadata,
   type RuntimeMapChunk
@@ -25,37 +28,43 @@ export const getMapMetadataQueryKey = (mapId: string) =>
 export const getMapListQueryKey = () => ['maps'] as const satisfies QueryKey;
 
 export const getVisibleChunkWindow = (
-  map: Pick<MapMetadata, 'chunkSizeTiles' | 'heightTiles' | 'widthTiles'>,
+  map: MapMetadata,
   centerTileX: number,
   centerTileZ: number,
   viewRadiusTiles: number,
   extraChunkRing = 1
 ) => {
-  const maxChunkX = Math.max(Math.ceil(map.widthTiles / map.chunkSizeTiles) - 1, 0);
-  const maxChunkZ = Math.max(Math.ceil(map.heightTiles / map.chunkSizeTiles) - 1, 0);
-  const minTileX = Math.max(centerTileX - viewRadiusTiles, 0);
-  const maxTileX = Math.min(centerTileX + viewRadiusTiles, map.widthTiles - 1);
-  const minTileZ = Math.max(centerTileZ - viewRadiusTiles, 0);
-  const maxTileZ = Math.min(centerTileZ + viewRadiusTiles, map.heightTiles - 1);
+  const chunkSize = map.resolution.chunkSizeTiles;
+
+  if (isFiniteMap(map)) {
+    const maxChunkX = Math.max(Math.ceil(map.extent.widthTiles / chunkSize) - 1, 0);
+    const maxChunkZ = Math.max(Math.ceil(map.extent.heightTiles / chunkSize) - 1, 0);
+    const minTileX = Math.max(centerTileX - viewRadiusTiles, 0);
+    const maxTileX = Math.min(centerTileX + viewRadiusTiles, map.extent.widthTiles - 1);
+    const minTileZ = Math.max(centerTileZ - viewRadiusTiles, 0);
+    const maxTileZ = Math.min(centerTileZ + viewRadiusTiles, map.extent.heightTiles - 1);
+
+    return {
+      maxChunkX: Math.min(Math.floor(maxTileX / chunkSize) + extraChunkRing, maxChunkX),
+      maxChunkZ: Math.min(Math.floor(maxTileZ / chunkSize) + extraChunkRing, maxChunkZ),
+      minChunkX: Math.max(Math.floor(minTileX / chunkSize) - extraChunkRing, 0),
+      minChunkZ: Math.max(Math.floor(minTileZ / chunkSize) - extraChunkRing, 0)
+    };
+  }
+
+  // Infinite map: no bounds clamping, signed chunk coords
+  const minTileX = centerTileX - viewRadiusTiles;
+  const maxTileX = centerTileX + viewRadiusTiles;
+  const minTileZ = centerTileZ - viewRadiusTiles;
+  const maxTileZ = centerTileZ + viewRadiusTiles;
 
   return {
-    maxChunkX: Math.min(Math.floor(maxTileX / map.chunkSizeTiles) + extraChunkRing, maxChunkX),
-    maxChunkZ: Math.min(Math.floor(maxTileZ / map.chunkSizeTiles) + extraChunkRing, maxChunkZ),
-    minChunkX: Math.max(Math.floor(minTileX / map.chunkSizeTiles) - extraChunkRing, 0),
-    minChunkZ: Math.max(Math.floor(minTileZ / map.chunkSizeTiles) - extraChunkRing, 0)
+    maxChunkX: Math.floor(maxTileX / chunkSize) + extraChunkRing,
+    maxChunkZ: Math.floor(maxTileZ / chunkSize) + extraChunkRing,
+    minChunkX: Math.floor(minTileX / chunkSize) - extraChunkRing,
+    minChunkZ: Math.floor(minTileZ / chunkSize) - extraChunkRing
   };
 };
-
-const getMaxChunkCoordinate = (
-  sizeInTiles: number,
-  chunkSizeTiles: number
-) => Math.max(Math.ceil(sizeInTiles / chunkSizeTiles) - 1, 0);
-
-const getChunkCoordinateForSample = (
-  coordinate: number,
-  chunkSizeTiles: number,
-  maxChunkCoordinate: number
-) => Math.min(Math.floor(coordinate / chunkSizeTiles), maxChunkCoordinate);
 
 const getChunkForSample = (
   queryClient: QueryClient,
@@ -63,20 +72,27 @@ const getChunkForSample = (
   sampleX: number,
   sampleZ: number
 ) => {
-  if (sampleX < 0 || sampleZ < 0 || sampleX > map.widthTiles || sampleZ > map.heightTiles) {
-    return null;
+  const chunkSize = map.resolution.chunkSizeTiles;
+
+  if (isFiniteMap(map)) {
+    if (sampleX < 0 || sampleZ < 0 || sampleX > map.extent.widthTiles || sampleZ > map.extent.heightTiles) {
+      return null;
+    }
+
+    const maxChunkX = Math.max(Math.ceil(map.extent.widthTiles / chunkSize) - 1, 0);
+    const maxChunkZ = Math.max(Math.ceil(map.extent.heightTiles / chunkSize) - 1, 0);
+    const chunkX = Math.min(Math.floor(sampleX / chunkSize), maxChunkX);
+    const chunkZ = Math.min(Math.floor(sampleZ / chunkSize), maxChunkZ);
+
+    return (
+      queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
+      null
+    );
   }
 
-  const chunkX = getChunkCoordinateForSample(
-    sampleX,
-    map.chunkSizeTiles,
-    getMaxChunkCoordinate(map.widthTiles, map.chunkSizeTiles)
-  );
-  const chunkZ = getChunkCoordinateForSample(
-    sampleZ,
-    map.chunkSizeTiles,
-    getMaxChunkCoordinate(map.heightTiles, map.chunkSizeTiles)
-  );
+  // Infinite map: signed chunk coords, no bounds check
+  const chunkX = Math.floor(sampleX / chunkSize);
+  const chunkZ = Math.floor(sampleZ / chunkSize);
 
   return (
     queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
@@ -139,6 +155,9 @@ export const createServerMapTerrain = ({
 }): ZarchTerrain => {
   const chunkLookupCache = new Map<string, RuntimeMapChunk | null>();
   const heightLookupCache = new Map<string, number | null>();
+  const mapWidthTiles = getMapWidthTiles(map);
+  const mapHeightTiles = getMapHeightTiles(map);
+  const chunkSize = map.resolution.chunkSizeTiles;
 
   const sampleHeight = (sampleX: number, sampleZ: number) => {
     const heightKey = `${sampleX}:${sampleZ}`;
@@ -148,7 +167,7 @@ export const createServerMapTerrain = ({
       return cachedHeight;
     }
 
-    const chunkKey = `${Math.floor(sampleX / map.chunkSizeTiles)}:${Math.floor(sampleZ / map.chunkSizeTiles)}`;
+    const chunkKey = `${Math.floor(sampleX / chunkSize)}:${Math.floor(sampleZ / chunkSize)}`;
     let chunk = chunkLookupCache.get(chunkKey);
 
     if (chunk === undefined) {
@@ -190,19 +209,24 @@ export const createServerMapTerrain = ({
     return resolveSurfaceMaterial(gx, gz, elevation, material);
   };
 
+  const containsTile = mapWidthTiles !== null && mapHeightTiles !== null
+    ? (gx: number, gz: number) =>
+        gx >= 0 && gz >= 0 && gx < mapWidthTiles && gz < mapHeightTiles
+    : () => true;
+
+  const isTileLoaded = (gx: number, gz: number) =>
+    containsTile(gx, gz) && getTileAverageHeight(gx, gz) !== null;
+
+  const shouldHaveTreeAt = (gx: number, gz: number) =>
+    containsTile(gx, gz) && shouldHaveTree(gx, gz);
+
   return {
-    chunkSizeTiles: map.chunkSizeTiles,
-    containsTile: (gx, gz) =>
-      gx >= 0 && gz >= 0 && gx < map.widthTiles && gz < map.heightTiles,
+    chunkSizeTiles: chunkSize,
+    containsTile,
     getTileAverageHeight,
-    heightTiles: map.heightTiles,
+    heightTiles: mapHeightTiles,
     id: map.id,
-    isTileLoaded: (gx, gz) =>
-      gx >= 0 &&
-      gz >= 0 &&
-      gx < map.widthTiles &&
-      gz < map.heightTiles &&
-      getTileAverageHeight(gx, gz) !== null,
+    isTileLoaded,
     isWaterTile: (gx, gz) => {
       const average = getTileAverageHeight(gx, gz);
       return average !== null && average < WATER_LEVEL;
@@ -218,9 +242,6 @@ export const createServerMapTerrain = ({
         viewRadiusTiles
       );
 
-      // Always iterate the window and call prefetchChunk — React Query
-      // deduplicates in-flight requests and skips cached chunks internally,
-      // so there is no need to track the last requested window signature here.
       for (let chunkZ = window.minChunkZ; chunkZ <= window.maxChunkZ; chunkZ += 1) {
         for (let chunkX = window.minChunkX; chunkX <= window.maxChunkX; chunkX += 1) {
           prefetchChunk(chunkX, chunkZ);
@@ -229,15 +250,10 @@ export const createServerMapTerrain = ({
     },
     resolveTileMaterial,
     sampleHeight,
-    shouldHaveTree: (gx, gz) =>
-      gx >= 0 &&
-      gz >= 0 &&
-      gx < map.widthTiles &&
-      gz < map.heightTiles &&
-      shouldHaveTree(gx, gz),
+    shouldHaveTree: shouldHaveTreeAt,
     tileColor: (gx, gz, elevation, target) =>
       applyTileColor(target, gx, gz, elevation, resolveTileMaterial(gx, gz, elevation)),
     treeType: (gx, gz) => getTreeType(gx, gz),
-    widthTiles: map.widthTiles
+    widthTiles: mapWidthTiles
   };
 };

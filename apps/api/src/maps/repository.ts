@@ -23,15 +23,18 @@ import {
 type MapRow = {
   chunkSizeTiles: number;
   createdAt: string;
-  generator: MapMetadata['generator'];
-  heightTiles: number;
+  extentKind: string;
+  generator: string | null;
+  heightTiles: number | null;
   id: string;
+  kind: string;
   metersPerTile: number;
   name: string | null;
-  renderUnitsPerTile: number;
   seed: string;
   updatedAt: string;
-  widthTiles: number;
+  widthTiles: number | null;
+  wrapX: number;
+  wrapZ: number;
 };
 
 type ChunkRow = {
@@ -61,11 +64,63 @@ const ensureDatabasePath = (dbPath: string) => {
   return absolutePath;
 };
 
-const mapRowToMetadata = (row: MapRow): MapMetadata => ({
-  ...row,
-  heightMeters: row.heightTiles * row.metersPerTile,
-  widthMeters: row.widthTiles * row.metersPerTile
-});
+const mapRowToMetadata = (row: MapRow): MapMetadata => {
+  const resolution = {
+    metersPerTile: row.metersPerTile,
+    chunkSizeTiles: row.chunkSizeTiles
+  };
+
+  if (row.extentKind === 'finite' && row.widthTiles !== null && row.heightTiles !== null) {
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind as MapMetadata['kind'],
+      extent: {
+        kind: 'finite' as const,
+        widthMeters: row.widthTiles * row.metersPerTile,
+        heightMeters: row.heightTiles * row.metersPerTile,
+        widthTiles: row.widthTiles,
+        heightTiles: row.heightTiles,
+        wrapX: row.wrapX === 1,
+        wrapZ: row.wrapZ === 1
+      },
+      resolution,
+      generator: row.generator as MapMetadata['generator'],
+      seed: row.seed,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind as MapMetadata['kind'],
+    extent: { kind: 'infinite' as const },
+    resolution,
+    generator: undefined,
+    seed: row.seed,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+};
+
+const MAP_ROW_COLUMNS = `
+  chunk_size_tiles AS chunkSizeTiles,
+  created_at AS createdAt,
+  extent_kind AS extentKind,
+  generator,
+  height_tiles AS heightTiles,
+  id,
+  kind,
+  meters_per_tile AS metersPerTile,
+  name,
+  seed,
+  updated_at AS updatedAt,
+  width_tiles AS widthTiles,
+  wrap_x AS wrapX,
+  wrap_z AS wrapZ
+`;
 
 export class MapRepository {
   readonly db: Database;
@@ -84,98 +139,116 @@ export class MapRepository {
   createMap(input: CreateMapInput): MapMetadata {
     const now = new Date().toISOString();
     const defaults = getDefaultMapConfig();
+    const id = randomUUID();
+    const seed = input.seed ?? randomUUID();
+
+    if (input.kind === 'wrapped-classic') {
+      const row: MapRow = {
+        chunkSizeTiles: defaults.chunkSizeTiles,
+        createdAt: now,
+        extentKind: 'finite',
+        generator: input.generator,
+        heightTiles: input.heightTiles,
+        id,
+        kind: 'wrapped-classic',
+        metersPerTile: defaults.metersPerTile,
+        name: input.name ?? null,
+        seed,
+        updatedAt: now,
+        widthTiles: input.widthTiles,
+        wrapX: input.wrapX ? 1 : 0,
+        wrapZ: input.wrapZ ? 1 : 0
+      };
+
+      const chunks = buildGeneratedMapChunks({
+        chunkSizeTiles: row.chunkSizeTiles,
+        generator: input.generator,
+        heightTiles: input.heightTiles,
+        id: row.id,
+        metersPerTile: row.metersPerTile,
+        seed: row.seed,
+        widthTiles: input.widthTiles
+      });
+
+      const insertMap = this.db.prepare(`
+        INSERT INTO maps (
+          id, name, kind, extent_kind,
+          width_tiles, height_tiles, wrap_x, wrap_z,
+          meters_per_tile, chunk_size_tiles,
+          generator, seed, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertChunk = this.db.prepare(`
+        INSERT INTO map_chunks (
+          map_id, chunk_x, chunk_z,
+          origin_tile_x, origin_tile_z,
+          tile_width, tile_height,
+          samples_wide, samples_high, heights
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      this.db.exec('BEGIN');
+
+      try {
+        insertMap.run(
+          row.id, row.name, row.kind, row.extentKind,
+          row.widthTiles, row.heightTiles, row.wrapX, row.wrapZ,
+          row.metersPerTile, row.chunkSizeTiles,
+          row.generator, row.seed, row.createdAt, row.updatedAt
+        );
+
+        for (const chunk of chunks) {
+          insertChunk.run(
+            row.id,
+            chunk.chunkX, chunk.chunkZ,
+            chunk.originTileX, chunk.originTileZ,
+            chunk.tileWidth, chunk.tileHeight,
+            chunk.samplesWide, chunk.samplesHigh,
+            encodeFloat32Heights(chunk.heights)
+          );
+        }
+
+        this.db.exec('COMMIT');
+        return mapRowToMetadata(row);
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    }
+
+    // infinite-vector: no chunk generation
     const row: MapRow = {
       chunkSizeTiles: defaults.chunkSizeTiles,
       createdAt: now,
-      generator: input.generator,
-      heightTiles: input.heightTiles,
-      id: randomUUID(),
+      extentKind: 'infinite',
+      generator: null,
+      heightTiles: null,
+      id,
+      kind: 'infinite-vector',
       metersPerTile: defaults.metersPerTile,
       name: input.name ?? null,
-      renderUnitsPerTile: defaults.renderUnitsPerTile,
-      seed: input.seed ?? randomUUID(),
+      seed,
       updatedAt: now,
-      widthTiles: input.widthTiles
+      widthTiles: null,
+      wrapX: 0,
+      wrapZ: 0
     };
-    const chunks = buildGeneratedMapChunks({
-      chunkSizeTiles: row.chunkSizeTiles,
-      generator: row.generator,
-      heightTiles: row.heightTiles,
-      id: row.id,
-      metersPerTile: row.metersPerTile,
-      renderUnitsPerTile: row.renderUnitsPerTile,
-      seed: row.seed,
-      widthTiles: row.widthTiles
-    });
 
-    const insertMap = this.db.prepare(`
+    this.db.prepare(`
       INSERT INTO maps (
-        id,
-        name,
-        width_tiles,
-        height_tiles,
-        meters_per_tile,
-        render_units_per_tile,
-        chunk_size_tiles,
-        generator,
-        seed,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertChunk = this.db.prepare(`
-      INSERT INTO map_chunks (
-        map_id,
-        chunk_x,
-        chunk_z,
-        origin_tile_x,
-        origin_tile_z,
-        tile_width,
-        tile_height,
-        samples_wide,
-        samples_high,
-        heights
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+        id, name, kind, extent_kind,
+        width_tiles, height_tiles, wrap_x, wrap_z,
+        meters_per_tile, chunk_size_tiles,
+        generator, seed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.name, row.kind, row.extentKind,
+      row.widthTiles, row.heightTiles, row.wrapX, row.wrapZ,
+      row.metersPerTile, row.chunkSizeTiles,
+      row.generator, row.seed, row.createdAt, row.updatedAt
+    );
 
-    this.db.exec('BEGIN');
-
-    try {
-      insertMap.run(
-        row.id,
-        row.name,
-        row.widthTiles,
-        row.heightTiles,
-        row.metersPerTile,
-        row.renderUnitsPerTile,
-        row.chunkSizeTiles,
-        row.generator,
-        row.seed,
-        row.createdAt,
-        row.updatedAt
-      );
-
-      for (const chunk of chunks) {
-        insertChunk.run(
-          row.id,
-          chunk.chunkX,
-          chunk.chunkZ,
-          chunk.originTileX,
-          chunk.originTileZ,
-          chunk.tileWidth,
-          chunk.tileHeight,
-          chunk.samplesWide,
-          chunk.samplesHigh,
-          encodeFloat32Heights(chunk.heights)
-        );
-      }
-
-      this.db.exec('COMMIT');
-      return mapRowToMetadata(row);
-    } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
-    }
+    return mapRowToMetadata(row);
   }
 
   deleteMap(id: string) {
@@ -189,18 +262,7 @@ export class MapRepository {
   getMap(id: string) {
     const row = this.db
       .query<MapRow, [string]>(`
-        SELECT
-          chunk_size_tiles AS chunkSizeTiles,
-          created_at AS createdAt,
-          generator,
-          height_tiles AS heightTiles,
-          id,
-          meters_per_tile AS metersPerTile,
-          name,
-          render_units_per_tile AS renderUnitsPerTile,
-          seed,
-          updated_at AS updatedAt,
-          width_tiles AS widthTiles
+        SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         WHERE id = ?
       `)
@@ -307,18 +369,7 @@ export class MapRepository {
   listMaps() {
     const rows = this.db
       .query<MapRow, []>(`
-        SELECT
-          chunk_size_tiles AS chunkSizeTiles,
-          created_at AS createdAt,
-          generator,
-          height_tiles AS heightTiles,
-          id,
-          meters_per_tile AS metersPerTile,
-          name,
-          render_units_per_tile AS renderUnitsPerTile,
-          seed,
-          updated_at AS updatedAt,
-          width_tiles AS widthTiles
+        SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         ORDER BY updated_at DESC, created_at DESC
       `)
@@ -334,12 +385,15 @@ export class MapRepository {
       CREATE TABLE IF NOT EXISTS maps (
         id TEXT PRIMARY KEY,
         name TEXT,
-        width_tiles INTEGER NOT NULL,
-        height_tiles INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        extent_kind TEXT NOT NULL,
+        width_tiles INTEGER,
+        height_tiles INTEGER,
+        wrap_x INTEGER NOT NULL DEFAULT 0,
+        wrap_z INTEGER NOT NULL DEFAULT 0,
         meters_per_tile INTEGER NOT NULL,
-        render_units_per_tile INTEGER NOT NULL,
         chunk_size_tiles INTEGER NOT NULL,
-        generator TEXT NOT NULL,
+        generator TEXT,
         seed TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL

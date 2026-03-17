@@ -3,11 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import { MapRepository } from './repository';
 
 describe('map repository', () => {
-  test('creates, lists, fetches, and deletes maps with persistent chunks', () => {
+  test('creates, lists, fetches, and deletes wrapped-classic maps with persistent chunks', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 
     try {
       const created = repository.createMap({
+        kind: 'wrapped-classic',
         generator: 'diamond-square',
         heightTiles: 64,
         name: 'Alpha',
@@ -15,8 +16,11 @@ describe('map repository', () => {
         widthTiles: 96
       });
 
-      expect(created.widthMeters).toBe(960);
-      expect(created.heightMeters).toBe(640);
+      expect(created.extent.kind).toBe('finite');
+      if (created.extent.kind === 'finite') {
+        expect(created.extent.widthMeters).toBe(960);
+        expect(created.extent.heightMeters).toBe(640);
+      }
 
       const listed = repository.listMaps();
       expect(listed).toHaveLength(1);
@@ -45,6 +49,7 @@ describe('map repository', () => {
 
     try {
       const created = repository.createMap({
+        kind: 'wrapped-classic',
         generator: 'island-clusters',
         heightTiles: 96,
         name: 'Archipelago',
@@ -62,6 +67,31 @@ describe('map repository', () => {
       expect(chunk).not.toBeNull();
       expect(chunk?.mapId).toBe(created.id);
       expect((chunk?.heights.length ?? 0) > 0).toBe(true);
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('creates infinite-vector maps without chunks', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Infinite World',
+        seed: 'infinite-seed'
+      });
+
+      expect(created.kind).toBe('infinite-vector');
+      expect(created.extent.kind).toBe('infinite');
+      expect(created.generator).toBeUndefined();
+
+      const fetched = repository.getMap(created.id);
+      expect(fetched?.kind).toBe('infinite-vector');
+      expect(fetched?.extent.kind).toBe('infinite');
+
+      // No chunks should exist
+      expect(repository.getMapChunk(created.id, 0, 0)).toBeNull();
     } finally {
       repository.close();
     }

@@ -7,6 +7,8 @@ import { Canvas } from '@react-three/fiber';
 
 import { createLog } from 'odgn-ts-helpers/log';
 
+import { getMapWidthTiles, getMapHeightTiles } from 'carrier-contracts/types';
+
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
@@ -57,8 +59,10 @@ const MainInner = () => {
     }
 
     initializedMapIdRef.current = map.id;
-    runtimeRef.current.camX = (map.widthTiles * TILE) * 0.5;
-    runtimeRef.current.camZ = (map.heightTiles * TILE) * 0.5;
+    const w = getMapWidthTiles(map);
+    const h = getMapHeightTiles(map);
+    runtimeRef.current.camX = w !== null ? (w * TILE) * 0.5 : 0;
+    runtimeRef.current.camZ = h !== null ? (h * TILE) * 0.5 : 0;
     runtimeRef.current.camYaw = 0;
     runtimeRef.current.camZoom = 1;
     runtimeRef.current.camZoomTarget = 1;

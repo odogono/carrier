@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { isFiniteMap } from "carrier-contracts/types";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +83,7 @@ export function MapsListPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Kind</TableHead>
               <TableHead>Dimensions</TableHead>
               <TableHead>Generator</TableHead>
               <TableHead>Seed</TableHead>
@@ -106,10 +109,17 @@ export function MapsListPage() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  {map.widthTiles}&times;{map.heightTiles}
+                  <Badge variant="outline">{map.kind}</Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{map.generator}</Badge>
+                  {isFiniteMap(map)
+                    ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles}</>
+                    : "Infinite"}
+                </TableCell>
+                <TableCell>
+                  {map.generator
+                    ? <Badge variant="secondary">{map.generator}</Badge>
+                    : <span className="text-muted-foreground">&mdash;</span>}
                 </TableCell>
                 <TableCell className="max-w-[200px] truncate font-mono text-xs">
                   {map.seed}

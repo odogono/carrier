@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { isFiniteMap } from 'carrier-contracts/types';
+
 import { MapViewer } from '@/components/map-viewer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -100,6 +102,7 @@ export function MapDetailPage() {
   }
 
   const hasChanges = name !== (map.name ?? '');
+  const finite = isFiniteMap(map);
 
   return (
     <div className="space-y-6">
@@ -170,23 +173,35 @@ export function MapDetailPage() {
           <CardContent>
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between">
+                <dt className="text-muted-foreground">Kind</dt>
+                <dd>
+                  <Badge variant="secondary">{map.kind}</Badge>
+                </dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted-foreground">Dimensions</dt>
                 <dd>
-                  {map.widthTiles}&times;{map.heightTiles} tiles
+                  {finite
+                    ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles} tiles</>
+                    : 'Infinite'}
                 </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Size</dt>
                 <dd>
-                  {map.widthMeters}&times;{map.heightMeters} meters
+                  {finite
+                    ? <>{map.extent.widthMeters}&times;{map.extent.heightMeters} meters</>
+                    : 'Infinite'}
                 </dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Generator</dt>
-                <dd>
-                  <Badge variant="secondary">{map.generator}</Badge>
-                </dd>
-              </div>
+              {map.generator && (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Generator</dt>
+                  <dd>
+                    <Badge variant="secondary">{map.generator}</Badge>
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Seed</dt>
                 <dd className="max-w-[200px] truncate font-mono text-xs">
@@ -195,15 +210,11 @@ export function MapDetailPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Meters/Tile</dt>
-                <dd>{map.metersPerTile}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Render Units/Tile</dt>
-                <dd>{map.renderUnitsPerTile}</dd>
+                <dd>{map.resolution.metersPerTile}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Chunk Size</dt>
-                <dd>{map.chunkSizeTiles} tiles</dd>
+                <dd>{map.resolution.chunkSizeTiles} tiles</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Created</dt>

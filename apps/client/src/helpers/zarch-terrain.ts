@@ -29,7 +29,7 @@ export type ZarchTerrain = {
   chunkSizeTiles: number;
   containsTile: (gx: number, gz: number) => boolean;
   getTileAverageHeight: (gx: number, gz: number) => number | null;
-  heightTiles: number;
+  heightTiles: number | null;
   id: string;
   isTileLoaded: (gx: number, gz: number) => boolean;
   isWaterTile: (gx: number, gz: number) => boolean;
@@ -48,7 +48,7 @@ export type ZarchTerrain = {
     target?: Color
   ) => Color;
   treeType: (gx: number, gz: number) => ZarchTreeType;
-  widthTiles: number;
+  widthTiles: number | null;
 };
 export const clampZoom = (zoom: number, min = ZOOM_MIN, max = ZOOM_MAX) =>
   Math.max(min, Math.min(max, zoom));

@@ -2,11 +2,9 @@ import {
   MAP_GENERATOR,
   MAP_GENERATOR_ISLANDS,
   MAP_METERS_PER_TILE,
-  MAP_RENDER_UNITS_PER_TILE,
   getSurfaceMaterialColorRgb,
   resolveSurfaceMaterial,
-  type MapGenerator,
-  type MapMetadata
+  type MapGenerator
 } from 'carrier-contracts';
 
 import {
@@ -334,20 +332,9 @@ const createMapSeed = (generator: MapGenerator, sizeTiles: number) => ({
   heightTiles: sizeTiles,
   id: `${generator}-${sizeTiles}`,
   metersPerTile: MAP_METERS_PER_TILE,
-  renderUnitsPerTile: MAP_RENDER_UNITS_PER_TILE,
   seed: `evaluation:${generator}:${sizeTiles}`,
   widthTiles: sizeTiles
-} satisfies Pick<
-  MapMetadata,
-  | 'chunkSizeTiles'
-  | 'generator'
-  | 'heightTiles'
-  | 'id'
-  | 'metersPerTile'
-  | 'renderUnitsPerTile'
-  | 'seed'
-  | 'widthTiles'
->);
+});
 
 const estimateCurrentJsonBytes = (chunk: GeneratedMapChunkRecord) =>
   new TextEncoder().encode(JSON.stringify(toMapChunkResponse(chunk))).byteLength;
