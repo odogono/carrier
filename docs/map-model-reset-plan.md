@@ -25,7 +25,6 @@ type MapExtent =
 type MapResolution = {
   metersPerTile: number;
   chunkSizeTiles: number;
-  renderUnitsPerTile: number;
 };
 
 type MapMetadata = {
@@ -42,9 +41,10 @@ type MapMetadata = {
 Key contract changes:
 
 - `maps.create`, `maps.find`, `maps.list`, and `maps.update` become variant-aware and stop assuming every map has `widthTiles` and `heightTiles`
-- `maps.getChunk` accepts signed `chunkX` and `chunkZ` for both variants
-- `wrapped-classic` create input includes `seed` and finite size in metres
-- `infinite-vector` create input creates an empty infinite world plus default resolution settings
+- `maps.getChunk` accepts signed `chunkX` and `chunkZ` for both variants — current Zod schemas enforce `.min(0)` on `GetMapChunkInput` and `MapChunkSchema` and must be changed to allow negative values
+- `wrapped-classic` create input includes `seed`, `generator` (`'diamond-square' | 'island-clusters'`), and finite size in metres — `generator` is variant-specific and only present on `wrapped-classic`
+- `infinite-vector` create input creates an empty infinite world plus default resolution settings — no `generator` field
+- `renderUnitsPerTile` is removed from the server model; it is a client rendering concern and stays as a client-side constant
 - Add Type B authoring CRUD routes for flat source objects:
   - source polygons: list/create/update/delete
   - point terrain controls: list/create/update/delete
@@ -68,6 +68,8 @@ Key contract changes:
 - Generate heights/materials deterministically from `seed + canonical wrapped coordinates`
 - Canonicalize sample/chunk lookup modulo finite world size so crossing any edge wraps seamlessly
 - Use logical signed chunk requests around the camera, but resolve them onto the finite toroidal world internally
+- Rewrite chunk generation to produce individual chunks from seed without generating the full heightfield first — the current `buildGeneratedMapChunks` generates the entire heightfield then slices, which is incompatible with on-demand generation. Diamond-square is inherently global, so `wrapped-classic` will likely need a different algorithm (e.g. layered seeded noise) that can produce any chunk independently given only the seed and chunk coordinates
+- The `map_chunks` table becomes a cache for `wrapped-classic`, not authoritative storage — the chunk API handler must generate-on-miss rather than only querying stored chunks
 
 ### 3. `infinite-vector` persistence and generation
 
@@ -75,7 +77,7 @@ Persist authored data separately from generated terrain cache:
 
 - `map_source_polygons`: flat top-level closed straight-edge polygons in world metres, procedural params, active/retired status, bbox
 - `map_control_points`: flat top-level point controls with position, type, radius/strength/elevation
-- `map_derived_islands`: resolved connected-land records with stable IDs on a best-effort basis, editable metadata, lineage info for merge/split remapping
+- `map_derived_islands`: resolved connected-land records with stable IDs, editable metadata, lineage info for merge/split remapping. ID stability algorithm: on boolean union, the surviving island keeps the ID of the largest-area operand; on split, the largest fragment keeps the original ID and new fragments receive new IDs. Lineage records track parent/child relationships for admin audit
 - `map_chunks`: signed chunk coordinates plus cached generated terrain
 
 Generation rules:
@@ -84,7 +86,7 @@ Generation rules:
 - boolean ops run on the server, create new source polygons, and retire operands
 - resolved land masses define authoritative derived islands
 - chunk generation is lazy and signed in all directions
-- chunk invalidation is localized: invalidate only chunks intersecting dirty bounds expanded by coastline noise radius and control-point influence
+- chunk invalidation is localized: invalidate only chunks whose bounds intersect the dirty region. The dirty region is the modified polygon/control-point bbox expanded by the maximum coastline noise radius (a generation parameter, concrete value TBD during Phase 3) plus the largest control-point influence radius touching that bbox
 - compile/cache spatial indexes and resolved geometry per map revision in process memory
 
 ### 4. `infinite-vector` editor
@@ -102,8 +104,8 @@ Editor requirements for v1:
 
 Tech recommendation after reevaluation:
 
-- use a dedicated geometry/boolean library rather than custom math
-- keep the editor stack canvas/scene-graph based and compatible with large pan/zoom scenes; prefer the existing admin canvas direction unless reevaluation finds a clear blocker before implementation starts
+- use `polyclip-ts` (Martinez polygon clipping algorithm, pure TypeScript, no native deps) for boolean operations — runs server-side and can also run client-side for preview if needed. Evaluate `polygon-clipping` as a fallback if `polyclip-ts` has issues with degenerate cases. WASM Clipper2 is an option if performance becomes a problem but adds build complexity
+- keep the editor stack canvas/scene-graph based and compatible with large pan/zoom scenes; prefer the existing admin Konva direction unless reevaluation finds a clear blocker before implementation starts
 
 ## Test Plan
 
@@ -117,12 +119,16 @@ Tech recommendation after reevaluation:
 
 ## Assumptions And Defaults
 
-- Breaking map-contract changes are acceptable
+- Breaking map-contract changes are acceptable — existing map data can be dropped and recreated
 - Canonical authored coordinates are world metres
 - `wrapped-classic` remains parameter-authored, not a full geometry editor
 - `infinite-vector` uses procedural polygon params plus point controls only; ridges/curves are deferred
 - True infinite runtime is the primary Type B target; bounded vector runtime is deferred as a later export/slice mode
 - Absolute world coordinates are acceptable for now; floating-origin work is explicitly deferred
+- `island-clusters` generator is retained as a `wrapped-classic` generator option alongside `diamond-square` — both must be rewritten for per-chunk on-demand generation
+- `renderUnitsPerTile` is a client-side rendering constant, not part of the server map model
+- Static entities (see `docs/static-entities-plan.md`) must use signed world-metre coordinates compatible with both map variants; derived-island association for static entities is deferred but the coordinate system must not block it
+- Single-admin editing is the v1 concurrency model for `infinite-vector`; optimistic locking via a map revision counter on write operations is sufficient. Multi-user concurrent editing is deferred
 
 ## Phased Roadmap
 
@@ -132,7 +138,9 @@ Goal: replace the finite-only shared map model with a typed finite/infinite mode
 
 - Add `kind`, `extent`, and `resolution` to shared map contracts
 - Remove hard assumptions that every map has `widthTiles` and `heightTiles`
-- Allow signed chunk coordinates in contracts and API handlers
+- Remove `renderUnitsPerTile` from server-side `MapMetadata` and `MapResolution`; keep it as a client constant
+- Change `chunkX`/`chunkZ` Zod schemas from `.min(0)` to unrestricted `.int()` in `GetMapChunkInput`, `MapChunkSchema`, and `MapChunkBinarySchema`
+- Make `generator` variant-specific: present on `wrapped-classic` create input, absent on `infinite-vector`
 - Keep old generators working behind adapters only long enough to complete migration
 
 Exit criteria:
@@ -147,6 +155,7 @@ Goal: make client and admin runtime code stop depending on global finite bounds.
 
 - Refactor chunk lookup, viewport math, and map helpers around variant-aware extents
 - Split finite-only behavior such as clamped camera/minimap math from shared terrain interfaces
+- Refactor admin viewport hook (`use-map-viewport.ts`) to remove finite-bounds clamping for infinite maps — replace with authored-content-cluster navigation for `infinite-vector`
 - Introduce signed chunk request paths end to end
 
 Exit criteria:
@@ -175,9 +184,11 @@ Exit criteria:
 Goal: stand up the infinite authored/runtime world model without the editor yet.
 
 - Add authored-object persistence for source polygons and point controls
-- Add derived-island persistence and remapping rules
+- Add derived-island persistence and remapping rules (largest-area-wins ID stability)
 - Implement signed lazy chunk generation and cache invalidation by dirty bounds
-- Add server-authoritative boolean operations and object retirement
+- Target chunk generation latency under 50ms per chunk; if exceeded, add background pre-generation of chunks around the viewport
+- Add server-authoritative boolean operations (using `polyclip-ts`) and object retirement
+- Add map revision counter for optimistic locking on write operations
 - Add admin overview data endpoints for authored-content navigation
 
 Exit criteria:
@@ -190,7 +201,7 @@ Exit criteria:
 
 Goal: ship a usable authoring workspace for polygons, booleans, controls, and derived-island metadata.
 
-- Add a dedicated editor route in admin
+- Add a dedicated editor route in admin at `/maps/:id/editor` (new route in `apps/admin/src/router.tsx`)
 - Implement local viewport plus overview navigation
 - Add polygon draw/select/edit/delete flows
 - Add point-control placement and editing
@@ -216,13 +227,20 @@ Exit criteria:
 - No core runtime path depends on deprecated finite-only contracts
 - Deferred items are explicitly captured as follow-up work, not hidden in the main path
 
+## Library Dependencies
+
+- `polyclip-ts`: polygon boolean operations (union, difference, intersection, xor) — pure TypeScript, no native deps. Used server-side in Phase 3 and potentially client-side for editor preview in Phase 4
+- Fallback: `polygon-clipping` if `polyclip-ts` has issues with degenerate edge cases
+- Escalation path: WASM build of Clipper2 if performance is insufficient
+
 ## Subsystem Checklist
 
 ### Shared contracts
 
-- Define `MapKind`, `MapExtent`, and `MapResolution`
+- Define `MapKind`, `MapExtent`, and `MapResolution` (without `renderUnitsPerTile`)
 - Update all map routes to be variant-aware
-- Change chunk coordinate schemas to signed integers
+- Change `chunkX`/`chunkZ` Zod schemas from `.min(0)` to unrestricted `.int()` across `GetMapChunkInput`, `MapChunkSchema`, and related schemas
+- Make `generator` variant-specific on create input (present for `wrapped-classic`, absent for `infinite-vector`)
 - Add authoring and derived-island routes for `infinite-vector`
 
 ### API and persistence
@@ -230,13 +248,15 @@ Exit criteria:
 - Migrate map storage for typed finite/infinite metadata
 - Add tables for source polygons, point controls, and derived islands
 - Add signed chunk cache support
-- Implement server-authoritative boolean operations
+- Implement server-authoritative boolean operations using `polyclip-ts`
 - Implement localized invalidation and revision/cache bookkeeping
+- Add map revision counter for optimistic locking
 
 ### Admin app
 
 - Update list/detail screens for typed map metadata
-- Add dedicated infinite-vector editor route
+- Refactor viewport hook to support both finite-clamped and unbounded navigation
+- Add dedicated infinite-vector editor route at `/maps/:id/editor`
 - Add overview plus local viewport navigation
 - Add polygon editing, boolean operations, point controls, and derived-island inspector flows
 
