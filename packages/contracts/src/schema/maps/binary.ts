@@ -11,6 +11,11 @@ export const decodeFloat32HeightsBlob = async (blob: Blob) => {
 
 type RuntimeChunkMetadata = Omit<MapChunkMetadata, 'materials'>;
 
+type BinaryMapChunkInput = Omit<MapChunkMetadata, 'materials'> & {
+  heights: unknown;
+  materials?: unknown;
+};
+
 export type RuntimeMapChunk = RuntimeChunkMetadata & {
   heights: Float32Array;
   materials?: MapSurfaceMaterial[];
@@ -20,8 +25,8 @@ const asNumber = (value: number | string) =>
   typeof value === 'number' ? value : Number(value);
 
 const normalizeMetadata = (
-  chunk: MapChunkMetadata & { heights: Blob }
-): MapChunkMetadata => ({
+  chunk: Omit<MapChunkMetadata, 'materials'> & { heights: Blob }
+): Omit<MapChunkMetadata, 'materials'> => ({
   ...chunk,
   chunkX: asNumber(chunk.chunkX),
   chunkZ: asNumber(chunk.chunkZ),
@@ -66,21 +71,35 @@ export const decodeMaterialBlob = async (blob: Blob) => {
   return Array.from(ids, materialId => getSurfaceMaterialById(materialId));
 };
 
+const expectBlob = (value: unknown, field: string) => {
+  if (!(value instanceof Blob)) {
+    throw new TypeError(`${field} must be a Blob`);
+  }
+
+  return value;
+};
+
 export const decodeMapChunkBinary = async (
-  chunk: MapChunkMetadata & { heights: Blob; materials?: Blob }
+  chunk: BinaryMapChunkInput
 ): Promise<RuntimeMapChunk> => {
-  const metadata = normalizeMetadata(chunk);
+  const heightsBlob = expectBlob(chunk.heights, 'heights');
+  const materialsBlob =
+    chunk.materials === undefined ? undefined : expectBlob(chunk.materials, 'materials');
+  const metadata = normalizeMetadata({
+    ...chunk,
+    heights: heightsBlob
+  });
 
   return {
     ...metadata,
     heights:
       metadata.layers.height.encoding === 'uint16'
         ? await decodeUint16HeightsBlob(
-            chunk.heights,
+            heightsBlob,
             metadata.layers.height.minHeight,
             metadata.layers.height.step
           )
-        : await decodeFloat32HeightsBlob(chunk.heights),
-    materials: chunk.materials ? await decodeMaterialBlob(chunk.materials) : undefined
+        : await decodeFloat32HeightsBlob(heightsBlob),
+    materials: materialsBlob ? await decodeMaterialBlob(materialsBlob) : undefined
   };
 };

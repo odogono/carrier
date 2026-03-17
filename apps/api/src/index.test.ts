@@ -63,14 +63,16 @@ describe('API server map routes', () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'wrapped-classic',
       generator: 'diamond-square',
-      heightTiles: 64,
+      heightMeters: 640,
       name: 'Contract map',
       seed: 'contract-seed',
-      widthTiles: 64
+      widthMeters: 640
     });
     const created = createdResponse.json as Record<string, unknown>;
 
     expect(created.name).toBe('Contract map');
+    expect((created.extent as Record<string, unknown>).wrapX).toBe(true);
+    expect((created.extent as Record<string, unknown>).wrapZ).toBe(true);
 
     const listedResponse = await request('GET', '/api/maps');
     const listed = listedResponse.json as Array<Record<string, unknown>>;
@@ -105,10 +107,10 @@ describe('API server map routes', () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'wrapped-classic',
       generator: 'island-clusters',
-      heightTiles: 96,
+      heightMeters: 960,
       name: 'Island contract map',
       seed: 'contract-islands',
-      widthTiles: 128
+      widthMeters: 1280
     });
     const created = createdResponse.json as Record<string, unknown>;
 
@@ -127,14 +129,41 @@ describe('API server map routes', () => {
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
   });
 
+  test('supports signed wrapped-classic chunk requests through canonical lookup', async () => {
+    const createdResponse = await request('POST', '/api/maps', {
+      kind: 'wrapped-classic',
+      generator: 'diamond-square',
+      heightMeters: 640,
+      name: 'Toroidal map',
+      seed: 'toroidal-seed',
+      widthMeters: 640
+    });
+    const created = createdResponse.json as Record<string, unknown>;
+
+    const canonicalResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/chunks/1/0`
+    );
+    const aliasedResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/chunks/-1/0`
+    );
+    const canonical = canonicalResponse.json as Record<string, unknown>;
+    const aliased = aliasedResponse.json as Record<string, unknown>;
+
+    expect(aliased.chunkX).toBe(canonical.chunkX);
+    expect(aliased.chunkZ).toBe(canonical.chunkZ);
+    expect(aliased.heights).toEqual(canonical.heights);
+  });
+
   test('supports binary chunk downloads through the oRPC client', async () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'wrapped-classic',
       generator: 'diamond-square',
-      heightTiles: 64,
+      heightMeters: 640,
       name: 'Binary map',
       seed: 'binary-seed',
-      widthTiles: 64
+      widthMeters: 640
     });
     const created = createdResponse.json as Record<string, unknown>;
     const client = await createTestClient();

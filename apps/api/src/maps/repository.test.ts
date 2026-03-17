@@ -3,23 +3,25 @@ import { describe, expect, test } from 'bun:test';
 import { MapRepository } from './repository';
 
 describe('map repository', () => {
-  test('creates, lists, fetches, and deletes wrapped-classic maps with persistent chunks', () => {
+  test('creates, lists, fetches, and deletes wrapped-classic maps with on-demand cached chunks', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 
     try {
       const created = repository.createMap({
         kind: 'wrapped-classic',
         generator: 'diamond-square',
-        heightTiles: 64,
+        heightMeters: 640,
         name: 'Alpha',
         seed: 'alpha-seed',
-        widthTiles: 96
+        widthMeters: 960
       });
 
       expect(created.extent.kind).toBe('finite');
       if (created.extent.kind === 'finite') {
         expect(created.extent.widthMeters).toBe(960);
         expect(created.extent.heightMeters).toBe(640);
+        expect(created.extent.wrapX).toBe(true);
+        expect(created.extent.wrapZ).toBe(true);
       }
 
       const listed = repository.listMaps();
@@ -28,6 +30,11 @@ describe('map repository', () => {
 
       const fetched = repository.getMap(created.id);
       expect(fetched?.seed).toBe('alpha-seed');
+      expect(
+        repository.db
+          .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM map_chunks')
+          .get()?.count
+      ).toBe(0);
 
       const chunk = repository.getMapChunk(created.id, 2, 1);
       expect(chunk).not.toBeNull();
@@ -35,6 +42,15 @@ describe('map repository', () => {
       expect(chunk?.tileHeight).toBe(32);
       expect(chunk?.samplesWide).toBe(33);
       expect(chunk?.samplesHigh).toBe(33);
+      expect(
+        repository.db
+          .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM map_chunks')
+          .get()?.count
+      ).toBe(1);
+
+      const aliasedChunk = repository.getMapChunk(created.id, -1, 1);
+      expect(aliasedChunk).not.toBeNull();
+      expect(Array.from(aliasedChunk!.heights)).toEqual(Array.from(chunk!.heights));
 
       expect(repository.deleteMap(created.id)).toBe(true);
       expect(repository.getMap(created.id)).toBeNull();
@@ -51,10 +67,10 @@ describe('map repository', () => {
       const created = repository.createMap({
         kind: 'wrapped-classic',
         generator: 'island-clusters',
-        heightTiles: 96,
+        heightMeters: 960,
         name: 'Archipelago',
         seed: 'archipelago-seed',
-        widthTiles: 128
+        widthMeters: 1280
       });
 
       expect(created.generator).toBe('island-clusters');

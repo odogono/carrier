@@ -10,6 +10,7 @@ export const MAP_CHUNK_SIZE_TILES = 32;
 export const MAP_METERS_PER_TILE = 10;
 export const MAP_RENDER_UNITS_PER_TILE = 24;
 export const MAX_MAP_TILES = 4096;
+export const MAX_MAP_METERS = MAX_MAP_TILES * MAP_METERS_PER_TILE;
 
 export {
   classifySurfaceMaterialFromElevation,
@@ -117,22 +118,22 @@ export type MapMetadata = z.infer<typeof MapMetadataSchema>;
 // --- Type Guards ---
 
 export const isFiniteMap = (
-  meta: MapMetadata
+  meta: MapMetadata | null | undefined
 ): meta is MapMetadata & { extent: FiniteExtent } =>
-  meta.extent.kind === 'finite';
+  meta?.extent?.kind === 'finite';
 
 export const isInfiniteMap = (
-  meta: MapMetadata
+  meta: MapMetadata | null | undefined
 ): meta is MapMetadata & { extent: InfiniteExtent } =>
-  meta.extent.kind === 'infinite';
+  meta?.extent?.kind === 'infinite';
 
 // --- Accessor Helpers ---
 
-export const getMapWidthTiles = (meta: MapMetadata): number | null =>
-  meta.extent.kind === 'finite' ? meta.extent.widthTiles : null;
+export const getMapWidthTiles = (meta: MapMetadata | null | undefined): number | null =>
+  meta?.extent?.kind === 'finite' ? meta.extent.widthTiles : null;
 
-export const getMapHeightTiles = (meta: MapMetadata): number | null =>
-  meta.extent.kind === 'finite' ? meta.extent.heightTiles : null;
+export const getMapHeightTiles = (meta: MapMetadata | null | undefined): number | null =>
+  meta?.extent?.kind === 'finite' ? meta.extent.heightTiles : null;
 
 export const getMapChunkSizeTiles = (meta: MapMetadata): number =>
   meta.resolution.chunkSizeTiles;
@@ -174,12 +175,24 @@ export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
 const CreateWrappedClassicMapInput = z.object({
   kind: z.literal('wrapped-classic'),
   generator: MapGenerator.default(MAP_GENERATOR),
-  heightTiles: z.number().int().min(1).max(MAX_MAP_TILES),
-  widthTiles: z.number().int().min(1).max(MAX_MAP_TILES),
+  heightMeters: z
+    .number()
+    .int()
+    .min(MAP_METERS_PER_TILE)
+    .max(MAX_MAP_METERS)
+    .refine(value => value % MAP_METERS_PER_TILE === 0, {
+      message: `heightMeters must be a multiple of ${MAP_METERS_PER_TILE}`
+    }),
   name: z.string().trim().min(1).max(120).optional(),
   seed: z.string().trim().min(1).max(120).optional(),
-  wrapX: z.boolean().default(false),
-  wrapZ: z.boolean().default(false)
+  widthMeters: z
+    .number()
+    .int()
+    .min(MAP_METERS_PER_TILE)
+    .max(MAX_MAP_METERS)
+    .refine(value => value % MAP_METERS_PER_TILE === 0, {
+      message: `widthMeters must be a multiple of ${MAP_METERS_PER_TILE}`
+    })
 });
 
 const CreateInfiniteVectorMapInput = z.object({

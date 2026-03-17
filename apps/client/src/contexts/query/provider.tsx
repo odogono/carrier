@@ -35,9 +35,12 @@ const localStoragePersister = createAsyncStoragePersister({
 });
 
 const persistOptions = {
-  buster: 'carrier-client-2026-03-08',
+  buster: 'carrier-client-2026-03-17-phase2',
   dehydrateOptions: {
-    shouldDehydrateQuery: (query: { queryKey: readonly unknown[]; state: { status: string } }) => {
+    shouldDehydrateQuery: (query: {
+      queryKey: readonly unknown[];
+      state: { status: string };
+    }) => {
       if (query.queryKey[0] === 'map-chunk') return false;
       return query.state.status === 'success';
     }

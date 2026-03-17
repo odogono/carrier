@@ -4,7 +4,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import type { MapKind } from "carrier-contracts/types";
+import {
+  MAP_METERS_PER_TILE,
+  type MapKind,
+} from "carrier-contracts/types";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,12 +22,32 @@ export function CreateMapPage() {
 
   const [kind, setKind] = useState<MapKind>("wrapped-classic");
   const [name, setName] = useState("");
-  const [widthTiles, setWidthTiles] = useState("128");
-  const [heightTiles, setHeightTiles] = useState("128");
+  const [widthMeters, setWidthMeters] = useState("1280");
+  const [heightMeters, setHeightMeters] = useState("1280");
   const [generator, setGenerator] = useState<
     "diamond-square" | "island-clusters"
   >("diamond-square");
   const [seed, setSeed] = useState("");
+
+  const parseDerivedTiles = (value: string) => {
+    const meters = Number(value);
+
+    if (
+      !Number.isFinite(meters) ||
+      !Number.isInteger(meters) ||
+      meters < MAP_METERS_PER_TILE ||
+      meters % MAP_METERS_PER_TILE !== 0
+    ) {
+      return null;
+    }
+
+    return meters / MAP_METERS_PER_TILE;
+  };
+
+  const derivedWidthTiles = parseDerivedTiles(widthMeters);
+  const derivedHeightTiles = parseDerivedTiles(heightMeters);
+  const wrappedClassicDimensionsValid =
+    derivedWidthTiles !== null && derivedHeightTiles !== null;
 
   const createMutation = useMutation({
     mutationFn: () => {
@@ -38,10 +61,10 @@ export function CreateMapPage() {
       return client.maps.create({
         kind: "wrapped-classic",
         generator,
-        heightTiles: Number(heightTiles),
+        heightMeters: Number(heightMeters),
         name: name.trim() || undefined,
         seed: seed.trim() || undefined,
-        widthTiles: Number(widthTiles),
+        widthMeters: Number(widthMeters),
       });
     },
     onSuccess: () => {
@@ -99,28 +122,40 @@ export function CreateMapPage() {
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="widthTiles">Width (tiles)</Label>
+                    <Label htmlFor="widthMeters">Width (meters)</Label>
                     <Input
-                      id="widthTiles"
+                      id="widthMeters"
                       type="number"
-                      value={widthTiles}
-                      onChange={(e) => setWidthTiles(e.target.value)}
-                      min={1}
-                      max={4096}
+                      value={widthMeters}
+                      onChange={(e) => setWidthMeters(e.target.value)}
+                      min={MAP_METERS_PER_TILE}
+                      max={4096 * MAP_METERS_PER_TILE}
+                      step={MAP_METERS_PER_TILE}
                       required
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {derivedWidthTiles === null
+                        ? `Use a whole-number multiple of ${MAP_METERS_PER_TILE}m`
+                        : `${derivedWidthTiles} tiles at ${MAP_METERS_PER_TILE}m/tile`}
+                    </p>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="heightTiles">Height (tiles)</Label>
+                    <Label htmlFor="heightMeters">Height (meters)</Label>
                     <Input
-                      id="heightTiles"
+                      id="heightMeters"
                       type="number"
-                      value={heightTiles}
-                      onChange={(e) => setHeightTiles(e.target.value)}
-                      min={1}
-                      max={4096}
+                      value={heightMeters}
+                      onChange={(e) => setHeightMeters(e.target.value)}
+                      min={MAP_METERS_PER_TILE}
+                      max={4096 * MAP_METERS_PER_TILE}
+                      step={MAP_METERS_PER_TILE}
                       required
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {derivedHeightTiles === null
+                        ? `Use a whole-number multiple of ${MAP_METERS_PER_TILE}m`
+                        : `${derivedHeightTiles} tiles at ${MAP_METERS_PER_TILE}m/tile`}
+                    </p>
                   </div>
                 </div>
 
@@ -154,7 +189,13 @@ export function CreateMapPage() {
             </div>
 
             <div className="flex gap-2 pt-4">
-              <Button type="submit" disabled={createMutation.isPending}>
+              <Button
+                type="submit"
+                disabled={
+                  createMutation.isPending ||
+                  (kind === "wrapped-classic" && !wrappedClassicDimensionsValid)
+                }
+              >
                 {createMutation.isPending ? "Creating..." : "Create Map"}
               </Button>
               <Button

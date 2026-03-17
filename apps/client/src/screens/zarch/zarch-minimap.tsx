@@ -9,6 +9,9 @@ type ZarchMinimapProps = {
   terrain: ZarchTerrain;
 };
 
+export const wrapWorldCoordinate = (value: number, size: number) =>
+  size <= 0 ? 0 : ((value % size) + size) % size;
+
 export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -91,7 +94,11 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
         Math.max(
           0,
           Math.round(
-            ((runtimeRef.current?.camX ?? 0) / Math.max(widthTiles * TILE, TILE)) *
+            (wrapWorldCoordinate(
+              runtimeRef.current?.camX ?? 0,
+              Math.max(widthTiles * TILE, TILE)
+            ) /
+              Math.max(widthTiles * TILE, TILE)) *
               drawSize
           )
         )
@@ -101,7 +108,11 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
         Math.max(
           0,
           Math.round(
-            ((runtimeRef.current?.camZ ?? 0) / Math.max(heightTiles * TILE, TILE)) *
+            (wrapWorldCoordinate(
+              runtimeRef.current?.camZ ?? 0,
+              Math.max(heightTiles * TILE, TILE)
+            ) /
+              Math.max(heightTiles * TILE, TILE)) *
               drawSize
           )
         )

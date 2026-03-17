@@ -19,7 +19,13 @@ Introduce a discriminated shared model roughly like:
 type MapKind = 'wrapped-classic' | 'infinite-vector';
 
 type MapExtent =
-  | { kind: 'finite'; widthMeters: number; heightMeters: number; wrapX: true; wrapZ: true }
+  | {
+      kind: 'finite';
+      widthMeters: number;
+      heightMeters: number;
+      wrapX: true;
+      wrapZ: true;
+    }
   | { kind: 'infinite' };
 
 type MapResolution = {
@@ -134,6 +140,8 @@ Tech recommendation after reevaluation:
 
 ### Phase 0: Contract Reset
 
+Status: Complete
+
 Goal: replace the finite-only shared map model with a typed finite/infinite model.
 
 - Add `kind`, `extent`, and `resolution` to shared map contracts
@@ -150,6 +158,8 @@ Exit criteria:
 - Contract tests cover both finite and infinite metadata shapes
 
 ### Phase 1: Shared Runtime Generalization
+
+Status: Complete
 
 Goal: make client and admin runtime code stop depending on global finite bounds.
 

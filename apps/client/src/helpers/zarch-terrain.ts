@@ -48,6 +48,8 @@ export type ZarchTerrain = {
     target?: Color
   ) => Color;
   treeType: (gx: number, gz: number) => ZarchTreeType;
+  wrapX: boolean;
+  wrapZ: boolean;
   widthTiles: number | null;
 };
 export const clampZoom = (zoom: number, min = ZOOM_MIN, max = ZOOM_MAX) =>

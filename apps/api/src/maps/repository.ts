@@ -5,12 +5,13 @@ import { Database } from 'bun:sqlite';
 import type {
   CreateMapInput,
   MapChunk,
+  MapGenerator,
   MapMetadata
 } from 'carrier-contracts';
 
 import {
   HEIGHT_LAYER,
-  buildGeneratedMapChunks,
+  buildGeneratedMapChunk,
   decodeFloat32Heights,
   deriveChunkMaterialIds,
   encodeFloat32Heights,
@@ -122,6 +123,24 @@ const MAP_ROW_COLUMNS = `
   wrap_z AS wrapZ
 `;
 
+const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
+  const tiles = meters / metersPerTile;
+
+  if (!Number.isInteger(tiles) || tiles <= 0) {
+    throw new Error(
+      `Map dimension ${meters}m is invalid for metersPerTile=${metersPerTile}`
+    );
+  }
+
+  return tiles;
+};
+
+const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
+  Math.max(Math.ceil(tileCount / chunkSizeTiles), 1);
+
+const toCanonicalChunkCoordinate = (chunk: number, chunkCount: number) =>
+  ((chunk % chunkCount) + chunkCount) % chunkCount;
+
 export class MapRepository {
   readonly db: Database;
 
@@ -136,6 +155,16 @@ export class MapRepository {
     this.db.close();
   }
 
+  private findMapRow(id: string) {
+    return this.db
+      .query<MapRow, [string]>(`
+        SELECT ${MAP_ROW_COLUMNS}
+        FROM maps
+        WHERE id = ?
+      `)
+      .get(id);
+  }
+
   createMap(input: CreateMapInput): MapMetadata {
     const now = new Date().toISOString();
     const defaults = getDefaultMapConfig();
@@ -143,32 +172,30 @@ export class MapRepository {
     const seed = input.seed ?? randomUUID();
 
     if (input.kind === 'wrapped-classic') {
+      const widthTiles = deriveTileCountFromMeters(
+        input.widthMeters,
+        defaults.metersPerTile
+      );
+      const heightTiles = deriveTileCountFromMeters(
+        input.heightMeters,
+        defaults.metersPerTile
+      );
       const row: MapRow = {
         chunkSizeTiles: defaults.chunkSizeTiles,
         createdAt: now,
         extentKind: 'finite',
         generator: input.generator,
-        heightTiles: input.heightTiles,
+        heightTiles,
         id,
         kind: 'wrapped-classic',
         metersPerTile: defaults.metersPerTile,
         name: input.name ?? null,
         seed,
         updatedAt: now,
-        widthTiles: input.widthTiles,
-        wrapX: input.wrapX ? 1 : 0,
-        wrapZ: input.wrapZ ? 1 : 0
+        widthTiles,
+        wrapX: 1,
+        wrapZ: 1
       };
-
-      const chunks = buildGeneratedMapChunks({
-        chunkSizeTiles: row.chunkSizeTiles,
-        generator: input.generator,
-        heightTiles: input.heightTiles,
-        id: row.id,
-        metersPerTile: row.metersPerTile,
-        seed: row.seed,
-        widthTiles: input.widthTiles
-      });
 
       const insertMap = this.db.prepare(`
         INSERT INTO maps (
@@ -178,15 +205,6 @@ export class MapRepository {
           generator, seed, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const insertChunk = this.db.prepare(`
-        INSERT INTO map_chunks (
-          map_id, chunk_x, chunk_z,
-          origin_tile_x, origin_tile_z,
-          tile_width, tile_height,
-          samples_wide, samples_high, heights
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
       this.db.exec('BEGIN');
 
       try {
@@ -196,17 +214,6 @@ export class MapRepository {
           row.metersPerTile, row.chunkSizeTiles,
           row.generator, row.seed, row.createdAt, row.updatedAt
         );
-
-        for (const chunk of chunks) {
-          insertChunk.run(
-            row.id,
-            chunk.chunkX, chunk.chunkZ,
-            chunk.originTileX, chunk.originTileZ,
-            chunk.tileWidth, chunk.tileHeight,
-            chunk.samplesWide, chunk.samplesHigh,
-            encodeFloat32Heights(chunk.heights)
-          );
-        }
 
         this.db.exec('COMMIT');
         return mapRowToMetadata(row);
@@ -260,13 +267,7 @@ export class MapRepository {
   }
 
   getMap(id: string) {
-    const row = this.db
-      .query<MapRow, [string]>(`
-        SELECT ${MAP_ROW_COLUMNS}
-        FROM maps
-        WHERE id = ?
-      `)
-      .get(id);
+    const row = this.findMapRow(id);
 
     if (!row) {
       return null;
@@ -299,8 +300,102 @@ export class MapRepository {
       .get(mapId, chunkX, chunkZ);
   }
 
+  private ensureWrappedClassicChunkRow(
+    row: MapRow,
+    requestedChunkX: number,
+    requestedChunkZ: number
+  ) {
+    if (
+      row.kind !== 'wrapped-classic' ||
+      row.generator === null ||
+      row.widthTiles === null ||
+      row.heightTiles === null
+    ) {
+      return null;
+    }
+
+    const canonicalChunkX = toCanonicalChunkCoordinate(
+      requestedChunkX,
+      getChunkCount(row.widthTiles, row.chunkSizeTiles)
+    );
+    const canonicalChunkZ = toCanonicalChunkCoordinate(
+      requestedChunkZ,
+      getChunkCount(row.heightTiles, row.chunkSizeTiles)
+    );
+    const cached = this.getChunkRow(row.id, canonicalChunkX, canonicalChunkZ);
+
+    if (cached) {
+      return cached;
+    }
+
+    const generated = buildGeneratedMapChunk(
+      {
+        chunkSizeTiles: row.chunkSizeTiles,
+        generator: row.generator as MapGenerator,
+        heightTiles: row.heightTiles,
+        id: row.id,
+        metersPerTile: row.metersPerTile,
+        seed: row.seed,
+        widthTiles: row.widthTiles
+      },
+      requestedChunkX,
+      requestedChunkZ
+    );
+
+    const encodedHeights = encodeFloat32Heights(generated.heights);
+
+    this.db
+      .prepare(`
+        INSERT OR IGNORE INTO map_chunks (
+          map_id, chunk_x, chunk_z,
+          origin_tile_x, origin_tile_z,
+          tile_width, tile_height,
+          samples_wide, samples_high, heights
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        row.id,
+        generated.chunkX,
+        generated.chunkZ,
+        generated.originTileX,
+        generated.originTileZ,
+        generated.tileWidth,
+        generated.tileHeight,
+        generated.samplesWide,
+        generated.samplesHigh,
+        encodedHeights
+      );
+
+    return {
+      chunkX: generated.chunkX,
+      chunkZ: generated.chunkZ,
+      heights: encodedHeights,
+      mapId: row.id,
+      originTileX: generated.originTileX,
+      originTileZ: generated.originTileZ,
+      samplesHigh: generated.samplesHigh,
+      samplesWide: generated.samplesWide,
+      tileHeight: generated.tileHeight,
+      tileWidth: generated.tileWidth
+    };
+  }
+
+  private resolveChunkRow(mapId: string, chunkX: number, chunkZ: number) {
+    const row = this.findMapRow(mapId);
+
+    if (!row) {
+      return null;
+    }
+
+    if (row.kind === 'wrapped-classic') {
+      return this.ensureWrappedClassicChunkRow(row, chunkX, chunkZ);
+    }
+
+    return this.getChunkRow(mapId, chunkX, chunkZ);
+  }
+
   getMapChunk(mapId: string, chunkX: number, chunkZ: number): MapChunk | null {
-    const row = this.getChunkRow(mapId, chunkX, chunkZ);
+    const row = this.resolveChunkRow(mapId, chunkX, chunkZ);
 
     if (!row) {
       return null;
@@ -313,7 +408,7 @@ export class MapRepository {
   }
 
   getMapChunkBinary(mapId: string, chunkX: number, chunkZ: number) {
-    const row = this.getChunkRow(mapId, chunkX, chunkZ);
+    const row = this.resolveChunkRow(mapId, chunkX, chunkZ);
 
     if (!row) {
       return null;

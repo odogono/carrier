@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient } from '@tanstack/react-query';
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
@@ -13,7 +13,6 @@ const ReactQueryDevtoolsProduction = React.lazy(() =>
     }),
   ),
 );
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -34,9 +33,12 @@ const localStoragePersister = createAsyncStoragePersister({
 });
 
 const persistOptions = {
-  buster: 'carrier-admin-2026-03-08',
+  buster: 'carrier-admin-2026-03-17-phase2',
   dehydrateOptions: {
-    shouldDehydrateQuery: (query: { queryKey: readonly unknown[]; state: { status: string } }) => {
+    shouldDehydrateQuery: (query: {
+      queryKey: readonly unknown[];
+      state: { status: string };
+    }) => {
       if (query.queryKey[0] === 'map-chunk') return false;
       return query.state.status === 'success';
     },

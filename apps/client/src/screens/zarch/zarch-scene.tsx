@@ -31,6 +31,7 @@ import type {
   ZarchInputState,
   ZarchRuntimeState
 } from './use-zarch-runtime';
+import { wrapWorldCoordinate } from './zarch-minimap';
 
 type TileMesh = Mesh<BufferGeometry, MeshLambertMaterial>;
 
@@ -324,14 +325,18 @@ export const ZarchScene = ({
     runtime.velZ -= runtime.velZ * 2.5 * dt;
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
-    if (terrain.widthTiles !== null) {
+    if (terrain.widthTiles !== null && terrain.wrapX) {
+      runtime.camX = wrapWorldCoordinate(runtime.camX, terrain.widthTiles * TILE);
+    } else if (terrain.widthTiles !== null) {
       runtime.camX = MathUtils.clamp(
         runtime.camX,
         0,
         Math.max((terrain.widthTiles - 1) * TILE, 0)
       );
     }
-    if (terrain.heightTiles !== null) {
+    if (terrain.heightTiles !== null && terrain.wrapZ) {
+      runtime.camZ = wrapWorldCoordinate(runtime.camZ, terrain.heightTiles * TILE);
+    } else if (terrain.heightTiles !== null) {
       runtime.camZ = MathUtils.clamp(
         runtime.camZ,
         0,

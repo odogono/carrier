@@ -69,6 +69,33 @@ type GeneratedHeightfield = {
   sampleWidth: number;
 };
 
+type HeightSampler = (sampleX: number, sampleZ: number) => number;
+
+type WrappedClassicMapSeed = {
+  chunkSizeTiles: number;
+  generator: MapGenerator;
+  heightTiles: number;
+  id: string;
+  metersPerTile: number;
+  seed: string;
+  widthTiles: number;
+};
+
+type Harmonic = {
+  amplitude: number;
+  freqX: number;
+  freqZ: number;
+  phaseX: number;
+  phaseZ: number;
+};
+
+type IslandAttractor = {
+  amplitude: number;
+  radius: number;
+  x: number;
+  z: number;
+};
+
 const xfnv1a = (input: string) => {
   let hash = 2_166_136_261;
 
@@ -100,20 +127,13 @@ const mulberry32 = (seed: number): RandomSource => {
 
 const createSeededRandom = (seed: string) => mulberry32(xfnv1a(seed)());
 
-const nextPowerOfTwo = (value: number) => {
-  let result = 1;
-
-  while (result < value) {
-    result <<= 1;
-  }
-
-  return result;
-};
-
 const sampleIndex = (x: number, z: number, sampleWidth: number) =>
   z * sampleWidth + x;
 
 const readHeight = (heights: Float32Array, index: number) => heights[index]!;
+
+const positiveModulo = (value: number, modulus: number) =>
+  ((value % modulus) + modulus) % modulus;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -126,292 +146,260 @@ const smoothstep = (edge0: number, edge1: number, value: number) => {
   return amount * amount * (3 - 2 * amount);
 };
 
-const coordNoise = (seed: string, x: number, z: number) => {
-  const random = createSeededRandom(`${seed}:${x}:${z}`);
-  return random() * 2 - 1;
-};
+const TAU = Math.PI * 2;
 
-const valueNoise = (seed: string, x: number, z: number, scale: number) => {
-  const scaledX = x / scale;
-  const scaledZ = z / scale;
-  const cellX = Math.floor(scaledX);
-  const cellZ = Math.floor(scaledZ);
-  const fracX = scaledX - cellX;
-  const fracZ = scaledZ - cellZ;
-  const fadeX = fracX * fracX * (3 - 2 * fracX);
-  const fadeZ = fracZ * fracZ * (3 - 2 * fracZ);
+const wrapSampleCoordinate = (coordinate: number, size: number) =>
+  size <= 0 ? 0 : positiveModulo(coordinate, size);
 
-  const top = lerp(
-    coordNoise(seed, cellX, cellZ),
-    coordNoise(seed, cellX + 1, cellZ),
-    fadeX
-  );
-  const bottom = lerp(
-    coordNoise(seed, cellX, cellZ + 1),
-    coordNoise(seed, cellX + 1, cellZ + 1),
-    fadeX
-  );
-
-  return lerp(top, bottom, fadeZ);
-};
-
-const fractalNoise = (
-  seed: string,
-  x: number,
-  z: number,
-  scales: readonly number[],
-  persistence: number
-) => {
-  let amplitude = 1;
-  let totalAmplitude = 0;
-  let total = 0;
-
-  for (const scale of scales) {
-    total += valueNoise(seed, x, z, scale) * amplitude;
-    totalAmplitude += amplitude;
-    amplitude *= persistence;
+const wrappedDelta = (from: number, to: number, size: number) => {
+  if (size <= 0) {
+    return from - to;
   }
 
-  return totalAmplitude === 0 ? 0 : total / totalAmplitude;
+  const delta = from - to;
+  const wrapped = positiveModulo(delta + size * 0.5, size) - size * 0.5;
+  return wrapped === -size * 0.5 ? size * 0.5 : wrapped;
 };
 
-const nthSortedValue = (values: Float32Array, ratio: number) => {
-  const sorted = Array.from(values).sort((left, right) => left - right);
-  const index = clamp(Math.floor((sorted.length - 1) * ratio), 0, sorted.length - 1);
-  return sorted[index]!;
+const normalizeCoordinate = (coordinate: number, size: number) =>
+  size <= 0 ? 0 : wrapSampleCoordinate(coordinate, size) / size;
+
+const createWrappedHarmonics = (
+  seed: string,
+  count: number,
+  minFrequency: number,
+  maxFrequency: number
+) => {
+  const random = createSeededRandom(seed);
+  const harmonics: Harmonic[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    harmonics.push({
+      amplitude: lerp(0.3, 1, Math.pow(0.58, index)) * lerp(0.75, 1.25, random()),
+      freqX: Math.max(minFrequency, Math.floor(lerp(minFrequency, maxFrequency + 1, random()))),
+      freqZ: Math.max(minFrequency, Math.floor(lerp(minFrequency, maxFrequency + 1, random()))),
+      phaseX: random() * TAU,
+      phaseZ: random() * TAU
+    });
+  }
+
+  return harmonics;
+};
+
+const sampleHarmonics = (
+  harmonics: readonly Harmonic[],
+  normalizedX: number,
+  normalizedZ: number
+) => {
+  let total = 0;
+  let amplitudeSum = 0;
+
+  for (const harmonic of harmonics) {
+    total +=
+      Math.sin(normalizedX * TAU * harmonic.freqX + harmonic.phaseX) *
+      Math.cos(normalizedZ * TAU * harmonic.freqZ + harmonic.phaseZ) *
+      harmonic.amplitude;
+    amplitudeSum += harmonic.amplitude;
+  }
+
+  return amplitudeSum === 0 ? 0 : total / amplitudeSum;
+};
+
+const buildHeightfield = (
+  widthTiles: number,
+  heightTiles: number,
+  sampleHeightAt: HeightSampler
+): GeneratedHeightfield => {
+  const sampleWidth = widthTiles + 1;
+  const sampleHeight = heightTiles + 1;
+  const heights = new Float32Array(sampleWidth * sampleHeight);
+
+  for (let z = 0; z < sampleHeight; z += 1) {
+    for (let x = 0; x < sampleWidth; x += 1) {
+      heights[sampleIndex(x, z, sampleWidth)] = sampleHeightAt(x, z);
+    }
+  }
+
+  return {
+    heights,
+    sampleHeight,
+    sampleWidth
+  };
+};
+
+const createDiamondSquareCompatibilitySampler = (
+  widthTiles: number,
+  heightTiles: number,
+  seed: string
+): HeightSampler => {
+  const baseHarmonics = createWrappedHarmonics(`${seed}:base`, 5, 1, 6);
+  const detailHarmonics = createWrappedHarmonics(`${seed}:detail`, 6, 4, 16);
+  const ridgeHarmonics = createWrappedHarmonics(`${seed}:ridge`, 3, 1, 4);
+
+  return (sampleX, sampleZ) => {
+    const normalizedX = normalizeCoordinate(sampleX, widthTiles);
+    const normalizedZ = normalizeCoordinate(sampleZ, heightTiles);
+    const base = sampleHarmonics(baseHarmonics, normalizedX, normalizedZ);
+    const detail = sampleHarmonics(detailHarmonics, normalizedX, normalizedZ);
+    const ridges = sampleHarmonics(ridgeHarmonics, normalizedX, normalizedZ);
+    const ridgeMask = 1 - Math.abs(ridges);
+
+    return (
+      base * INITIAL_HEIGHT_VARIATION * 0.72 +
+      detail * INITIAL_HEIGHT_VARIATION * 0.38 +
+      ridgeMask * INITIAL_HEIGHT_VARIATION * 0.3 +
+      HEIGHT_BIAS
+    );
+  };
+};
+
+const createIslandAttractors = (
+  seed: string,
+  widthTiles: number,
+  heightTiles: number
+) => {
+  const random = createSeededRandom(seed);
+  const maxDimension = Math.max(widthTiles, heightTiles, 1);
+  const major = Array.from({ length: 2 + Math.floor(random() * 3) }, () => ({
+    amplitude: lerp(0.75, 1.25, random()),
+    radius: lerp(maxDimension * 0.12, maxDimension * 0.22, random()),
+    x: random() * widthTiles,
+    z: random() * heightTiles
+  }));
+  const medium = Array.from({ length: 5 + Math.floor(random() * 5) }, () => ({
+    amplitude: lerp(0.22, 0.5, random()),
+    radius: lerp(maxDimension * 0.05, maxDimension * 0.11, random()),
+    x: random() * widthTiles,
+    z: random() * heightTiles
+  }));
+  const micro = Array.from({ length: 12 + Math.floor(random() * 8) }, () => ({
+    amplitude: lerp(0.05, 0.18, random()) * (random() > 0.35 ? 1 : -1),
+    radius: lerp(maxDimension * 0.018, maxDimension * 0.04, random()),
+    x: random() * widthTiles,
+    z: random() * heightTiles
+  }));
+
+  return {
+    major,
+    medium,
+    micro
+  };
+};
+
+const sampleAttractors = (
+  attractors: readonly IslandAttractor[],
+  sampleX: number,
+  sampleZ: number,
+  widthTiles: number,
+  heightTiles: number
+) => {
+  let total = 0;
+
+  for (const attractor of attractors) {
+    const dx = wrappedDelta(sampleX, attractor.x, widthTiles);
+    const dz = wrappedDelta(sampleZ, attractor.z, heightTiles);
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const influence = Math.max(0, 1 - distance / attractor.radius);
+    total += attractor.amplitude * influence * influence;
+  }
+
+  return total;
+};
+
+const createIslandSampler = (
+  widthTiles: number,
+  heightTiles: number,
+  seed: string
+): HeightSampler => {
+  const harmonics = createWrappedHarmonics(`${seed}:archipelago`, 5, 1, 8);
+  const breakup = createWrappedHarmonics(`${seed}:breakup`, 4, 6, 18);
+  const ridge = createWrappedHarmonics(`${seed}:ridge`, 3, 2, 6);
+  const attractors = createIslandAttractors(`${seed}:islands`, widthTiles, heightTiles);
+
+  return (sampleX, sampleZ) => {
+    const normalizedX = normalizeCoordinate(sampleX, widthTiles);
+    const normalizedZ = normalizeCoordinate(sampleZ, heightTiles);
+    const canonicalX = wrapSampleCoordinate(sampleX, widthTiles);
+    const canonicalZ = wrapSampleCoordinate(sampleZ, heightTiles);
+    const archipelagoNoise = sampleHarmonics(harmonics, normalizedX, normalizedZ);
+    const breakupNoise = sampleHarmonics(breakup, normalizedX, normalizedZ);
+    const ridgeNoise = 1 - Math.abs(sampleHarmonics(ridge, normalizedX, normalizedZ));
+    const major = sampleAttractors(
+      attractors.major,
+      canonicalX,
+      canonicalZ,
+      widthTiles,
+      heightTiles
+    );
+    const medium = sampleAttractors(
+      attractors.medium,
+      canonicalX,
+      canonicalZ,
+      widthTiles,
+      heightTiles
+    );
+    const micro = sampleAttractors(
+      attractors.micro,
+      canonicalX,
+      canonicalZ,
+      widthTiles,
+      heightTiles
+    );
+
+    const rawHeight =
+      -0.8 +
+      major * 0.95 +
+      medium * 0.55 +
+      micro +
+      archipelagoNoise * 0.24 +
+      breakupNoise * 0.12 +
+      ridgeNoise * 0.28;
+
+    return rawHeight * ISLAND_HEIGHT_SCALE + MAP_WATER_LEVEL;
+  };
+};
+
+const createWrappedHeightSampler = (
+  generator: MapGenerator,
+  widthTiles: number,
+  heightTiles: number,
+  seed: string
+) => {
+  if (generator === MAP_GENERATOR) {
+    return createDiamondSquareCompatibilitySampler(widthTiles, heightTiles, seed);
+  }
+
+  if (generator === MAP_GENERATOR_ISLANDS) {
+    return createIslandSampler(widthTiles, heightTiles, seed);
+  }
+
+  throw new Error(`Unsupported map generator: ${generator}`);
 };
 
 export const generateDiamondSquareHeightfield = (
   widthTiles: number,
   heightTiles: number,
   seed: string
-): GeneratedHeightfield => {
-  const squareTiles = nextPowerOfTwo(Math.max(widthTiles, heightTiles));
-  const squareSamples = squareTiles + 1;
-  const source = new Float32Array(squareSamples * squareSamples);
-  const random = createSeededRandom(seed);
-
-  source[sampleIndex(0, 0, squareSamples)] =
-    (random() - 0.5) * INITIAL_HEIGHT_VARIATION;
-  source[sampleIndex(squareTiles, 0, squareSamples)] =
-    (random() - 0.5) * INITIAL_HEIGHT_VARIATION;
-  source[sampleIndex(0, squareTiles, squareSamples)] =
-    (random() - 0.5) * INITIAL_HEIGHT_VARIATION;
-  source[sampleIndex(squareTiles, squareTiles, squareSamples)] =
-    (random() - 0.5) * INITIAL_HEIGHT_VARIATION;
-
-  let step = squareTiles;
-  let scale = INITIAL_SCALE;
-
-  while (step > 1) {
-    const halfStep = step >> 1;
-
-    for (let z = 0; z < squareTiles; z += step) {
-      for (let x = 0; x < squareTiles; x += step) {
-        const average =
-          (readHeight(source, sampleIndex(x, z, squareSamples)) +
-            readHeight(source, sampleIndex(x + step, z, squareSamples)) +
-            readHeight(source, sampleIndex(x, z + step, squareSamples)) +
-            readHeight(source, sampleIndex(x + step, z + step, squareSamples))) *
-          0.25;
-
-        source[sampleIndex(x + halfStep, z + halfStep, squareSamples)] =
-          average + (random() - 0.5) * scale;
-      }
-    }
-
-    for (let z = 0; z <= squareTiles; z += halfStep) {
-      for (let x = (z + halfStep) % step; x <= squareTiles; x += step) {
-        let sum = 0;
-        let count = 0;
-
-        if (z - halfStep >= 0) {
-          sum += readHeight(source, sampleIndex(x, z - halfStep, squareSamples));
-          count += 1;
-        }
-        if (z + halfStep <= squareTiles) {
-          sum += readHeight(source, sampleIndex(x, z + halfStep, squareSamples));
-          count += 1;
-        }
-        if (x - halfStep >= 0) {
-          sum += readHeight(source, sampleIndex(x - halfStep, z, squareSamples));
-          count += 1;
-        }
-        if (x + halfStep <= squareTiles) {
-          sum += readHeight(source, sampleIndex(x + halfStep, z, squareSamples));
-          count += 1;
-        }
-
-        source[sampleIndex(x, z, squareSamples)] =
-          sum / count + (random() - 0.5) * scale;
-      }
-    }
-
-    step = halfStep;
-    scale *= ROUGHNESS;
-  }
-
-  const sampleWidth = widthTiles + 1;
-  const sampleHeight = heightTiles + 1;
-  const heights = new Float32Array(sampleWidth * sampleHeight);
-
-  for (let z = 0; z < sampleHeight; z += 1) {
-    for (let x = 0; x < sampleWidth; x += 1) {
-      heights[sampleIndex(x, z, sampleWidth)] =
-        readHeight(source, sampleIndex(x, z, squareSamples)) + HEIGHT_BIAS;
-    }
-  }
-
-  return {
-    heights,
-    sampleHeight,
-    sampleWidth
-  };
-};
+): GeneratedHeightfield =>
+  buildHeightfield(
+    widthTiles,
+    heightTiles,
+    createDiamondSquareCompatibilitySampler(widthTiles, heightTiles, seed)
+  );
 
 export const generateIslandHeightfield = (
   widthTiles: number,
   heightTiles: number,
   seed: string
-): GeneratedHeightfield => {
-  const sampleWidth = widthTiles + 1;
-  const sampleHeight = heightTiles + 1;
-  const heights = new Float32Array(sampleWidth * sampleHeight);
-  const base = generateDiamondSquareHeightfield(widthTiles, heightTiles, `${seed}:base`);
-  const random = createSeededRandom(`${seed}:islands`);
-  const maxDimension = Math.max(widthTiles, heightTiles, 1);
-  const centerX = widthTiles * 0.5;
-  const centerZ = heightTiles * 0.5;
-
-  const landmassAttractors = Array.from({ length: 1 + Math.floor(random() * 3) }, () => ({
-    amplitude: lerp(0.9, 1.35, random()),
-    radius: lerp(maxDimension * 0.16, maxDimension * 0.28, random()),
-    x: lerp(widthTiles * 0.22, widthTiles * 0.78, random()),
-    z: lerp(heightTiles * 0.22, heightTiles * 0.78, random())
-  }));
-  const mediumAttractors = Array.from({ length: 5 + Math.floor(random() * 5) }, () => ({
-    amplitude: lerp(0.22, 0.55, random()),
-    radius: lerp(maxDimension * 0.05, maxDimension * 0.12, random()),
-    x: lerp(widthTiles * 0.12, widthTiles * 0.88, random()),
-    z: lerp(heightTiles * 0.12, heightTiles * 0.88, random())
-  }));
-  const microFeatures = Array.from({ length: 18 + Math.floor(random() * 12) }, () => ({
-    amplitude: lerp(0.08, 0.24, random()) * (random() > 0.42 ? 1 : -1),
-    radius: lerp(maxDimension * 0.018, maxDimension * 0.045, random()),
-    x: random() * widthTiles,
-    z: random() * heightTiles
-  }));
-  const ridgeAngle = random() * Math.PI;
-  const ridgeFrequency = lerp(1.7, 2.5, random());
-  const channelAngle = ridgeAngle + Math.PI * 0.5 + lerp(-0.2, 0.2, random());
-
-  for (let z = 0; z < sampleHeight; z += 1) {
-    const normalizedZ = heightTiles === 0 ? 0 : z / heightTiles;
-
-    for (let x = 0; x < sampleWidth; x += 1) {
-      const normalizedX = widthTiles === 0 ? 0 : x / widthTiles;
-      const dx = normalizedX - 0.5;
-      const dz = normalizedZ - 0.5;
-      const radialDistance = Math.sqrt(dx * dx + dz * dz) / 0.70710678118;
-      const coastalMask = 1 - smoothstep(0.34, 0.96, radialDistance);
-      const edgeSuppression = smoothstep(0.55, 1, radialDistance);
-
-      let attractorHeight = 0;
-
-      for (const attractor of landmassAttractors) {
-        const featureDx = x - attractor.x;
-        const featureDz = z - attractor.z;
-        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
-        const influence = Math.max(0, 1 - distance / attractor.radius);
-        attractorHeight += attractor.amplitude * influence * influence;
-      }
-
-      for (const attractor of mediumAttractors) {
-        const featureDx = x - attractor.x;
-        const featureDz = z - attractor.z;
-        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
-        const influence = Math.max(0, 1 - distance / attractor.radius);
-        attractorHeight += attractor.amplitude * influence * influence;
-      }
-
-      let microHeight = 0;
-
-      for (const feature of microFeatures) {
-        const featureDx = x - feature.x;
-        const featureDz = z - feature.z;
-        const distance = Math.sqrt(featureDx * featureDx + featureDz * featureDz);
-        const influence = Math.max(0, 1 - distance / feature.radius);
-        microHeight += feature.amplitude * influence * influence;
-      }
-
-      const baseHeight =
-        readHeight(base.heights, sampleIndex(x, z, sampleWidth)) / INITIAL_HEIGHT_VARIATION;
-      const continentalNoise = fractalNoise(
-        `${seed}:continental`,
-        x,
-        z,
-        [maxDimension * 0.22, maxDimension * 0.11, maxDimension * 0.055],
-        0.5
-      );
-      const archipelagoNoise = fractalNoise(
-        `${seed}:archipelago`,
-        x,
-        z,
-        [maxDimension * 0.1, maxDimension * 0.05, maxDimension * 0.025],
-        0.52
-      );
-      const breakupNoise = fractalNoise(
-        `${seed}:breakup`,
-        x,
-        z,
-        [maxDimension * 0.045, maxDimension * 0.022],
-        0.55
-      );
-
-      const ridgeAxis =
-        ((x - centerX) * Math.cos(ridgeAngle) + (z - centerZ) * Math.sin(ridgeAngle)) /
-        maxDimension;
-      const ridgeNoise = Math.sin((ridgeAxis + continentalNoise * 0.18) * Math.PI * ridgeFrequency);
-      const ridgeContribution = (1 - Math.abs(ridgeNoise)) * 0.32;
-
-      const channelAxis =
-        ((x - centerX) * Math.cos(channelAngle) + (z - centerZ) * Math.sin(channelAngle)) /
-        maxDimension;
-      const channelNoise =
-        Math.sin((channelAxis + archipelagoNoise * 0.3) * Math.PI * (ridgeFrequency + 0.65));
-      const channelContribution = -Math.max(0, 1 - Math.abs(channelNoise) * 1.35) * 0.34;
-
-      const rawHeight =
-        baseHeight * 0.32 +
-        coastalMask * 0.86 +
-        attractorHeight * 0.72 +
-        continentalNoise * 0.26 +
-        archipelagoNoise * 0.21 +
-        breakupNoise * 0.08 +
-        ridgeContribution +
-        channelContribution +
-        microHeight -
-        edgeSuppression * 1.08;
-
-      heights[sampleIndex(x, z, sampleWidth)] = rawHeight;
-    }
-  }
-
-  const seaLevelBaseline = nthSortedValue(heights, ISLAND_TARGET_WATER_RATIO);
-
-  for (let index = 0; index < heights.length; index += 1) {
-    heights[index] = (heights[index]! - seaLevelBaseline) * ISLAND_HEIGHT_SCALE + MAP_WATER_LEVEL;
-  }
-
-  return {
-    heights,
-    sampleHeight,
-    sampleWidth
-  };
-};
+): GeneratedHeightfield =>
+  buildHeightfield(
+    widthTiles,
+    heightTiles,
+    createIslandSampler(widthTiles, heightTiles, seed)
+  );
 
 const getChunkHeightSamples = (
-  heightfield: GeneratedHeightfield,
+  sampleHeightAt: HeightSampler,
   originTileX: number,
   originTileZ: number,
   tileWidth: number,
@@ -422,15 +410,11 @@ const getChunkHeightSamples = (
   const heights = new Float32Array(samplesWide * samplesHigh);
 
   for (let sampleZ = 0; sampleZ < samplesHigh; sampleZ += 1) {
-    const sourceZ = originTileZ + sampleZ;
-
     for (let sampleX = 0; sampleX < samplesWide; sampleX += 1) {
-      const sourceX = originTileX + sampleX;
-      heights[sampleIndex(sampleX, sampleZ, samplesWide)] =
-        readHeight(
-          heightfield.heights,
-          sampleIndex(sourceX, sourceZ, heightfield.sampleWidth)
-        );
+      heights[sampleIndex(sampleX, sampleZ, samplesWide)] = sampleHeightAt(
+        originTileX + sampleX,
+        originTileZ + sampleZ
+      );
     }
   }
 
@@ -445,53 +429,74 @@ export type GeneratedMapChunkRecord = Omit<MapChunk, 'heights' | 'layers'> & {
   heights: Float32Array;
 };
 
+const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
+  Math.max(Math.ceil(tileCount / chunkSizeTiles), 1);
+
+const toCanonicalChunkCoordinate = (chunk: number, chunkCount: number) =>
+  positiveModulo(chunk, chunkCount);
+
+const buildChunkFromSampler = (
+  map: WrappedClassicMapSeed,
+  sampleHeightAt: HeightSampler,
+  chunkX: number,
+  chunkZ: number
+): GeneratedMapChunkRecord => {
+  const chunkCountX = getChunkCount(map.widthTiles, map.chunkSizeTiles);
+  const chunkCountZ = getChunkCount(map.heightTiles, map.chunkSizeTiles);
+  const canonicalChunkX = toCanonicalChunkCoordinate(chunkX, chunkCountX);
+  const canonicalChunkZ = toCanonicalChunkCoordinate(chunkZ, chunkCountZ);
+  const originTileX = canonicalChunkX * map.chunkSizeTiles;
+  const originTileZ = canonicalChunkZ * map.chunkSizeTiles;
+  const tileWidth = Math.min(map.chunkSizeTiles, map.widthTiles - originTileX);
+  const tileHeight = Math.min(map.chunkSizeTiles, map.heightTiles - originTileZ);
+  const { heights, samplesHigh, samplesWide } = getChunkHeightSamples(
+    sampleHeightAt,
+    originTileX,
+    originTileZ,
+    tileWidth,
+    tileHeight
+  );
+
+  return {
+    chunkX: canonicalChunkX,
+    chunkZ: canonicalChunkZ,
+    mapId: map.id,
+    originTileX,
+    originTileZ,
+    samplesHigh,
+    samplesWide,
+    tileHeight,
+    tileWidth,
+    heights
+  };
+};
+
+export const buildGeneratedMapChunk = (
+  map: WrappedClassicMapSeed,
+  chunkX: number,
+  chunkZ: number
+): GeneratedMapChunkRecord =>
+  buildChunkFromSampler(
+    map,
+    createWrappedHeightSampler(map.generator, map.widthTiles, map.heightTiles, map.seed),
+    chunkX,
+    chunkZ
+  );
+
 export const buildGeneratedMapChunks = (
   map: ChunkSeed
 ): GeneratedMapChunkRecord[] => {
-  const heightfield =
-    map.generator === MAP_GENERATOR
-      ? generateDiamondSquareHeightfield(map.widthTiles, map.heightTiles, map.seed)
-      : map.generator === MAP_GENERATOR_ISLANDS
-        ? generateIslandHeightfield(map.widthTiles, map.heightTiles, map.seed)
-        : (() => {
-            throw new Error(`Unsupported map generator: ${map.generator}`);
-          })();
+  const sampleHeightAt = createWrappedHeightSampler(
+    map.generator,
+    map.widthTiles,
+    map.heightTiles,
+    map.seed
+  );
   const chunks: GeneratedMapChunkRecord[] = [];
 
-  for (let originTileZ = 0; originTileZ < map.heightTiles; originTileZ += map.chunkSizeTiles) {
-    for (
-      let originTileX = 0;
-      originTileX < map.widthTiles;
-      originTileX += map.chunkSizeTiles
-    ) {
-      const tileWidth = Math.min(
-        map.chunkSizeTiles,
-        map.widthTiles - originTileX
-      );
-      const tileHeight = Math.min(
-        map.chunkSizeTiles,
-        map.heightTiles - originTileZ
-      );
-      const { heights, samplesHigh, samplesWide } = getChunkHeightSamples(
-        heightfield,
-        originTileX,
-        originTileZ,
-        tileWidth,
-        tileHeight
-      );
-
-      chunks.push({
-        chunkX: Math.floor(originTileX / map.chunkSizeTiles),
-        chunkZ: Math.floor(originTileZ / map.chunkSizeTiles),
-        mapId: map.id,
-        originTileX,
-        originTileZ,
-        samplesHigh,
-        samplesWide,
-        tileHeight,
-        tileWidth,
-        heights
-      });
+  for (let chunkZ = 0; chunkZ < getChunkCount(map.heightTiles, map.chunkSizeTiles); chunkZ += 1) {
+    for (let chunkX = 0; chunkX < getChunkCount(map.widthTiles, map.chunkSizeTiles); chunkX += 1) {
+      chunks.push(buildChunkFromSampler(map, sampleHeightAt, chunkX, chunkZ));
     }
   }
 

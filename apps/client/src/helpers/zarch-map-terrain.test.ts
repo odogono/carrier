@@ -34,6 +34,20 @@ const map: MapMetadata = {
   updatedAt: '2026-03-06T00:00:00.000Z'
 };
 
+const wrappedMap: MapMetadata = {
+  ...map,
+  id: 'map-wrap',
+  extent: {
+    kind: 'finite',
+    widthMeters: 640,
+    heightMeters: 640,
+    widthTiles: 64,
+    heightTiles: 64,
+    wrapX: true,
+    wrapZ: true
+  }
+};
+
 const chunk00: RuntimeMapChunk = {
   chunkX: 0,
   chunkZ: 0,
@@ -51,6 +65,32 @@ const chunk00: RuntimeMapChunk = {
   samplesWide: 33,
   tileHeight: 32,
   tileWidth: 32
+};
+
+const chunk10: RuntimeMapChunk = {
+  ...chunk00,
+  chunkX: 1,
+  heights: Float32Array.from({ length: 33 * 33 }, (_, index) => 10_000 + index),
+  mapId: wrappedMap.id,
+  originTileX: 32
+};
+
+const chunk01: RuntimeMapChunk = {
+  ...chunk00,
+  chunkZ: 1,
+  heights: Float32Array.from({ length: 33 * 33 }, (_, index) => 20_000 + index),
+  mapId: wrappedMap.id,
+  originTileZ: 32
+};
+
+const chunk11: RuntimeMapChunk = {
+  ...chunk00,
+  chunkX: 1,
+  chunkZ: 1,
+  heights: Float32Array.from({ length: 33 * 33 }, (_, index) => 30_000 + index),
+  mapId: wrappedMap.id,
+  originTileX: 32,
+  originTileZ: 32
 };
 
 describe('server-backed zarch terrain', () => {
@@ -116,5 +156,44 @@ describe('server-backed zarch terrain', () => {
 
     expect(terrain.isTileLoaded(0, 0)).toBe(true);
     expect(terrain.isTileLoaded(40, 40)).toBe(false);
+  });
+
+  test('wraps sample and tile lookup for wrapped-classic maps', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 0, 0), {
+      ...chunk00,
+      mapId: wrappedMap.id
+    });
+    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 1, 0), chunk10);
+    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 0, 1), chunk01);
+    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 1, 1), chunk11);
+
+    const terrain = createServerMapTerrain({
+      map: wrappedMap,
+      prefetchChunk: () => {},
+      queryClient
+    });
+
+    expect(terrain.containsTile(-1, 0)).toBe(true);
+    expect(terrain.sampleHeight(-1, 0)).toBe(chunk10.heights[31]);
+    expect(terrain.sampleHeight(64, 0)).toBe(chunk00.heights[0]);
+    expect(terrain.isTileLoaded(-1, -1)).toBe(true);
+    expect(terrain.wrapX).toBe(true);
+    expect(terrain.wrapZ).toBe(true);
+  });
+
+  test('deduplicates wrapped chunk prefetches onto canonical chunk coordinates', () => {
+    const requested: string[] = [];
+    const queryClient = new QueryClient();
+
+    const terrain = createServerMapTerrain({
+      map: wrappedMap,
+      prefetchChunk: (chunkX, chunkZ) => requested.push(`${chunkX},${chunkZ}`),
+      queryClient
+    });
+
+    terrain.requestVisibleChunks(0, 0, 40);
+
+    expect(requested.sort()).toEqual(['0,0', '0,1', '1,0', '1,1']);
   });
 });
