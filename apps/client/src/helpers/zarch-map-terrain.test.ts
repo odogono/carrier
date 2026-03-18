@@ -28,6 +28,7 @@ const map: MapMetadata = {
     metersPerTile: 10,
     chunkSizeTiles: 32
   },
+  revision: 0,
   generator: 'diamond-square',
   seed: 'map-seed',
   createdAt: '2026-03-06T00:00:00.000Z',

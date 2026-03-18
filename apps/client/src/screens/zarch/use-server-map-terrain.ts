@@ -37,6 +37,7 @@ export const useServerMapTerrain = () => {
     gcTime: MAP_METADATA_GC_MS,
     queryFn: () => client.maps.list({}),
     queryKey: getMapListQueryKey(),
+    refetchOnMount: 'always',
     staleTime: MAP_METADATA_CACHE_MS
   });
 
@@ -53,6 +54,7 @@ export const useServerMapTerrain = () => {
     gcTime: MAP_METADATA_GC_MS,
     queryFn: () => client.maps.find({ id: selectedMapId! }),
     queryKey: getMapMetadataQueryKey(selectedMapId ?? ''),
+    refetchOnMount: 'always',
     staleTime: MAP_METADATA_CACHE_MS
   });
 

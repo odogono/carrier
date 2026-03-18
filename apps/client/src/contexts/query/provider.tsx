@@ -35,7 +35,7 @@ const localStoragePersister = createAsyncStoragePersister({
 });
 
 const persistOptions = {
-  buster: 'carrier-client-2026-03-17-phase2',
+  buster: 'carrier-client-2026-03-18-phase4',
   dehydrateOptions: {
     shouldDehydrateQuery: (query: {
       queryKey: readonly unknown[];
