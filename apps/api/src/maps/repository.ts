@@ -941,6 +941,7 @@ export class MapRepository {
       clearCompiledVectorTerrainArtifact(options.mapId, previousTerrainRevision);
 
       return {
+        dirtyBounds,
         mapRevision: updatedMapRow.revision,
         result
       };
@@ -1284,7 +1285,7 @@ export class MapRepository {
     params: SourcePolygonParams;
     vertices: WorldPoint[];
   }) {
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1300,6 +1301,7 @@ export class MapRepository {
     );
 
     return {
+      dirtyBounds: dirtyBounds ?? result.bbox,
       mapRevision,
       polygon: result
     };
@@ -1319,7 +1321,7 @@ export class MapRepository {
       );
     }
 
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1367,6 +1369,7 @@ export class MapRepository {
     );
 
     return {
+      dirtyBounds: dirtyBounds ?? result.bbox,
       mapRevision,
       polygon: result
     };
@@ -1377,7 +1380,7 @@ export class MapRepository {
     id: string;
     mapId: string;
   }) {
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1403,6 +1406,7 @@ export class MapRepository {
     );
 
     return {
+      dirtyBounds: dirtyBounds ?? result.bbox,
       mapRevision,
       polygon: result
     };
@@ -1416,7 +1420,7 @@ export class MapRepository {
   createControlPoint(input: Omit<ControlPoint, 'createdAt' | 'id' | 'updatedAt'> & {
     expectedRevision: number;
   }) {
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1455,6 +1459,7 @@ export class MapRepository {
 
     return {
       controlPoint: result,
+      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -1484,7 +1489,7 @@ export class MapRepository {
       );
     }
 
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1531,6 +1536,7 @@ export class MapRepository {
 
     return {
       controlPoint: result,
+      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -1540,7 +1546,7 @@ export class MapRepository {
     id: string;
     mapId: string;
   }) {
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1561,6 +1567,7 @@ export class MapRepository {
 
     return {
       controlPoint: result,
+      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -1629,7 +1636,7 @@ export class MapRepository {
     operation: BooleanOperation;
     polygonIds: string[];
   }): ApplyBooleanOutput {
-    const { mapRevision, result } = this.performTerrainMutation(
+    const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
         mapId: input.mapId
@@ -1693,6 +1700,17 @@ export class MapRepository {
 
     return {
       createdPolygons: result.createdPolygons,
+      dirtyBounds:
+        dirtyBounds ??
+        result.createdPolygons
+          .map(polygon => polygon.bbox)
+          .reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null) ??
+        {
+          maxX: 0,
+          maxZ: 0,
+          minX: 0,
+          minZ: 0
+        },
       mapRevision,
       retiredPolygonIds: result.retiredPolygonIds
     };

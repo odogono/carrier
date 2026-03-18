@@ -118,6 +118,7 @@ export const CreateSourcePolygonInput = z.object({
 export type CreateSourcePolygonInput = z.infer<typeof CreateSourcePolygonInput>;
 
 export const CreateSourcePolygonOutput = z.object({
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
   polygon: SourcePolygonSchema
 });
@@ -133,6 +134,7 @@ export const UpdateSourcePolygonInput = z.object({
 export type UpdateSourcePolygonInput = z.infer<typeof UpdateSourcePolygonInput>;
 
 export const UpdateSourcePolygonOutput = z.object({
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
   polygon: SourcePolygonSchema
 });
@@ -146,6 +148,7 @@ export const DeleteSourcePolygonInput = z.object({
 export type DeleteSourcePolygonInput = z.infer<typeof DeleteSourcePolygonInput>;
 
 export const DeleteSourcePolygonOutput = z.object({
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
   polygon: SourcePolygonSchema
 });
@@ -174,6 +177,7 @@ export type CreateControlPointInput = z.infer<typeof CreateControlPointInput>;
 
 export const CreateControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative()
 });
 export type CreateControlPointOutput = z.infer<typeof CreateControlPointOutput>;
@@ -193,6 +197,7 @@ export type UpdateControlPointInput = z.infer<typeof UpdateControlPointInput>;
 
 export const UpdateControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative()
 });
 export type UpdateControlPointOutput = z.infer<typeof UpdateControlPointOutput>;
@@ -206,6 +211,7 @@ export type DeleteControlPointInput = z.infer<typeof DeleteControlPointInput>;
 
 export const DeleteControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative()
 });
 export type DeleteControlPointOutput = z.infer<typeof DeleteControlPointOutput>;
@@ -260,6 +266,7 @@ export type ApplyBooleanInput = z.infer<typeof ApplyBooleanInput>;
 
 export const ApplyBooleanOutput = z.object({
   createdPolygons: z.array(SourcePolygonSchema),
+  dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
   retiredPolygonIds: z.array(z.string().min(1))
 });

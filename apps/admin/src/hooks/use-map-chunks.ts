@@ -10,7 +10,11 @@ import type { ViewportChunkRange } from "./use-map-viewport";
 const CHUNK_STALE_MS = 60_000;
 const CHUNK_GC_MS = 600_000;
 
-export const useMapChunks = (mapId: string, range: ViewportChunkRange) => {
+export const useMapChunks = (
+  mapId: string,
+  range: ViewportChunkRange,
+  enabled = true,
+) => {
   const chunkCoords = useMemo(() => {
     const coords: Array<{ chunkX: number; chunkZ: number }> = [];
 
@@ -25,6 +29,7 @@ export const useMapChunks = (mapId: string, range: ViewportChunkRange) => {
 
   const queries = useQueries({
     queries: chunkCoords.map(({ chunkX, chunkZ }) => ({
+      enabled,
       gcTime: CHUNK_GC_MS,
       queryFn: async () =>
         decodeMapChunkBinary(

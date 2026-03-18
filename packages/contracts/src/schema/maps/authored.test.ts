@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  ApplyBooleanOutput,
   ApplyBooleanInput,
+  CreateControlPointOutput,
   CreateControlPointInput,
+  CreateSourcePolygonOutput,
   CreateSourcePolygonInput,
   MapMetadataSchema,
   MapOverviewSchema
@@ -98,5 +101,68 @@ describe('authored map schemas', () => {
         revision: 0
       }).bounds
     ).toBeNull();
+  });
+
+  test('validates terrain mutation outputs with dirty bounds', () => {
+    const dirtyBounds = {
+      maxX: 100,
+      maxZ: 120,
+      minX: -40,
+      minZ: -60
+    };
+
+    expect(
+      CreateSourcePolygonOutput.parse({
+        dirtyBounds,
+        mapRevision: 1,
+        polygon: {
+          bbox: dirtyBounds,
+          createdAt: new Date().toISOString(),
+          id: 'polygon-1',
+          mapId: 'map-1',
+          params: {
+            maxDisplacementMeters: 12,
+            noiseScaleMeters: 64,
+            roughness: 0.5
+          },
+          retiredAt: null,
+          status: 'active',
+          updatedAt: new Date().toISOString(),
+          vertices: [
+            { x: -40, z: -60 },
+            { x: 100, z: -60 },
+            { x: 100, z: 120 }
+          ]
+        }
+      }).dirtyBounds
+    ).toEqual(dirtyBounds);
+
+    expect(
+      CreateControlPointOutput.parse({
+        controlPoint: {
+          createdAt: new Date().toISOString(),
+          elevationMeters: 42,
+          id: 'control-1',
+          influenceMeters: 80,
+          mapId: 'map-1',
+          strength: 1,
+          type: 'plain',
+          updatedAt: new Date().toISOString(),
+          x: 12,
+          z: -8
+        },
+        dirtyBounds,
+        mapRevision: 2
+      }).dirtyBounds
+    ).toEqual(dirtyBounds);
+
+    expect(
+      ApplyBooleanOutput.parse({
+        createdPolygons: [],
+        dirtyBounds,
+        mapRevision: 3,
+        retiredPolygonIds: ['polygon-1']
+      }).dirtyBounds
+    ).toEqual(dirtyBounds);
   });
 });

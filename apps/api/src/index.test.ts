@@ -214,6 +214,12 @@ describe('API server map routes', () => {
     );
     const polygonPayload = polygonResponse.json as Record<string, unknown>;
     expect(polygonPayload.mapRevision).toBe(1);
+    expect(polygonPayload.dirtyBounds).toEqual({
+      maxX: 200,
+      maxZ: 200,
+      minX: 0,
+      minZ: 0
+    });
 
     const staleControlResponse = await request(
       'POST',
@@ -247,6 +253,12 @@ describe('API server map routes', () => {
     );
     const controlPayload = controlResponse.json as Record<string, unknown>;
     expect(controlPayload.mapRevision).toBe(2);
+    expect(controlPayload.dirtyBounds).toEqual({
+      maxX: 220,
+      maxZ: 220,
+      minX: -20,
+      minZ: -20
+    });
 
     const overviewResponse = await request(
       'GET',

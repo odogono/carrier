@@ -125,6 +125,13 @@ export function MapDetailPage() {
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
         </Button>
+        {map.kind === 'infinite-vector' && (
+          <Link to="/maps/$id/editor" params={{ id }}>
+            <Button size="sm" variant="outline">
+              Open Editor
+            </Button>
+          </Link>
+        )}
       </div>
 
       <Card>

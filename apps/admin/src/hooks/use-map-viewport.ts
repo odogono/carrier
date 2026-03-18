@@ -1,6 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 
-import { isFiniteMap, type MapMetadata } from "carrier-contracts/types";
+import {
+  isFiniteMap,
+  type MapMetadata,
+  type WorldBounds,
+  type WorldPoint,
+} from "carrier-contracts/types";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 32;
@@ -20,7 +25,72 @@ export type ViewportChunkRange = {
   minChunkZ: number;
 };
 
+export type TileBounds = {
+  maxTileX: number;
+  maxTileZ: number;
+  minTileX: number;
+  minTileZ: number;
+};
+
 const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
+
+export const worldToTilePoint = (
+  map: MapMetadata,
+  point: Pick<WorldPoint, "x" | "z">,
+): WorldPoint => ({
+  x: point.x / map.resolution.metersPerTile,
+  z: point.z / map.resolution.metersPerTile,
+});
+
+export const tileToWorldPoint = (
+  map: MapMetadata,
+  point: Pick<WorldPoint, "x" | "z">,
+): WorldPoint => ({
+  x: point.x * map.resolution.metersPerTile,
+  z: point.z * map.resolution.metersPerTile,
+});
+
+export const worldBoundsToTileBounds = (
+  map: MapMetadata,
+  bounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ">,
+): TileBounds => ({
+  maxTileX: bounds.maxX / map.resolution.metersPerTile,
+  maxTileZ: bounds.maxZ / map.resolution.metersPerTile,
+  minTileX: bounds.minX / map.resolution.metersPerTile,
+  minTileZ: bounds.minZ / map.resolution.metersPerTile,
+});
+
+export const tileBoundsToWorldBounds = (
+  map: MapMetadata,
+  bounds: TileBounds,
+): WorldBounds => ({
+  maxX: bounds.maxTileX * map.resolution.metersPerTile,
+  maxZ: bounds.maxTileZ * map.resolution.metersPerTile,
+  minX: bounds.minTileX * map.resolution.metersPerTile,
+  minZ: bounds.minTileZ * map.resolution.metersPerTile,
+});
+
+export const screenToTilePoint = (
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+  screenX: number,
+  screenY: number,
+): WorldPoint => ({
+  x: viewport.centerTileX + (screenX - canvasWidth / 2) / viewport.zoom,
+  z: viewport.centerTileZ + (screenY - canvasHeight / 2) / viewport.zoom,
+});
+
+export const tileToScreenPoint = (
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+  tileX: number,
+  tileZ: number,
+): WorldPoint => ({
+  x: canvasWidth / 2 + (tileX - viewport.centerTileX) * viewport.zoom,
+  z: canvasHeight / 2 + (tileZ - viewport.centerTileZ) * viewport.zoom,
+});
 
 const clampCenter = (
   centerX: number,
@@ -35,6 +105,32 @@ const clampCenter = (
     Math.max(0, Math.min(map.extent.heightTiles, centerZ)),
   ];
 };
+
+export const getViewportTileBounds = (
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): TileBounds => {
+  const halfW = canvasWidth / viewport.zoom / 2;
+  const halfH = canvasHeight / viewport.zoom / 2;
+
+  return {
+    maxTileX: viewport.centerTileX + halfW,
+    maxTileZ: viewport.centerTileZ + halfH,
+    minTileX: viewport.centerTileX - halfW,
+    minTileZ: viewport.centerTileZ - halfH,
+  };
+};
+
+export const getViewportWorldBounds = (
+  map: MapMetadata,
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): WorldBounds => tileBoundsToWorldBounds(
+  map,
+  getViewportTileBounds(viewport, canvasWidth, canvasHeight),
+);
 
 export const getVisibleChunkRange = (
   viewport: Viewport,
@@ -124,6 +220,43 @@ const computeFitViewport = (
   };
 };
 
+export const fitViewportToTileBounds = (
+  map: MapMetadata,
+  canvasWidth: number,
+  canvasHeight: number,
+  bounds: TileBounds,
+  paddingTiles = 2,
+): Viewport => {
+  if (canvasWidth <= 0 || canvasHeight <= 0) {
+    return computeFitViewport(map, canvasWidth, canvasHeight);
+  }
+
+  const width = Math.max(bounds.maxTileX - bounds.minTileX, 1);
+  const height = Math.max(bounds.maxTileZ - bounds.minTileZ, 1);
+  const paddedWidth = width + paddingTiles * 2;
+  const paddedHeight = height + paddingTiles * 2;
+
+  return {
+    centerTileX: (bounds.minTileX + bounds.maxTileX) / 2,
+    centerTileZ: (bounds.minTileZ + bounds.maxTileZ) / 2,
+    zoom: clampZoom(Math.min(canvasWidth / paddedWidth, canvasHeight / paddedHeight)),
+  };
+};
+
+export const fitViewportToWorldBounds = (
+  map: MapMetadata,
+  canvasWidth: number,
+  canvasHeight: number,
+  bounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ">,
+  paddingTiles = 2,
+): Viewport => fitViewportToTileBounds(
+  map,
+  canvasWidth,
+  canvasHeight,
+  worldBoundsToTileBounds(map, bounds),
+  paddingTiles,
+);
+
 export const useMapViewport = (
   map: MapMetadata,
   canvasWidth: number,
@@ -153,7 +286,7 @@ export const useMapViewport = (
     target.releasePointerCapture(pointerId);
   }, []);
 
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+  const onPointerDown = useCallback((e: React.PointerEvent<Element>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     setIsDragging(true);
     setViewport((v) => {
@@ -168,7 +301,7 @@ export const useMapViewport = (
   }, []);
 
   const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
+    (e: React.PointerEvent<Element>) => {
       const drag = dragRef.current;
       if (!drag) return;
 
@@ -183,21 +316,21 @@ export const useMapViewport = (
   );
 
   const onPointerUp = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
+    (e: React.PointerEvent<Element>) => {
       endDrag(e.currentTarget, e.pointerId);
     },
     [endDrag],
   );
 
   const onPointerCancel = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
+    (e: React.PointerEvent<Element>) => {
       endDrag(e.currentTarget, e.pointerId);
     },
     [endDrag],
   );
 
   const onPointerLeave = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
+    (e: React.PointerEvent<Element>) => {
       if (!dragRef.current) return;
       endDrag(e.currentTarget, e.pointerId);
     },
@@ -205,7 +338,7 @@ export const useMapViewport = (
   );
 
   const onWheel = useCallback(
-    (e: React.WheelEvent<HTMLElement>) => {
+    (e: React.WheelEvent<Element>) => {
       e.preventDefault();
 
       const rect = e.currentTarget.getBoundingClientRect();
@@ -234,7 +367,7 @@ export const useMapViewport = (
   );
 
   const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLElement>) => {
+    (e: React.KeyboardEvent<Element>) => {
       const panAmount = () => {
         const tilesVisible = canvasWidth / viewport.zoom;
         return Math.max(1, tilesVisible * 0.25);
@@ -322,6 +455,30 @@ export const useMapViewport = (
     setViewport(computeFitViewport(map, canvasWidth, canvasHeight));
   }, [map, canvasWidth, canvasHeight]);
 
+  const fitToWorldBounds = useCallback(
+    (bounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ">) => {
+      if (canvasWidth <= 0 || canvasHeight <= 0) return;
+      setViewport(fitViewportToWorldBounds(map, canvasWidth, canvasHeight, bounds));
+    },
+    [canvasHeight, canvasWidth, map],
+  );
+
+  const recenterOnWorldPoint = useCallback(
+    (point: Pick<WorldPoint, "x" | "z">) => {
+      setViewport((v) => {
+        const tilePoint = worldToTilePoint(map, point);
+        const [centerTileX, centerTileZ] = clampCenter(tilePoint.x, tilePoint.z, map);
+
+        return {
+          ...v,
+          centerTileX,
+          centerTileZ,
+        };
+      });
+    },
+    [map],
+  );
+
   const zoomIn = useCallback(() => {
     setViewport((v) => ({ ...v, zoom: clampZoom(v.zoom * 1.3) }));
   }, []);
@@ -332,6 +489,7 @@ export const useMapViewport = (
 
   return {
     fitToView,
+    fitToWorldBounds,
     isDragging,
     onKeyDown,
     onPointerDown,
@@ -340,6 +498,8 @@ export const useMapViewport = (
     onPointerLeave,
     onPointerUp,
     onWheel,
+    recenterOnWorldPoint,
+    setViewport,
     viewport,
     zoomIn,
     zoomOut,
