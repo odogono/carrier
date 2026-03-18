@@ -79,10 +79,10 @@ describe('map repository', () => {
       });
       expect(createdPolygon.mapRevision).toBe(1);
       expect(createdPolygon.dirtyBounds).toEqual({
-        maxX: 240,
-        maxZ: 240,
-        minX: 40,
-        minZ: 40
+        maxX: 258,
+        maxZ: 258,
+        minX: 22,
+        minZ: 22
       });
 
       expect(() =>
@@ -110,10 +110,10 @@ describe('map repository', () => {
       });
       expect(createdControl.mapRevision).toBe(2);
       expect(createdControl.dirtyBounds).toEqual({
-        maxX: 240,
-        maxZ: 240,
-        minX: 0,
-        minZ: 0
+        maxX: 378,
+        maxZ: 378,
+        minX: -138,
+        minZ: -138
       });
 
       const terrainChunk = repository.getMapChunk(created.id, 0, 0);
@@ -132,10 +132,10 @@ describe('map repository', () => {
       });
       expect(updatedControl.mapRevision).toBe(3);
       expect(updatedControl.dirtyBounds).toEqual({
-        maxX: 280,
-        maxZ: 280,
-        minX: 0,
-        minZ: 0
+        maxX: 438,
+        maxZ: 438,
+        minX: -158,
+        minZ: -158
       });
       expect(getChunkCount(repository)).toBe(1);
 
@@ -162,10 +162,10 @@ describe('map repository', () => {
       expect(deletedPolygon.mapRevision).toBe(5);
       expect(deletedPolygon.polygon.status).toBe('retired');
       expect(deletedPolygon.dirtyBounds).toEqual({
-        maxX: 240,
-        maxZ: 240,
-        minX: 40,
-        minZ: 40
+        maxX: 380,
+        maxZ: 380,
+        minX: -100,
+        minZ: -100
       });
       expect(repository.listDerivedIslands(created.id)).toHaveLength(0);
     } finally {
@@ -205,10 +205,10 @@ describe('map repository', () => {
 
       expect(xorResult.createdPolygons).toHaveLength(2);
       expect(xorResult.dirtyBounds).toEqual({
-        maxX: 300,
-        maxZ: 180,
-        minX: 0,
-        minZ: 0
+        maxX: 318,
+        maxZ: 198,
+        minX: -18,
+        minZ: -18
       });
       expect(xorResult.retiredPolygonIds).toEqual([left.polygon.id, right.polygon.id]);
       expect(repository.listSourcePolygons(created.id, 'active')).toHaveLength(2);

@@ -37,6 +37,7 @@ export const useMapChunks = (
         ),
       queryKey: ["map-chunk", mapId, chunkX, chunkZ] as const,
       staleTime: CHUNK_STALE_MS,
+      structuralSharing: false,
     })),
   });
 

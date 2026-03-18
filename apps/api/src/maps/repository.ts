@@ -892,16 +892,26 @@ export class MapRepository {
     return maxDisplacement + maxInfluence;
   }
 
-  private invalidateChunks(mapId: string, dirtyBounds: WorldBounds | null) {
+  private getExpandedDirtyBounds(mapId: string, dirtyBounds: WorldBounds | null) {
     if (!dirtyBounds) {
-      return;
+      return null;
     }
 
     const mapRow = this.getMapRowOrThrow(mapId);
     const polygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
     const controlPoints = this.listControlPointRows(mapId).map(controlPointRowToModel);
     const expansion = this.computeInvalidationExpansion(polygons, controlPoints, dirtyBounds);
-    const expandedBounds = expandWorldBounds(dirtyBounds, expansion);
+    return expandWorldBounds(dirtyBounds, expansion);
+  }
+
+  private invalidateChunks(mapId: string, dirtyBounds: WorldBounds | null) {
+    const expandedBounds = this.getExpandedDirtyBounds(mapId, dirtyBounds);
+
+    if (!expandedBounds) {
+      return;
+    }
+
+    const mapRow = this.getMapRowOrThrow(mapId);
     const chunkWorldSize = mapRow.chunkSizeTiles * mapRow.metersPerTile;
     const minChunkX = Math.floor(expandedBounds.minX / chunkWorldSize);
     const maxChunkX = Math.floor(expandedBounds.maxX / chunkWorldSize);
@@ -935,13 +945,14 @@ export class MapRepository {
       const updatedMapRow = this.bumpMapRevisions(options.mapId, {
         terrainAffecting: true
       });
+      const expandedDirtyBounds = this.getExpandedDirtyBounds(options.mapId, dirtyBounds);
 
       this.rebuildDerivedIslands(options.mapId, now);
       this.invalidateChunks(options.mapId, dirtyBounds);
       clearCompiledVectorTerrainArtifact(options.mapId, previousTerrainRevision);
 
       return {
-        dirtyBounds,
+        dirtyBounds: expandedDirtyBounds,
         mapRevision: updatedMapRow.revision,
         result
       };

@@ -84,7 +84,7 @@ export const createServer = async () => {
       cors({
         allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
         credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         origin: [
           'http://localhost:5178',
           'http://localhost:5179',

@@ -4,13 +4,30 @@ import { tileColorRgb } from "@/lib/terrain-colors";
 
 type ChunkBitmapEntry = {
   bitmap: HTMLCanvasElement;
-  dataRef: RuntimeMapChunk;
 };
 
 const cache = new Map<string, ChunkBitmapEntry>();
 
-const cacheKey = (mapId: string, chunkX: number, chunkZ: number) =>
-  `${mapId}:${chunkX}:${chunkZ}`;
+const hashChunk = (chunk: RuntimeMapChunk) => {
+  let hash = 2166136261;
+
+  for (const height of chunk.heights) {
+    hash ^= Math.round(height * 100);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  if (chunk.materials) {
+    for (const material of chunk.materials) {
+      hash ^= Number(material) + 1;
+      hash = Math.imul(hash, 16777619);
+    }
+  }
+
+  return (hash >>> 0).toString(16);
+};
+
+const cacheKey = (chunk: RuntimeMapChunk) =>
+  `${chunk.mapId}:${chunk.chunkX}:${chunk.chunkZ}:${hashChunk(chunk)}`;
 
 const renderChunkToCanvas = (chunk: RuntimeMapChunk): HTMLCanvasElement => {
   const w = chunk.tileWidth;
@@ -47,15 +64,15 @@ const renderChunkToCanvas = (chunk: RuntimeMapChunk): HTMLCanvasElement => {
 };
 
 export const getChunkBitmap = (chunk: RuntimeMapChunk): HTMLCanvasElement => {
-  const key = cacheKey(chunk.mapId, chunk.chunkX, chunk.chunkZ);
+  const key = cacheKey(chunk);
   const existing = cache.get(key);
 
-  if (existing && existing.dataRef === chunk) {
+  if (existing) {
     return existing.bitmap;
   }
 
   const bitmap = renderChunkToCanvas(chunk);
-  cache.set(key, { bitmap, dataRef: chunk });
+  cache.set(key, { bitmap });
   return bitmap;
 };
 

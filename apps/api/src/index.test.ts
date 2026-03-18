@@ -215,10 +215,10 @@ describe('API server map routes', () => {
     const polygonPayload = polygonResponse.json as Record<string, unknown>;
     expect(polygonPayload.mapRevision).toBe(1);
     expect(polygonPayload.dirtyBounds).toEqual({
-      maxX: 200,
-      maxZ: 200,
-      minX: 0,
-      minZ: 0
+      maxX: 216,
+      maxZ: 216,
+      minX: -16,
+      minZ: -16
     });
 
     const staleControlResponse = await request(
@@ -254,10 +254,10 @@ describe('API server map routes', () => {
     const controlPayload = controlResponse.json as Record<string, unknown>;
     expect(controlPayload.mapRevision).toBe(2);
     expect(controlPayload.dirtyBounds).toEqual({
-      maxX: 220,
-      maxZ: 220,
-      minX: -20,
-      minZ: -20
+      maxX: 356,
+      maxZ: 356,
+      minX: -156,
+      minZ: -156
     });
 
     const overviewResponse = await request(
@@ -297,5 +297,25 @@ describe('API server map routes', () => {
     );
     const chunk = chunkResponse.json as Record<string, unknown>;
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+  });
+
+  test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {
+    const { app } = await createServer();
+    const response = await app.handle(
+      new Request('http://localhost/api/maps/test-map/polygons/test-polygon', {
+        headers: {
+          'Access-Control-Request-Headers': 'content-type',
+          'Access-Control-Request-Method': 'PATCH',
+          Origin: 'http://localhost:5179'
+        },
+        method: 'OPTIONS'
+      })
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe(
+      'http://localhost:5179'
+    );
+    expect(response.headers.get('access-control-allow-methods')).toContain('PATCH');
   });
 });
