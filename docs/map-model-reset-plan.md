@@ -176,6 +176,8 @@ Exit criteria:
 
 ### Phase 2: `wrapped-classic`
 
+Status: Complete
+
 Goal: deliver the Zarch-like wrapped world as the first complete new map variant.
 
 - Add `wrapped-classic` map creation and metadata handling

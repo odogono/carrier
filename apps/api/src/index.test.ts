@@ -184,4 +184,106 @@ describe('API server map routes', () => {
     expect(chunk.heights.length).toBe(33 * 33);
     expect(chunk.materials?.length).toBe(32 * 32);
   });
+
+  test('supports infinite-vector authored routes through the public API', async () => {
+    const createdResponse = await request('POST', '/api/maps', {
+      kind: 'infinite-vector',
+      name: 'Authoring map',
+      seed: 'authoring-seed'
+    });
+    const created = createdResponse.json as Record<string, unknown>;
+
+    const polygonResponse = await request(
+      'POST',
+      `/api/maps/${created.id as string}/polygons`,
+      {
+        expectedRevision: 0,
+        mapId: created.id,
+        params: {
+          maxDisplacementMeters: 16,
+          noiseScaleMeters: 96,
+          roughness: 0.6
+        },
+        vertices: [
+          { x: 0, z: 0 },
+          { x: 200, z: 0 },
+          { x: 200, z: 200 },
+          { x: 0, z: 200 }
+        ]
+      }
+    );
+    const polygonPayload = polygonResponse.json as Record<string, unknown>;
+    expect(polygonPayload.mapRevision).toBe(1);
+
+    const staleControlResponse = await request(
+      'POST',
+      `/api/maps/${created.id as string}/controls`,
+      {
+        elevationMeters: 90,
+        expectedRevision: 0,
+        influenceMeters: 120,
+        mapId: created.id,
+        strength: 1,
+        type: 'peak',
+        x: 100,
+        z: 100
+      }
+    );
+    expect(staleControlResponse.response.status).toBe(409);
+
+    const controlResponse = await request(
+      'POST',
+      `/api/maps/${created.id as string}/controls`,
+      {
+        elevationMeters: 90,
+        expectedRevision: 1,
+        influenceMeters: 120,
+        mapId: created.id,
+        strength: 1,
+        type: 'peak',
+        x: 100,
+        z: 100
+      }
+    );
+    const controlPayload = controlResponse.json as Record<string, unknown>;
+    expect(controlPayload.mapRevision).toBe(2);
+
+    const overviewResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/overview`
+    );
+    const overview = overviewResponse.json as Record<string, unknown>;
+    const counts = overview.counts as Record<string, unknown>;
+    expect(counts.sourcePolygons).toBe(1);
+    expect(counts.controlPoints).toBe(1);
+    expect(counts.derivedIslands).toBe(1);
+
+    const islandsResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/islands`
+    );
+    const islands = islandsResponse.json as Array<Record<string, unknown>>;
+    expect(islands).toHaveLength(1);
+
+    const islandUpdateResponse = await request(
+      'PATCH',
+      `/api/maps/${created.id as string}/islands/${islands[0]?.id as string}`,
+      {
+        defaultFaction: 'blue',
+        expectedRevision: 2,
+        id: islands[0]?.id,
+        mapId: created.id,
+        name: 'Main Island'
+      }
+    );
+    const islandUpdate = islandUpdateResponse.json as Record<string, unknown>;
+    expect((islandUpdate.island as Record<string, unknown>).name).toBe('Main Island');
+
+    const chunkResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/chunks/0/0`
+    );
+    const chunk = chunkResponse.json as Record<string, unknown>;
+    expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+  });
 });

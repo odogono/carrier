@@ -4,6 +4,10 @@ import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
 import { oz } from '@orpc/zod';
 
+import { authoredMapsContract } from './authored';
+
+export * from './authored';
+
 export const MAP_GENERATOR = 'diamond-square' as const;
 export const MAP_GENERATOR_ISLANDS = 'island-clusters' as const;
 export const MAP_CHUNK_SIZE_TILES = 32;
@@ -108,6 +112,7 @@ export const MapMetadataSchema = z.object({
   kind: MapKind,
   extent: MapExtentSchema,
   resolution: MapResolutionSchema,
+  revision: z.number().int().nonnegative(),
   generator: MapGenerator.optional(),
   seed: z.string().min(1),
   createdAt: z.string(),
@@ -311,6 +316,7 @@ export const UpdateMapRoute: Route = {
 } as const;
 
 export const mapsContract = {
+  ...authoredMapsContract,
   create: oc.route(CreateMapRoute).input(CreateMapInput).output(CreateMapOutput),
   delete: oc.route(DeleteMapRoute).input(DeleteMapInput).output(DeleteMapOutput),
   find: oc.route(GetMapRoute).input(GetMapInput).output(GetMapOutput),

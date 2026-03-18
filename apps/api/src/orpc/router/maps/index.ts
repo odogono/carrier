@@ -18,6 +18,8 @@ import { ORPCError, os } from '@orpc/server';
 
 import { getMapRepository } from '@/maps/repository';
 
+import { authored } from './authored';
+
 const create = os
   .route(CreateMapRoute)
   .input(CreateMapInput)
@@ -125,6 +127,7 @@ const update = os
   });
 
 export const maps = {
+  ...authored,
   create,
   delete: remove,
   find,

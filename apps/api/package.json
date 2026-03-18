@@ -44,6 +44,7 @@
     "elysia": "^1.4.27",
     "odgn-query": "^0.3.1",
     "odgn-ts-helpers": "^0.2.0",
+    "polyclip-ts": "^0.16.8",
     "zod": "^4.3.6"
   }
 }
