@@ -9,7 +9,7 @@ import {
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 32;
-const DEFAULT_ZOOM = 4;
+export const DEFAULT_ZOOM = 4;
 const ZOOM_FACTOR = 1.15;
 
 export type Viewport = {
@@ -198,7 +198,7 @@ export const getVisibleChunkRange = (
   };
 };
 
-const computeFitViewport = (
+export const getDefaultViewport = (
   map: MapMetadata,
   canvasWidth: number,
   canvasHeight?: number,
@@ -228,7 +228,7 @@ export const fitViewportToTileBounds = (
   paddingTiles = 2,
 ): Viewport => {
   if (canvasWidth <= 0 || canvasHeight <= 0) {
-    return computeFitViewport(map, canvasWidth, canvasHeight);
+    return getDefaultViewport(map, canvasWidth, canvasHeight);
   }
 
   const width = Math.max(bounds.maxTileX - bounds.minTileX, 1);
@@ -263,7 +263,7 @@ export const useMapViewport = (
   canvasHeight: number,
 ) => {
   const [viewport, setViewport] = useState<Viewport>(() =>
-    computeFitViewport(map, canvasWidth),
+    getDefaultViewport(map, canvasWidth, canvasHeight),
   );
 
   const dragRef = useRef<{
@@ -442,7 +442,7 @@ export const useMapViewport = (
         case "Home":
         case "0": {
           e.preventDefault();
-          setViewport(computeFitViewport(map, canvasWidth));
+          setViewport(getDefaultViewport(map, canvasWidth, canvasHeight));
           break;
         }
       }
@@ -452,7 +452,7 @@ export const useMapViewport = (
 
   const fitToView = useCallback(() => {
     if (canvasWidth <= 0 || canvasHeight <= 0) return;
-    setViewport(computeFitViewport(map, canvasWidth, canvasHeight));
+    setViewport(getDefaultViewport(map, canvasWidth, canvasHeight));
   }, [map, canvasWidth, canvasHeight]);
 
   const fitToWorldBounds = useCallback(

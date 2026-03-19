@@ -2,8 +2,6 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import {
   isFiniteMap,
-  getMapWidthTiles,
-  getMapHeightTiles,
   resolveSurfaceMaterial,
   type MapMetadata,
   type RuntimeMapChunk
@@ -192,8 +190,8 @@ export const createServerMapTerrain = ({
 }): ZarchTerrain => {
   const chunkLookupCache = new Map<string, RuntimeMapChunk | null>();
   const heightLookupCache = new Map<string, number | null>();
-  const mapWidthTiles = getMapWidthTiles(map);
-  const mapHeightTiles = getMapHeightTiles(map);
+  const mapWidthTiles = isFiniteMap(map) ? map.extent.widthTiles : null;
+  const mapHeightTiles = isFiniteMap(map) ? map.extent.heightTiles : null;
   const chunkSize = map.resolution.chunkSizeTiles;
   const wrappedFinite = isToroidalWrappedMap(map);
   const chunkCountX =

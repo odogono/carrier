@@ -193,6 +193,8 @@ Exit criteria:
 
 ### Phase 3: `infinite-vector` Backend
 
+Status: Complete
+
 Goal: stand up the infinite authored/runtime world model without the editor yet.
 
 - Add authored-object persistence for source polygons and point controls
@@ -211,6 +213,8 @@ Exit criteria:
 
 ### Phase 4: `infinite-vector` Editor
 
+Status: Complete
+
 Goal: ship a usable authoring workspace for polygons, booleans, controls, and derived-island metadata.
 
 - Add a dedicated editor route in admin at `/maps/:id/editor` (new route in `apps/admin/src/router.tsx`)
@@ -228,16 +232,25 @@ Exit criteria:
 
 ### Phase 5: Cleanup And Deferred Paths
 
+Status: Complete
+
 Goal: remove transition scaffolding and document deferred work clearly.
 
-- Remove legacy finite-only assumptions that are no longer needed
-- Document bounded-vector export/slice mode as the next optional branch
-- Reassess floating-origin and player-facing infinite-world overview after real usage
+- Remove deprecated shared helpers and stale compatibility framing from the package surfaces
+- Standardize runtime callers on explicit `isFiniteMap(map)` checks and direct `map.extent` access
+- Rewrite stale architecture and planning docs so the discriminated reset model is the only current guidance
+- Capture the deferred branch explicitly as follow-up work instead of leaving it implicit in old notes
 
 Exit criteria:
 
 - No core runtime path depends on deprecated finite-only contracts
 - Deferred items are explicitly captured as follow-up work, not hidden in the main path
+
+Deferred backlog after Phase 5:
+
+- bounded-vector export or slice mode from `infinite-vector`
+- floating-origin evaluation after larger-world runtime usage
+- player-facing infinite-world overview once gameplay requirements justify it
 
 ## Library Dependencies
 

@@ -7,7 +7,7 @@ import { Canvas } from '@react-three/fiber';
 
 import { createLog } from 'odgn-ts-helpers/log';
 
-import { getMapWidthTiles, getMapHeightTiles } from 'carrier-contracts/types';
+import { isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
 
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
@@ -27,6 +27,20 @@ import { ZarchScene } from './zarch/zarch-scene';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
 const log = createLog('Main');
+
+export const getInitialCameraState = (map: MapMetadata) => {
+  if (!isFiniteMap(map)) {
+    return {
+      camX: 0,
+      camZ: 0
+    };
+  }
+
+  return {
+    camX: (map.extent.widthTiles * TILE) * 0.5,
+    camZ: (map.extent.heightTiles * TILE) * 0.5
+  };
+};
 
 const MainInner = () => {
   const [containerElement, setContainerElement] =
@@ -59,10 +73,9 @@ const MainInner = () => {
     }
 
     initializedMapIdRef.current = map.id;
-    const w = getMapWidthTiles(map);
-    const h = getMapHeightTiles(map);
-    runtimeRef.current.camX = w !== null ? (w * TILE) * 0.5 : 0;
-    runtimeRef.current.camZ = h !== null ? (h * TILE) * 0.5 : 0;
+    const initialCamera = getInitialCameraState(map);
+    runtimeRef.current.camX = initialCamera.camX;
+    runtimeRef.current.camZ = initialCamera.camZ;
     runtimeRef.current.camYaw = 0;
     runtimeRef.current.camZoom = 1;
     runtimeRef.current.camZoomTarget = 1;

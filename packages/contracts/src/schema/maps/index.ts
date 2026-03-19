@@ -12,7 +12,6 @@ export const MAP_GENERATOR = 'diamond-square' as const;
 export const MAP_GENERATOR_ISLANDS = 'island-clusters' as const;
 export const MAP_CHUNK_SIZE_TILES = 32;
 export const MAP_METERS_PER_TILE = 10;
-export const MAP_RENDER_UNITS_PER_TILE = 24;
 export const MAX_MAP_TILES = 4096;
 export const MAX_MAP_METERS = MAX_MAP_TILES * MAP_METERS_PER_TILE;
 
@@ -131,14 +130,6 @@ export const isInfiniteMap = (
   meta: MapMetadata | null | undefined
 ): meta is MapMetadata & { extent: InfiniteExtent } =>
   meta?.extent?.kind === 'infinite';
-
-// --- Accessor Helpers ---
-
-export const getMapWidthTiles = (meta: MapMetadata | null | undefined): number | null =>
-  meta?.extent?.kind === 'finite' ? meta.extent.widthTiles : null;
-
-export const getMapHeightTiles = (meta: MapMetadata | null | undefined): number | null =>
-  meta?.extent?.kind === 'finite' ? meta.extent.heightTiles : null;
 
 export const getMapChunkSizeTiles = (meta: MapMetadata): number =>
   meta.resolution.chunkSizeTiles;

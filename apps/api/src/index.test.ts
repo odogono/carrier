@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { contract } from 'carrier-contracts/contract';
 import { decodeMapChunkBinary } from 'carrier-contracts/types';
@@ -10,6 +14,8 @@ import { OpenAPILink } from '@orpc/openapi-client/fetch';
 import { resetMapRepository } from '@/maps/repository';
 
 import { createServer } from './index';
+
+const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const request = async (
   method: string,
@@ -317,5 +323,17 @@ describe('API server map routes', () => {
       'http://localhost:5179'
     );
     expect(response.headers.get('access-control-allow-methods')).toContain('PATCH');
+  });
+
+  test('package exports resolve to real source files', async () => {
+    const packageJson = await Bun.file(resolve(apiRoot, 'package.json')).json() as {
+      exports?: Record<string, string>;
+    };
+
+    expect(packageJson.exports).toBeDefined();
+
+    for (const entry of Object.values(packageJson.exports ?? {})) {
+      expect(existsSync(resolve(apiRoot, entry))).toBe(true);
+    }
   });
 });

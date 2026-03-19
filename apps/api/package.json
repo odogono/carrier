@@ -3,8 +3,8 @@
   "module": "src/index.ts",
   "type": "module",
   "exports": {
-    "./contract": "./src/orpc/compat/contract.ts",
-    "./types": "./src/orpc/compat/types.ts"
+    "./contract": "./src/orpc/contract.ts",
+    "./types": "./src/orpc/types.ts"
   },
   "scripts": {
     "dev": "bun run --hot src/index.ts",
