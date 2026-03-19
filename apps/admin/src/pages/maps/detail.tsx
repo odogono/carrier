@@ -1,77 +1,75 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { isFiniteMap, type MapExportKind } from 'carrier-contracts/types';
+import { ArrowLeft, Save, Trash2 } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
-import { toast } from "sonner";
-
-import { isFiniteMap, type MapExportKind } from "carrier-contracts/types";
-
-import { MapViewer } from "@/components/map-viewer";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { MapViewer } from '@/components/map-viewer';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  CardTitle
+} from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { client } from "@/lib/api-client";
+  DialogTitle
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import { client } from '@/lib/api-client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 
 export function MapDetailPage() {
-  const { id } = useParams({ from: "/maps/$id" });
+  const { id } = useParams({ from: '/maps/$id' });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
   const [showExport, setShowExport] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState('');
   const [nameLoaded, setNameLoaded] = useState(false);
-  const [exportName, setExportName] = useState("");
+  const [exportName, setExportName] = useState('');
   const [exportBoundsLoaded, setExportBoundsLoaded] = useState(false);
-  const [minX, setMinX] = useState("0");
-  const [minZ, setMinZ] = useState("0");
-  const [maxX, setMaxX] = useState("640");
-  const [maxZ, setMaxZ] = useState("640");
-  const [metersPerTile, setMetersPerTile] = useState("10");
-  const [chunkSizeTiles, setChunkSizeTiles] = useState("32");
+  const [minX, setMinX] = useState('0');
+  const [minZ, setMinZ] = useState('0');
+  const [maxX, setMaxX] = useState('640');
+  const [maxZ, setMaxZ] = useState('640');
+  const [metersPerTile, setMetersPerTile] = useState('10');
+  const [chunkSizeTiles, setChunkSizeTiles] = useState('32');
   const [exportKind, setExportKind] = useState<MapExportKind>(
-    "finite-vector-slice",
+    'finite-vector-slice'
   );
 
   const mapQuery = useQuery({
     queryFn: () => client.maps.find({ id }),
-    queryKey: ["maps", id],
+    queryKey: ['maps', id]
   });
 
   const overviewQuery = useQuery({
-    enabled: mapQuery.data?.kind === "infinite-vector",
+    enabled: mapQuery.data?.kind === 'infinite-vector',
     queryFn: () => client.maps.getOverview({ mapId: id }),
-    queryKey: ["maps", id, "overview"],
+    queryKey: ['maps', id, 'overview']
   });
 
   const exportsQuery = useQuery({
-    enabled: mapQuery.data?.kind === "infinite-vector",
+    enabled: mapQuery.data?.kind === 'infinite-vector',
     queryFn: () => client.maps.listExports({ mapId: id }),
-    queryKey: ["maps", id, "exports"],
+    queryKey: ['maps', id, 'exports']
   });
 
   const map = mapQuery.data;
 
   useEffect(() => {
     if (map && !nameLoaded) {
-      setName(map.name ?? "");
+      setName(map.name ?? '');
       setNameLoaded(true);
     }
   }, [map, nameLoaded]);
@@ -92,34 +90,34 @@ export function MapDetailPage() {
     exportBoundsLoaded,
     mapQuery.data?.resolution.chunkSizeTiles,
     mapQuery.data?.resolution.metersPerTile,
-    overviewQuery.data?.bounds,
+    overviewQuery.data?.bounds
   ]);
 
   const updateMutation = useMutation({
     mutationFn: () =>
       client.maps.update({
         id,
-        name: name.trim() || null,
+        name: name.trim() || null
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["maps"] });
-      toast.success("Map updated");
+      void queryClient.invalidateQueries({ queryKey: ['maps'] });
+      toast.success('Map updated');
     },
     onError: () => {
-      toast.error("Failed to update map");
-    },
+      toast.error('Failed to update map');
+    }
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => client.maps.delete({ id }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["maps"] });
-      toast.success("Map deleted");
-      void navigate({ to: "/maps" });
+      void queryClient.invalidateQueries({ queryKey: ['maps'] });
+      toast.success('Map deleted');
+      void navigate({ to: '/maps' });
     },
     onError: () => {
-      toast.error("Failed to delete map");
-    },
+      toast.error('Failed to delete map');
+    }
   });
 
   const exportMutation = useMutation({
@@ -129,29 +127,29 @@ export function MapDetailPage() {
           maxX: Number(maxX),
           maxZ: Number(maxZ),
           minX: Number(minX),
-          minZ: Number(minZ),
+          minZ: Number(minZ)
         },
         chunkSizeTiles: Number(chunkSizeTiles),
         expectedRevision: map!.revision,
         kind: exportKind,
         mapId: id,
         metersPerTile: Number(metersPerTile),
-        name: exportName.trim() || undefined,
+        name: exportName.trim() || undefined
       }),
     onSuccess: () => {
       void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["maps"] }),
-        queryClient.invalidateQueries({ queryKey: ["maps", id, "exports"] }),
+        queryClient.invalidateQueries({ queryKey: ['maps'] }),
+        queryClient.invalidateQueries({ queryKey: ['maps', id, 'exports'] })
       ]);
-      toast.success("Export created");
+      toast.success('Export created');
       setShowExport(false);
-      setExportName("");
+      setExportName('');
     },
-    onError: (error) => {
+    onError: error => {
       toast.error(
-        error instanceof Error ? error.message : "Failed to create export",
+        error instanceof Error ? error.message : 'Failed to create export'
       );
-    },
+    }
   });
 
   const handleSave = (e: FormEvent) => {
@@ -182,7 +180,7 @@ export function MapDetailPage() {
     );
   }
 
-  const hasChanges = name !== (map.name ?? "");
+  const hasChanges = name !== (map.name ?? '');
   const finite = isFiniteMap(map);
   const parsedMinX = parseNumber(minX);
   const parsedMinZ = parseNumber(minZ);
@@ -221,13 +219,13 @@ export function MapDetailPage() {
           heightTiles,
           chunkCount,
           heightBytes,
-          binaryBytes: heightBytes + materialBytes,
+          binaryBytes: heightBytes + materialBytes
         };
       })()
     : null;
   const formatBytes = (value: number | null) =>
     value === null
-      ? "—"
+      ? '—'
       : `${(value / 1024).toFixed(value >= 1024 ? 1 : 0)} KiB`;
 
   return (
@@ -240,7 +238,7 @@ export function MapDetailPage() {
         </Link>
         <div className="flex-1">
           <h2 className="text-3xl font-bold tracking-tight">
-            {map.name ?? "Unnamed Map"}
+            {map.name ?? 'Unnamed Map'}
           </h2>
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
@@ -252,7 +250,7 @@ export function MapDetailPage() {
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
         </Button>
-        {map.kind === "infinite-vector" && (
+        {map.kind === 'infinite-vector' && (
           <>
             <Button
               size="sm"
@@ -293,7 +291,7 @@ export function MapDetailPage() {
                 <Input
                   id="name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={e => setName(e.target.value)}
                   placeholder="Map name"
                   maxLength={120}
                 />
@@ -303,7 +301,7 @@ export function MapDetailPage() {
                 disabled={updateMutation.isPending || !hasChanges}
               >
                 <Save className="mr-2 h-4 w-4" />
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </form>
           </CardContent>
@@ -327,11 +325,11 @@ export function MapDetailPage() {
                 <dd>
                   {finite ? (
                     <>
-                      {map.extent.widthTiles}&times;{map.extent.heightTiles}{" "}
+                      {map.extent.widthTiles}&times;{map.extent.heightTiles}{' '}
                       tiles
                     </>
                   ) : (
-                    "Infinite"
+                    'Infinite'
                   )}
                 </dd>
               </div>
@@ -340,11 +338,11 @@ export function MapDetailPage() {
                 <dd>
                   {finite ? (
                     <>
-                      {map.extent.widthMeters}&times;{map.extent.heightMeters}{" "}
+                      {map.extent.widthMeters}&times;{map.extent.heightMeters}{' '}
                       meters
                     </>
                   ) : (
-                    "Infinite"
+                    'Infinite'
                   )}
                 </dd>
               </div>
@@ -408,7 +406,7 @@ export function MapDetailPage() {
               <div className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">Source Bounds</dt>
                 <dd className="font-mono text-xs">
-                  {map.export.bounds.minX},{map.export.bounds.minZ} →{" "}
+                  {map.export.bounds.minX},{map.export.bounds.minZ} →{' '}
                   {map.export.bounds.maxX},{map.export.bounds.maxZ}
                 </dd>
               </div>
@@ -417,7 +415,7 @@ export function MapDetailPage() {
         </Card>
       )}
 
-      {map.kind === "infinite-vector" && (
+      {map.kind === 'infinite-vector' && (
         <Card>
           <CardHeader>
             <CardTitle>Exports</CardTitle>
@@ -436,7 +434,7 @@ export function MapDetailPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {exportsQuery.data?.map((exportedMap) => (
+                {exportsQuery.data?.map(exportedMap => (
                   <div
                     key={exportedMap.id}
                     className="flex items-center justify-between rounded-md border p-3"
@@ -447,19 +445,19 @@ export function MapDetailPage() {
                         params={{ id: exportedMap.id }}
                         className="font-medium hover:underline"
                       >
-                        {exportedMap.name ?? "Unnamed Export"}
+                        {exportedMap.name ?? 'Unnamed Export'}
                       </Link>
                       <div className="text-xs text-muted-foreground">
-                        {exportedMap.kind} · revision{" "}
+                        {exportedMap.kind} · revision{' '}
                         {exportedMap.export?.sourceRevision ?? 0}
                       </div>
                     </div>
                     <Badge variant="outline">
                       {exportedMap.export
                         ? new Date(
-                            exportedMap.export.exportedAt,
+                            exportedMap.export.exportedAt
                           ).toLocaleDateString()
-                        : "Export"}
+                        : 'Export'}
                     </Badge>
                   </div>
                 ))}
@@ -474,8 +472,8 @@ export function MapDetailPage() {
           <DialogHeader>
             <DialogTitle>Delete Map</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete{" "}
-              <strong>{map.name ?? "this map"}</strong>? This will permanently
+              Are you sure you want to delete{' '}
+              <strong>{map.name ?? 'this map'}</strong>? This will permanently
               remove the map and all its chunks. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -488,7 +486,7 @@ export function MapDetailPage() {
               disabled={deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -509,7 +507,7 @@ export function MapDetailPage() {
               <Input
                 id="export-name"
                 value={exportName}
-                onChange={(e) => setExportName(e.target.value)}
+                onChange={e => setExportName(e.target.value)}
                 placeholder="North sector slice"
                 maxLength={120}
               />
@@ -519,7 +517,7 @@ export function MapDetailPage() {
               <Select
                 id="export-kind"
                 value={exportKind}
-                onChange={(e) => setExportKind(e.target.value as MapExportKind)}
+                onChange={e => setExportKind(e.target.value as MapExportKind)}
               >
                 <option value="finite-vector-slice">Finite Vector Slice</option>
                 <option value="wrapped-classic-slice">
@@ -533,7 +531,7 @@ export function MapDetailPage() {
                 <Input
                   id="min-x"
                   value={minX}
-                  onChange={(e) => setMinX(e.target.value)}
+                  onChange={e => setMinX(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -541,7 +539,7 @@ export function MapDetailPage() {
                 <Input
                   id="max-x"
                   value={maxX}
-                  onChange={(e) => setMaxX(e.target.value)}
+                  onChange={e => setMaxX(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -549,7 +547,7 @@ export function MapDetailPage() {
                 <Input
                   id="min-z"
                   value={minZ}
-                  onChange={(e) => setMinZ(e.target.value)}
+                  onChange={e => setMinZ(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -557,7 +555,7 @@ export function MapDetailPage() {
                 <Input
                   id="max-z"
                   value={maxZ}
-                  onChange={(e) => setMaxZ(e.target.value)}
+                  onChange={e => setMaxZ(e.target.value)}
                 />
               </div>
             </div>
@@ -567,7 +565,7 @@ export function MapDetailPage() {
                 <Input
                   id="meters-per-tile"
                   value={metersPerTile}
-                  onChange={(e) => setMetersPerTile(e.target.value)}
+                  onChange={e => setMetersPerTile(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -575,7 +573,7 @@ export function MapDetailPage() {
                 <Input
                   id="chunk-size-tiles"
                   value={chunkSizeTiles}
-                  onChange={(e) => setChunkSizeTiles(e.target.value)}
+                  onChange={e => setChunkSizeTiles(e.target.value)}
                 />
               </div>
             </div>
@@ -585,12 +583,12 @@ export function MapDetailPage() {
                 <span>
                   {exportStats
                     ? `${exportStats.widthTiles} × ${exportStats.heightTiles}`
-                    : "—"}
+                    : '—'}
                 </span>
               </div>
               <div className="mt-2 flex justify-between">
                 <span className="text-muted-foreground">Estimated chunks</span>
-                <span>{exportStats?.chunkCount ?? "—"}</span>
+                <span>{exportStats?.chunkCount ?? '—'}</span>
               </div>
               <div className="mt-2 flex justify-between">
                 <span className="text-muted-foreground">
@@ -614,7 +612,7 @@ export function MapDetailPage() {
               disabled={exportMutation.isPending || !exportDimensionsValid}
               onClick={() => exportMutation.mutate()}
             >
-              {exportMutation.isPending ? "Exporting..." : "Create Export"}
+              {exportMutation.isPending ? 'Exporting...' : 'Create Export'}
             </Button>
           </DialogFooter>
         </DialogContent>

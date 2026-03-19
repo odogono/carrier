@@ -1,32 +1,31 @@
-import { useCallback, useRef } from "react";
+import type { WorldBounds, WorldPoint } from 'carrier-contracts/types';
+import { useCallback, useRef } from 'react';
 
-import type { WorldBounds, WorldPoint } from "carrier-contracts/types";
-
-import { getBoundsCenter, STOP_PROPAGATION } from "../helpers/drafts";
+import { STOP_PROPAGATION, getBoundsCenter } from '../helpers/drafts';
 
 type OverviewPaneProps = {
-  bounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ"> | null;
+  bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
   clusters: ReadonlyArray<{
-    bbox: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ">;
+    bbox: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>;
     controlPointCount: number;
     derivedIslandCount: number;
     sourcePolygonCount: number;
   }>;
-  onRecenter: (point: Pick<WorldPoint, "x" | "z">) => void;
-  viewportBounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ"> | null;
+  onRecenter: (point: Pick<WorldPoint, 'x' | 'z'>) => void;
+  viewportBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
 };
 
 export function OverviewPane({
   bounds,
   clusters,
   onRecenter,
-  viewportBounds,
+  viewportBounds
 }: OverviewPaneProps) {
   const dragRef = useRef<{ dx: number; dz: number } | null>(null);
   const draggedRef = useRef(false);
 
   const toRelative = useCallback(
-    (point: Pick<WorldPoint, "x" | "z">) => {
+    (point: Pick<WorldPoint, 'x' | 'z'>) => {
       if (!bounds) {
         return { x: 50, z: 50 };
       }
@@ -36,10 +35,10 @@ export function OverviewPane({
 
       return {
         x: ((point.x - bounds.minX) / width) * 100,
-        z: ((point.z - bounds.minZ) / height) * 100,
+        z: ((point.z - bounds.minZ) / height) * 100
       };
     },
-    [bounds],
+    [bounds]
   );
 
   const toWorld = useCallback(
@@ -58,10 +57,10 @@ export function OverviewPane({
 
       return {
         x: bounds.minX + (bounds.maxX - bounds.minX) * relativeX,
-        z: bounds.minZ + (bounds.maxZ - bounds.minZ) * relativeZ,
+        z: bounds.minZ + (bounds.maxZ - bounds.minZ) * relativeZ
       };
     },
-    [bounds],
+    [bounds]
   );
 
   if (!bounds || !viewportBounds) {
@@ -74,18 +73,18 @@ export function OverviewPane({
 
   const topLeft = toRelative({
     x: viewportBounds.minX,
-    z: viewportBounds.minZ,
+    z: viewportBounds.minZ
   });
   const bottomRight = toRelative({
     x: viewportBounds.maxX,
-    z: viewportBounds.maxZ,
+    z: viewportBounds.maxZ
   });
   const center = getBoundsCenter(viewportBounds);
 
   return (
     <div
       className="relative h-56 overflow-hidden rounded-md border bg-slate-950"
-      onClick={(event) => {
+      onClick={event => {
         if (draggedRef.current) {
           draggedRef.current = false;
           return;
@@ -97,7 +96,7 @@ export function OverviewPane({
 
         onRecenter(toWorld(event));
       }}
-      onPointerMove={(event) => {
+      onPointerMove={event => {
         if (!dragRef.current) {
           return;
         }
@@ -106,7 +105,7 @@ export function OverviewPane({
 
         onRecenter({
           x: toWorld(event).x + dragRef.current.dx,
-          z: toWorld(event).z + dragRef.current.dz,
+          z: toWorld(event).z + dragRef.current.dz
         });
       }}
       onPointerUp={() => {
@@ -116,7 +115,7 @@ export function OverviewPane({
       {clusters.map((cluster, index) => {
         const position = toRelative({
           x: (cluster.bbox.minX + cluster.bbox.maxX) / 2,
-          z: (cluster.bbox.minZ + cluster.bbox.maxZ) / 2,
+          z: (cluster.bbox.minZ + cluster.bbox.maxZ) / 2
         });
 
         return (
@@ -126,7 +125,7 @@ export function OverviewPane({
             style={{
               left: `${position.x}%`,
               top: `${position.z}%`,
-              transform: "translate(-50%, -50%)",
+              transform: 'translate(-50%, -50%)'
             }}
             title={`${cluster.sourcePolygonCount} polygons · ${cluster.controlPointCount} controls · ${cluster.derivedIslandCount} islands`}
           />
@@ -134,12 +133,12 @@ export function OverviewPane({
       })}
       <div
         className="absolute border-2 border-emerald-300/90 bg-emerald-300/10"
-        onPointerDown={(event) => {
+        onPointerDown={event => {
           STOP_PROPAGATION(event);
           const pointerWorld = toWorld(event);
           dragRef.current = {
             dx: center.x - pointerWorld.x,
-            dz: center.z - pointerWorld.z,
+            dz: center.z - pointerWorld.z
           };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
@@ -147,7 +146,7 @@ export function OverviewPane({
           height: `${Math.max(bottomRight.z - topLeft.z, 4)}%`,
           left: `${topLeft.x}%`,
           top: `${topLeft.z}%`,
-          width: `${Math.max(bottomRight.x - topLeft.x, 4)}%`,
+          width: `${Math.max(bottomRight.x - topLeft.x, 4)}%`
         }}
       />
     </div>

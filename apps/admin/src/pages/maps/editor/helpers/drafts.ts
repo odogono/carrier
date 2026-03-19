@@ -3,7 +3,7 @@ import type { SourcePolygon, WorldBounds } from 'carrier-contracts/types';
 import {
   DEFAULT_CONTROL_POINT,
   DEFAULT_SOURCE_POLYGON_PARAMS,
-  mergeWorldBounds,
+  mergeWorldBounds
 } from '.';
 import type {
   ControlPointDraft,
@@ -11,21 +11,21 @@ import type {
   DerivedIslandLike,
   IslandDraft,
   PolygonDraft,
-  SourcePolygonLike,
+  SourcePolygonLike
 } from './types';
 
 export const createPolygonDraft = (
-  polygon?: SourcePolygonLike,
+  polygon?: SourcePolygonLike
 ): PolygonDraft => ({
   id: polygon?.id,
   kind: polygon ? 'edit' : 'create',
   params: polygon?.params ?? { ...DEFAULT_SOURCE_POLYGON_PARAMS },
   selectedVertexIndex: null,
-  vertices: polygon?.vertices.map((vertex) => ({ ...vertex })) ?? [],
+  vertices: polygon?.vertices.map(vertex => ({ ...vertex })) ?? []
 });
 
 export const createControlPointDraft = (
-  point?: ControlPointLike,
+  point?: ControlPointLike
 ): ControlPointDraft => ({
   elevationMeters:
     point?.elevationMeters ?? DEFAULT_CONTROL_POINT.elevationMeters,
@@ -36,19 +36,19 @@ export const createControlPointDraft = (
   strength: point?.strength ?? DEFAULT_CONTROL_POINT.strength,
   type: point?.type ?? DEFAULT_CONTROL_POINT.type,
   x: point?.x ?? 0,
-  z: point?.z ?? 0,
+  z: point?.z ?? 0
 });
 
 export const createIslandDraft = (island: DerivedIslandLike): IslandDraft => ({
   defaultFaction: island.defaultFaction ?? '',
   defaultOwner: island.defaultOwner ?? '',
   id: island.id,
-  name: island.name ?? '',
+  name: island.name ?? ''
 });
 
 export const isDraftDirty = (
   draft: PolygonDraft,
-  polygon: Pick<SourcePolygon, 'params' | 'vertices'> | null,
+  polygon: Pick<SourcePolygon, 'params' | 'vertices'> | null
 ) => {
   if (!polygon) {
     return draft.vertices.length > 0;
@@ -61,28 +61,28 @@ export const isDraftDirty = (
 };
 
 export const boundsFromPolygons = (
-  polygons: readonly Pick<SourcePolygon, 'bbox'>[],
+  polygons: readonly Pick<SourcePolygon, 'bbox'>[]
 ) =>
   polygons.reduce<WorldBounds | null>(
     (bounds, polygon) => mergeWorldBounds(bounds, polygon.bbox),
-    null,
+    null
   );
 
 export const getBoundsCenter = (
-  bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>,
+  bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>
 ) => ({
   x: (bounds.minX + bounds.maxX) / 2,
-  z: (bounds.minZ + bounds.maxZ) / 2,
+  z: (bounds.minZ + bounds.maxZ) / 2
 });
 
 export const expandBounds = (
   bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>,
-  amount: number,
+  amount: number
 ): WorldBounds => ({
   maxX: bounds.maxX + amount,
   maxZ: bounds.maxZ + amount,
   minX: bounds.minX - amount,
-  minZ: bounds.minZ - amount,
+  minZ: bounds.minZ - amount
 });
 
 export const parseNumber = (value: string, fallback: number) => {

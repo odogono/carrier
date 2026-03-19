@@ -3,12 +3,12 @@ import type {
   DerivedIsland,
   SourcePolygon,
   SourcePolygonParams,
-  WorldPoint,
-} from "carrier-contracts/types";
+  WorldPoint
+} from 'carrier-contracts/types';
 
 export type PolygonDraft = {
   id?: string;
-  kind: "create" | "edit";
+  kind: 'create' | 'edit';
   params: SourcePolygonParams;
   selectedVertexIndex: number | null;
   vertices: WorldPoint[];
@@ -18,9 +18,9 @@ export type ControlPointDraft = {
   elevationMeters: number;
   id?: string;
   influenceMeters: number;
-  kind: "create" | "edit";
+  kind: 'create' | 'edit';
   strength: number;
-  type: ControlPoint["type"];
+  type: ControlPoint['type'];
   x: number;
   z: number;
 };
@@ -33,24 +33,24 @@ export type IslandDraft = {
 };
 
 export type DeleteTarget =
-  | { id: string; kind: "control-point" }
-  | { id: string; kind: "polygon" }
+  | { id: string; kind: 'control-point' }
+  | { id: string; kind: 'polygon' }
   | null;
 
 export type CanvasDragState =
-  | { kind: "control-point"; pointId?: string; pointerId: number }
-  | { kind: "vertex"; pointerId: number; vertexIndex: number }
+  | { kind: 'control-point'; pointId?: string; pointerId: number }
+  | { kind: 'vertex'; pointerId: number; vertexIndex: number }
   | null;
 
 export type SourcePolygonLike = Pick<
   SourcePolygon,
-  "id" | "params" | "vertices"
+  'id' | 'params' | 'vertices'
 >;
 export type ControlPointLike = Pick<
   ControlPoint,
-  "elevationMeters" | "id" | "influenceMeters" | "strength" | "type" | "x" | "z"
+  'elevationMeters' | 'id' | 'influenceMeters' | 'strength' | 'type' | 'x' | 'z'
 >;
 export type DerivedIslandLike = Pick<
   DerivedIsland,
-  "defaultFaction" | "defaultOwner" | "id" | "name"
+  'defaultFaction' | 'defaultOwner' | 'id' | 'name'
 >;

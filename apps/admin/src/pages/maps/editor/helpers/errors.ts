@@ -1,18 +1,18 @@
 export const getErrorCode = (error: unknown): string | null => {
-  if (typeof error !== "object" || !error) {
+  if (typeof error !== 'object' || !error) {
     return null;
   }
 
-  if ("code" in error && typeof error.code === "string") {
+  if ('code' in error && typeof error.code === 'string') {
     return error.code;
   }
 
   if (
-    "data" in error &&
-    typeof error.data === "object" &&
+    'data' in error &&
+    typeof error.data === 'object' &&
     error.data &&
-    "code" in error.data &&
-    typeof error.data.code === "string"
+    'code' in error.data &&
+    typeof error.data.code === 'string'
   ) {
     return error.data.code;
   }

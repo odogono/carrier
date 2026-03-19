@@ -1,19 +1,18 @@
+import type { MapMetadata } from 'carrier-contracts/types';
+import { Home, Minus, Plus } from 'lucide-react';
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
-  type WheelEvent,
-} from "react";
+  type WheelEvent
+} from 'react';
 
-import type { MapMetadata } from "carrier-contracts/types";
-import { Home, Minus, Plus } from "lucide-react";
+import { Button } from '@/components/ui/button';
+import { useMapChunks } from '@/hooks/use-map-chunks';
+import { getVisibleChunkRange, useMapViewport } from '@/hooks/use-map-viewport';
 
-import { Button } from "@/components/ui/button";
-import { useMapChunks } from "@/hooks/use-map-chunks";
-import { getVisibleChunkRange, useMapViewport } from "@/hooks/use-map-viewport";
-
-import { MapStage } from "./map-stage";
+import { MapStage } from './map-stage';
 
 type MapViewerProps = {
   map: MapMetadata;
@@ -34,7 +33,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setSize((prev) => {
+    setSize(prev => {
       const w = Math.floor(rect.width);
       const h = Math.floor(rect.height);
       if (prev.width === w && prev.height === h) return prev;
@@ -68,7 +67,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     onWheel,
     viewport,
     zoomIn,
-    zoomOut,
+    zoomOut
   } = useMapViewport(map, size.width, size.height);
 
   const handlePointerDown = useCallback(
@@ -76,7 +75,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
       interactionRef.current?.focus();
       onPointerDown(e);
     },
-    [onPointerDown],
+    [onPointerDown]
   );
 
   // Refit when canvas size first becomes available
@@ -93,7 +92,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     viewport,
     size.width,
     size.height,
-    map,
+    map
   );
   const chunks = useMapChunks(mapId, chunkRange);
 
@@ -119,12 +118,12 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
             tabIndex={0}
             className="outline-none"
             style={{
-              cursor: isDragging ? "grabbing" : "crosshair",
-              display: "block",
+              cursor: isDragging ? 'grabbing' : 'crosshair',
+              display: 'block',
               height: size.height,
-              overscrollBehavior: "contain",
-              touchAction: "none",
-              width: size.width,
+              overscrollBehavior: 'contain',
+              touchAction: 'none',
+              width: size.width
             }}
           >
             <MapStage
@@ -168,9 +167,13 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {map.extent.kind === 'finite'
-            ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles} tiles</>
-            : 'Infinite'}{" "}
+          {map.extent.kind === 'finite' ? (
+            <>
+              {map.extent.widthTiles}&times;{map.extent.heightTiles} tiles
+            </>
+          ) : (
+            'Infinite'
+          )}{' '}
           &middot; Zoom {zoomPercent}%
         </span>
         <span>Drag to pan &middot; Scroll to zoom &middot; Home to reset</span>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 
 export const useElementSize = (ref: RefObject<HTMLElement | null>) => {
   const [size, setSize] = useState({ height: 0, width: 0 });
@@ -11,10 +11,10 @@ export const useElementSize = (ref: RefObject<HTMLElement | null>) => {
     }
 
     const rect = element.getBoundingClientRect();
-    setSize((previous) => {
+    setSize(previous => {
       const next = {
         height: Math.floor(rect.height),
-        width: Math.floor(rect.width),
+        width: Math.floor(rect.width)
       };
 
       if (previous.height === next.height && previous.width === next.width) {

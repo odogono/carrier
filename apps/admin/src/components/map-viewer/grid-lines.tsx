@@ -1,7 +1,6 @@
+import { isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
 import { useMemo } from 'react';
 import { Line, Text } from 'react-konva';
-
-import { isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
 
 import type { Viewport } from '@/hooks/use-map-viewport';
 
@@ -15,7 +14,7 @@ const GRID_LEVELS: GridLevel[] = [
   { label: '1km', spacingTiles: 100 },
   { label: '5km', spacingTiles: 500 },
   { label: '10km', spacingTiles: 1000 },
-  { label: '100km', spacingTiles: 10000 },
+  { label: '100km', spacingTiles: 10000 }
 ];
 
 const GRID_STROKE = 'rgba(255, 255, 255, 0.3)';
@@ -52,7 +51,7 @@ export function GridLines({
   canvasHeight,
   canvasWidth,
   map,
-  viewport,
+  viewport
 }: GridLinesProps) {
   const elements = useMemo(() => {
     const finite = isFiniteMap(map);
@@ -94,13 +93,13 @@ export function GridLines({
     for (let x = firstX; x <= lastX; x += spacing) {
       lines.push({
         key: `v${x}`,
-        points: [x, clampMinZ, x, clampMaxZ],
+        points: [x, clampMinZ, x, clampMaxZ]
       });
       labels.push({
         key: `lv${x}`,
         text: formatLabel(x, metersPerTile),
         x: x + labelPadding,
-        y: clampMinZ + labelPadding,
+        y: clampMinZ + labelPadding
       });
     }
 
@@ -111,13 +110,13 @@ export function GridLines({
     for (let z = firstZ; z <= lastZ; z += spacing) {
       lines.push({
         key: `h${z}`,
-        points: [clampMinX, z, clampMaxX, z],
+        points: [clampMinX, z, clampMaxX, z]
       });
       labels.push({
         key: `lh${z}`,
         text: formatLabel(z, metersPerTile),
         x: clampMinX + labelPadding,
-        y: z + labelPadding,
+        y: z + labelPadding
       });
     }
 
@@ -128,12 +127,12 @@ export function GridLines({
     map,
     viewport.centerTileX,
     viewport.centerTileZ,
-    viewport.zoom,
+    viewport.zoom
   ]);
 
   return (
     <>
-      {elements.lines.map((line) => (
+      {elements.lines.map(line => (
         <Line
           key={line.key}
           points={line.points}
@@ -142,7 +141,7 @@ export function GridLines({
           listening={false}
         />
       ))}
-      {elements.labels.map((label) => (
+      {elements.labels.map(label => (
         <Text
           key={label.key}
           x={label.x}

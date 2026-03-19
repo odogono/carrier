@@ -15,4 +15,8 @@ export const tileColorRgb = (
   elevation: number,
   material?: MapSurfaceMaterial | null
 ): RgbTuple =>
-  getSurfaceMaterialColorRgb(resolveSurfaceMaterial(gx, gz, elevation, material), gx, gz);
+  getSurfaceMaterialColorRgb(
+    resolveSurfaceMaterial(gx, gz, elevation, material),
+    gx,
+    gz
+  );

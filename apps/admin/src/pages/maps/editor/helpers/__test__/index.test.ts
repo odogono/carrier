@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-
 import type { MapMetadata } from 'carrier-contracts/types';
+
+import {
+  fitViewportToWorldBounds,
+  screenToTilePoint,
+  tileToScreenPoint
+} from '@/hooks/use-map-viewport';
 
 import {
   DEFAULT_SOURCE_POLYGON_PARAMS,
@@ -9,13 +14,8 @@ import {
   chunkIntersectsDirtyBounds,
   getChunkWorldBounds,
   mergeWorldBounds,
-  nextOrderedSelection,
+  nextOrderedSelection
 } from '../index';
-import {
-  fitViewportToWorldBounds,
-  screenToTilePoint,
-  tileToScreenPoint,
-} from '@/hooks/use-map-viewport';
 
 const infiniteMap: MapMetadata = {
   createdAt: new Date().toISOString(),
@@ -25,11 +25,11 @@ const infiniteMap: MapMetadata = {
   name: 'Infinite',
   resolution: {
     chunkSizeTiles: 32,
-    metersPerTile: 10,
+    metersPerTile: 10
   },
   revision: 0,
   seed: 'seed',
-  updatedAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
 };
 
 describe('editor utilities', () => {
@@ -37,13 +37,13 @@ describe('editor utilities', () => {
     const viewport = {
       centerTileX: 40,
       centerTileZ: -12,
-      zoom: 4,
+      zoom: 4
     };
 
     const screen = tileToScreenPoint(viewport, 800, 600, 48, -6);
     expect(screenToTilePoint(viewport, 800, 600, screen.x, screen.z)).toEqual({
       x: 48,
-      z: -6,
+      z: -6
     });
   });
 
@@ -59,10 +59,10 @@ describe('editor utilities', () => {
         [
           { x: 0, z: 0 },
           { x: 10, z: 0 },
-          { x: 10, z: 10 },
+          { x: 10, z: 10 }
         ],
-        DEFAULT_SOURCE_POLYGON_PARAMS,
-      ),
+        DEFAULT_SOURCE_POLYGON_PARAMS
+      )
     ).toBe(true);
 
     expect(
@@ -70,10 +70,10 @@ describe('editor utilities', () => {
         [
           { x: 0, z: 0 },
           { x: 0, z: 0 },
-          { x: 10, z: 10 },
+          { x: 10, z: 10 }
         ],
-        DEFAULT_SOURCE_POLYGON_PARAMS,
-      ),
+        DEFAULT_SOURCE_POLYGON_PARAMS
+      )
     ).toBe(false);
   });
 
@@ -83,10 +83,10 @@ describe('editor utilities', () => {
         [
           { x: 0, z: 0 },
           { x: 10, z: 0 },
-          { x: 10, z: 10 },
+          { x: 10, z: 10 }
         ],
-        1,
-      ),
+        1
+      )
     ).toBe(false);
 
     expect(
@@ -95,10 +95,10 @@ describe('editor utilities', () => {
           { x: 0, z: 0 },
           { x: 10, z: 0 },
           { x: 10, z: 10 },
-          { x: 0, z: 10 },
+          { x: 0, z: 10 }
         ],
-        2,
-      ),
+        2
+      )
     ).toBe(true);
   });
 
@@ -107,7 +107,7 @@ describe('editor utilities', () => {
       maxX: 640,
       maxZ: 320,
       minX: 0,
-      minZ: 0,
+      minZ: 0
     });
 
     expect(fitted.centerTileX).toBe(32);
@@ -119,16 +119,16 @@ describe('editor utilities', () => {
         maxX: 300,
         maxZ: 300,
         minX: 50,
-        minZ: 50,
-      }),
+        minZ: 50
+      })
     ).toBe(true);
     expect(
       chunkIntersectsDirtyBounds(infiniteMap, 4, 4, {
         maxX: 300,
         maxZ: 300,
         minX: 50,
-        minZ: 50,
-      }),
+        minZ: 50
+      })
     ).toBe(false);
   });
 
@@ -139,27 +139,27 @@ describe('editor utilities', () => {
           maxX: 10,
           maxZ: 10,
           minX: -10,
-          minZ: -10,
+          minZ: -10
         },
         {
           maxX: 20,
           maxZ: 30,
           minX: 0,
-          minZ: -5,
-        },
-      ),
+          minZ: -5
+        }
+      )
     ).toEqual({
       maxX: 20,
       maxZ: 30,
       minX: -10,
-      minZ: -10,
+      minZ: -10
     });
 
     expect(getChunkWorldBounds(infiniteMap, -1, 2)).toEqual({
       maxX: 0,
       maxZ: 960,
       minX: -320,
-      minZ: 640,
+      minZ: 640
     });
   });
 });

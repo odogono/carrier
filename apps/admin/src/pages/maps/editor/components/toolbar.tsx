@@ -1,6 +1,7 @@
 import type { BooleanOperation } from 'carrier-contracts/types';
 
 import { Button } from '@/components/ui/button';
+
 import type { EditorTool } from '../helpers';
 
 type EditorToolbarProps = {
@@ -24,59 +25,68 @@ export function EditorToolbar({
   onBeginVertexEdit,
   onSelectTool,
   selectedPolygon,
-  tool,
+  tool
 }: EditorToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
         variant={tool === 'select' ? 'default' : 'outline'}
-        onClick={() => onSelectTool('select')}>
+        onClick={() => onSelectTool('select')}
+      >
         Select
       </Button>
       <Button
         variant={tool === 'pan' ? 'default' : 'outline'}
-        onClick={() => onSelectTool('pan')}>
+        onClick={() => onSelectTool('pan')}
+      >
         Pan
       </Button>
       <Button
         variant={tool === 'draw-polygon' ? 'default' : 'outline'}
-        onClick={onBeginDrawPolygon}>
+        onClick={onBeginDrawPolygon}
+      >
         Draw Polygon
       </Button>
       <Button
         variant={tool === 'edit-vertices' ? 'default' : 'outline'}
         disabled={!selectedPolygon}
-        onClick={onBeginVertexEdit}>
+        onClick={onBeginVertexEdit}
+      >
         Edit Vertices
       </Button>
       <Button
         variant={tool === 'place-control-point' ? 'default' : 'outline'}
-        onClick={onBeginControlPoint}>
+        onClick={onBeginControlPoint}
+      >
         Add Control Point
       </Button>
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
           disabled={!canApplyUnionLike}
-          onClick={() => onApplyBoolean('union')}>
+          onClick={() => onApplyBoolean('union')}
+        >
           Union
         </Button>
         <Button
           variant="outline"
           disabled={!canApplyDifference}
-          onClick={() => onApplyBoolean('difference')}>
+          onClick={() => onApplyBoolean('difference')}
+        >
           Difference
         </Button>
         <Button
           variant="outline"
           disabled={!canApplyUnionLike}
-          onClick={() => onApplyBoolean('intersection')}>
+          onClick={() => onApplyBoolean('intersection')}
+        >
           Intersection
         </Button>
         <Button
           variant="outline"
           disabled={!canApplyUnionLike}
-          onClick={() => onApplyBoolean('xor')}>
+          onClick={() => onApplyBoolean('xor')}
+        >
           XOR
         </Button>
       </div>

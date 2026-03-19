@@ -1,28 +1,27 @@
-import type { KeyboardEvent, PointerEvent, RefObject, WheelEvent } from 'react';
-
-import { Home, Minus, Plus } from 'lucide-react';
-
 import type {
   ControlPoint,
   MapMetadata,
   SourcePolygon,
-  WorldPoint,
+  WorldPoint
 } from 'carrier-contracts/types';
+import { Home, Minus, Plus } from 'lucide-react';
+import type { KeyboardEvent, PointerEvent, RefObject, WheelEvent } from 'react';
 
 import { MapStage } from '@/components/map-viewer/map-stage';
 import { Button } from '@/components/ui/button';
 import type { Viewport } from '@/hooks/use-map-viewport';
+
 import {
   canSavePolygonDraft,
   getPolygonEdgeInsertPosition,
   nextOrderedSelection,
-  type EditorTool,
+  type EditorTool
 } from '../helpers';
 import { STOP_PROPAGATION } from '../helpers/drafts';
 import type {
   CanvasDragState,
   ControlPointDraft,
-  PolygonDraft,
+  PolygonDraft
 } from '../helpers/types';
 
 type EditorCanvasProps = {
@@ -107,7 +106,7 @@ export function EditorCanvas({
   tool,
   viewport,
   zoomIn,
-  zoomOut,
+  zoomOut
 }: EditorCanvasProps) {
   const selectedPolygonSet = new Set(selectedPolygonIds);
   const zoomPercent = Math.round(viewport.zoom * 100);
@@ -118,7 +117,8 @@ export function EditorCanvas({
         <div className="flex flex-col gap-2">
           <div
             ref={containerRef}
-            className="relative h-[640px] overflow-hidden rounded-md border bg-[#0a1320]">
+            className="relative h-[640px] overflow-hidden rounded-md border bg-[#0a1320]"
+          >
             {size.width > 0 && size.height > 0 && (
               <>
                 <MapStage
@@ -130,7 +130,8 @@ export function EditorCanvas({
                 />
                 <div
                   className="absolute inset-0"
-                  onWheelCapture={onWheelCapture}>
+                  onWheelCapture={onWheelCapture}
+                >
                   <svg
                     ref={interactionRef}
                     className="absolute inset-0 outline-none"
@@ -155,18 +156,19 @@ export function EditorCanvas({
                             ? 'copy'
                             : tool === 'pan'
                               ? 'grab'
-                              : 'default',
-                    }}>
-                    {overlayPolygons.map((polygon) => {
+                              : 'default'
+                    }}
+                  >
+                    {overlayPolygons.map(polygon => {
                       const points = polygon.vertices
-                        .map((vertex) => {
+                        .map(vertex => {
                           const screen = toScreenPoint(vertex);
                           return `${screen.x},${screen.z}`;
                         })
                         .join(' ');
                       const selected = selectedPolygonSet.has(polygon.id);
                       const highlighted = highlightedIslandPolygonIds.has(
-                        polygon.id,
+                        polygon.id
                       );
 
                       return (
@@ -179,14 +181,14 @@ export function EditorCanvas({
                                 ? 'rgba(14, 165, 233, 0.22)'
                                 : 'rgba(255,255,255,0.08)'
                           }
-                          onClick={(event) => {
+                          onClick={event => {
                             STOP_PROPAGATION(event);
-                            setSelectedPolygonIds((selection) =>
+                            setSelectedPolygonIds(selection =>
                               nextOrderedSelection(
                                 selection,
                                 polygon.id,
-                                event.shiftKey,
-                              ),
+                                event.shiftKey
+                              )
                             );
                             setSelectedControlPointId(null);
                             setSelectedIslandId(null);
@@ -217,7 +219,7 @@ export function EditorCanvas({
                               : 'rgba(250,204,21,0.18)'
                           }
                           points={polygonDraft.vertices
-                            .map((vertex) => {
+                            .map(vertex => {
                               const screen = toScreenPoint(vertex);
                               return `${screen.x},${screen.z}`;
                             })
@@ -247,44 +249,44 @@ export function EditorCanvas({
                                     ? '#86efac'
                                     : '#0f172a'
                               }
-                              onClick={(event) => {
+                              onClick={event => {
                                 STOP_PROPAGATION(event);
                                 if (
                                   tool === 'draw-polygon' &&
                                   isFirst &&
                                   canSavePolygonDraft(
                                     polygonDraft.vertices,
-                                    polygonDraft.params,
+                                    polygonDraft.params
                                   )
                                 ) {
                                   commitDrawPolygon();
                                   return;
                                 }
 
-                                setPolygonDraft((draft) =>
+                                setPolygonDraft(draft =>
                                   draft
                                     ? { ...draft, selectedVertexIndex: index }
-                                    : draft,
+                                    : draft
                                 );
                               }}
-                              onPointerDown={(event) => {
+                              onPointerDown={event => {
                                 STOP_PROPAGATION(event);
                                 if (tool !== 'edit-vertices') {
                                   return;
                                 }
 
                                 interactionRef.current?.setPointerCapture(
-                                  event.pointerId,
+                                  event.pointerId
                                 );
                                 setDragState({
                                   kind: 'vertex',
                                   pointerId: event.pointerId,
-                                  vertexIndex: index,
+                                  vertexIndex: index
                                 });
-                                setPolygonDraft((draft) =>
+                                setPolygonDraft(draft =>
                                   draft
                                     ? { ...draft, selectedVertexIndex: index }
-                                    : draft,
+                                    : draft
                                 );
                               }}
                               r={isFirst && tool === 'draw-polygon' ? 8 : 6}
@@ -309,17 +311,17 @@ export function EditorCanvas({
                             return (
                               <line
                                 key={`edge-${index}`}
-                                onClick={(event) => {
+                                onClick={event => {
                                   STOP_PROPAGATION(event);
                                   const world = toWorldPoint(
-                                    event as unknown as PointerEvent<SVGSVGElement>,
+                                    event as unknown as PointerEvent<SVGSVGElement>
                                   );
                                   const insertAt = getPolygonEdgeInsertPosition(
                                     vertex,
                                     next,
-                                    world,
+                                    world
                                   );
-                                  setPolygonDraft((draft) =>
+                                  setPolygonDraft(draft =>
                                     draft
                                       ? {
                                           ...draft,
@@ -327,13 +329,13 @@ export function EditorCanvas({
                                           vertices: [
                                             ...draft.vertices.slice(
                                               0,
-                                              index + 1,
+                                              index + 1
                                             ),
                                             insertAt,
-                                            ...draft.vertices.slice(index + 1),
-                                          ],
+                                            ...draft.vertices.slice(index + 1)
+                                          ]
                                         }
-                                      : draft,
+                                      : draft
                                   );
                                 }}
                                 onPointerDown={STOP_PROPAGATION}
@@ -349,7 +351,7 @@ export function EditorCanvas({
                       </>
                     )}
 
-                    {controlPoints.map((point) => {
+                    {controlPoints.map(point => {
                       const screen = toScreenPoint(point);
                       const selected = point.id === selectedControlPointId;
                       return (
@@ -358,17 +360,17 @@ export function EditorCanvas({
                             cx={screen.x}
                             cy={screen.z}
                             fill={selected ? '#f97316' : '#e2e8f0'}
-                            onClick={(event) => {
+                            onClick={event => {
                               STOP_PROPAGATION(event);
                               setSelectedControlPointId(point.id);
                               setSelectedPolygonIds([]);
                               setSelectedIslandId(null);
                               setPolygonDraft(null);
                             }}
-                            onPointerDown={(event) => {
+                            onPointerDown={event => {
                               STOP_PROPAGATION(event);
                               interactionRef.current?.setPointerCapture(
-                                event.pointerId,
+                                event.pointerId
                               );
                               setSelectedControlPointId(point.id);
                               setSelectedPolygonIds([]);
@@ -376,7 +378,7 @@ export function EditorCanvas({
                               setDragState({
                                 kind: 'control-point',
                                 pointId: point.id,
-                                pointerId: event.pointerId,
+                                pointerId: event.pointerId
                               });
                             }}
                             r={7}
@@ -440,7 +442,8 @@ export function EditorCanvas({
                     onClick={zoomIn}
                     size="icon"
                     title="Zoom in"
-                    variant="secondary">
+                    variant="secondary"
+                  >
                     <Plus className="h-4 w-4" />
                   </Button>
                   <Button
@@ -448,7 +451,8 @@ export function EditorCanvas({
                     onClick={zoomOut}
                     size="icon"
                     title="Zoom out"
-                    variant="secondary">
+                    variant="secondary"
+                  >
                     <Minus className="h-4 w-4" />
                   </Button>
                   <Button
@@ -456,7 +460,8 @@ export function EditorCanvas({
                     onClick={fitToView}
                     size="icon"
                     title="Reset view"
-                    variant="secondary">
+                    variant="secondary"
+                  >
                     <Home className="h-4 w-4" />
                   </Button>
                 </div>

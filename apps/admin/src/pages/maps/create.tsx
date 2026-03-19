@@ -1,32 +1,30 @@
-import { type FormEvent, useState } from "react";
+import { MAP_METERS_PER_TILE } from 'carrier-contracts/types';
+import { useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 
-import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-
-import { MAP_METERS_PER_TILE } from "carrier-contracts/types";
-
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { client } from "@/lib/api-client";
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import { client } from '@/lib/api-client';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 
 export function CreateMapPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [kind, setKind] = useState<"wrapped-classic" | "infinite-vector">(
-    "wrapped-classic",
+  const [kind, setKind] = useState<'wrapped-classic' | 'infinite-vector'>(
+    'wrapped-classic'
   );
-  const [name, setName] = useState("");
-  const [widthMeters, setWidthMeters] = useState("1280");
-  const [heightMeters, setHeightMeters] = useState("1280");
+  const [name, setName] = useState('');
+  const [widthMeters, setWidthMeters] = useState('1280');
+  const [heightMeters, setHeightMeters] = useState('1280');
   const [generator, setGenerator] = useState<
-    "diamond-square" | "island-clusters"
-  >("diamond-square");
-  const [seed, setSeed] = useState("");
+    'diamond-square' | 'island-clusters'
+  >('diamond-square');
+  const [seed, setSeed] = useState('');
 
   const parseDerivedTiles = (value: string) => {
     const meters = Number(value);
@@ -50,30 +48,30 @@ export function CreateMapPage() {
 
   const createMutation = useMutation({
     mutationFn: () => {
-      if (kind === "infinite-vector") {
+      if (kind === 'infinite-vector') {
         return client.maps.create({
-          kind: "infinite-vector",
+          kind: 'infinite-vector',
           name: name.trim() || undefined,
-          seed: seed.trim() || undefined,
+          seed: seed.trim() || undefined
         });
       }
       return client.maps.create({
-        kind: "wrapped-classic",
+        kind: 'wrapped-classic',
         generator,
         heightMeters: Number(heightMeters),
         name: name.trim() || undefined,
         seed: seed.trim() || undefined,
-        widthMeters: Number(widthMeters),
+        widthMeters: Number(widthMeters)
       });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["maps"] });
-      toast.success("Map created");
-      void navigate({ to: "/maps" });
+      void queryClient.invalidateQueries({ queryKey: ['maps'] });
+      toast.success('Map created');
+      void navigate({ to: '/maps' });
     },
     onError: () => {
-      toast.error("Failed to create map");
-    },
+      toast.error('Failed to create map');
+    }
   });
 
   const handleSubmit = (e: FormEvent) => {
@@ -99,9 +97,9 @@ export function CreateMapPage() {
               <Select
                 id="kind"
                 value={kind}
-                onChange={(e) =>
+                onChange={e =>
                   setKind(
-                    e.target.value as "wrapped-classic" | "infinite-vector",
+                    e.target.value as 'wrapped-classic' | 'infinite-vector'
                   )
                 }
               >
@@ -115,13 +113,13 @@ export function CreateMapPage() {
               <Input
                 id="name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={e => setName(e.target.value)}
                 placeholder="My Map"
                 maxLength={120}
               />
             </div>
 
-            {kind === "wrapped-classic" && (
+            {kind === 'wrapped-classic' && (
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -130,7 +128,7 @@ export function CreateMapPage() {
                       id="widthMeters"
                       type="number"
                       value={widthMeters}
-                      onChange={(e) => setWidthMeters(e.target.value)}
+                      onChange={e => setWidthMeters(e.target.value)}
                       min={MAP_METERS_PER_TILE}
                       max={4096 * MAP_METERS_PER_TILE}
                       step={MAP_METERS_PER_TILE}
@@ -148,7 +146,7 @@ export function CreateMapPage() {
                       id="heightMeters"
                       type="number"
                       value={heightMeters}
-                      onChange={(e) => setHeightMeters(e.target.value)}
+                      onChange={e => setHeightMeters(e.target.value)}
                       min={MAP_METERS_PER_TILE}
                       max={4096 * MAP_METERS_PER_TILE}
                       step={MAP_METERS_PER_TILE}
@@ -167,9 +165,9 @@ export function CreateMapPage() {
                   <Select
                     id="generator"
                     value={generator}
-                    onChange={(e) =>
+                    onChange={e =>
                       setGenerator(
-                        e.target.value as "diamond-square" | "island-clusters",
+                        e.target.value as 'diamond-square' | 'island-clusters'
                       )
                     }
                   >
@@ -185,7 +183,7 @@ export function CreateMapPage() {
               <Input
                 id="seed"
                 value={seed}
-                onChange={(e) => setSeed(e.target.value)}
+                onChange={e => setSeed(e.target.value)}
                 placeholder="Random if left empty"
                 maxLength={120}
               />
@@ -196,15 +194,15 @@ export function CreateMapPage() {
                 type="submit"
                 disabled={
                   createMutation.isPending ||
-                  (kind === "wrapped-classic" && !wrappedClassicDimensionsValid)
+                  (kind === 'wrapped-classic' && !wrappedClassicDimensionsValid)
                 }
               >
-                {createMutation.isPending ? "Creating..." : "Create Map"}
+                {createMutation.isPending ? 'Creating...' : 'Create Map'}
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void navigate({ to: "/maps" })}
+                onClick={() => void navigate({ to: '/maps' })}
               >
                 Cancel
               </Button>

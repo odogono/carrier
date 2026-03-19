@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import {
+  decodeMapChunkBinary,
+  type RuntimeMapChunk
+} from 'carrier-contracts/types';
+import { useMemo } from 'react';
 
-import { useQueries } from "@tanstack/react-query";
-import { decodeMapChunkBinary, type RuntimeMapChunk } from "carrier-contracts/types";
+import { client } from '@/lib/api-client';
+import { useQueries } from '@tanstack/react-query';
 
-import { client } from "@/lib/api-client";
-
-import type { ViewportChunkRange } from "./use-map-viewport";
+import type { ViewportChunkRange } from './use-map-viewport';
 
 const CHUNK_STALE_MS = 60_000;
 const CHUNK_GC_MS = 600_000;
@@ -13,7 +15,7 @@ const CHUNK_GC_MS = 600_000;
 export const useMapChunks = (
   mapId: string,
   range: ViewportChunkRange,
-  enabled = true,
+  enabled = true
 ) => {
   const chunkCoords = useMemo(() => {
     const coords: Array<{ chunkX: number; chunkZ: number }> = [];
@@ -35,10 +37,10 @@ export const useMapChunks = (
         decodeMapChunkBinary(
           await client.maps.getChunkBinary({ chunkX, chunkZ, mapId })
         ),
-      queryKey: ["map-chunk", mapId, chunkX, chunkZ] as const,
+      queryKey: ['map-chunk', mapId, chunkX, chunkZ] as const,
       staleTime: CHUNK_STALE_MS,
-      structuralSharing: false,
-    })),
+      structuralSharing: false
+    }))
   });
 
   const chunks = useMemo(() => {

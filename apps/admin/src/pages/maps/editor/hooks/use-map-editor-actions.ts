@@ -1,19 +1,18 @@
+import type {
+  BooleanOperation,
+  MapMetadata,
+  WorldBounds
+} from 'carrier-contracts/types';
 import {
   useCallback,
   useState,
   type Dispatch,
-  type SetStateAction,
+  type SetStateAction
 } from 'react';
-
 import { toast } from 'sonner';
 
-import type {
-  BooleanOperation,
-  MapMetadata,
-  WorldBounds,
-} from 'carrier-contracts/types';
-
 import { client } from '@/lib/api-client';
+
 import { canSavePolygonDraft, type EditorTool } from '../helpers';
 import { boundsFromPolygons, createIslandDraft } from '../helpers/drafts';
 import { getErrorCode, toMessage } from '../helpers/errors';
@@ -21,7 +20,7 @@ import type {
   ControlPointDraft,
   DeleteTarget,
   IslandDraft,
-  PolygonDraft,
+  PolygonDraft
 } from '../helpers/types';
 
 type UseMapEditorActionsOptions = {
@@ -29,12 +28,12 @@ type UseMapEditorActionsOptions = {
   deleteTarget: DeleteTarget;
   editorRevision: number | null;
   fitToWorldBounds: (
-    bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>,
+    bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>
   ) => void;
   id: string;
   invalidateIslandMetadataQueries: () => Promise<unknown>;
   invalidateTerrainMutation: (
-    dirtyBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>,
+    dirtyBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>
   ) => Promise<unknown>;
   islandDraft: IslandDraft | null;
   map: MapMetadata | null | undefined;
@@ -73,7 +72,7 @@ export const useMapEditorActions = ({
   setSelectedControlPointId,
   setSelectedIslandId,
   setSelectedPolygonIds,
-  setTool,
+  setTool
 }: UseMapEditorActionsOptions) => {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -88,7 +87,7 @@ export const useMapEditorActions = ({
       await syncRevisionFromServer();
       toast.error('The editor was out of date. Reloaded latest map data.');
     },
-    [syncRevisionFromServer],
+    [syncRevisionFromServer]
   );
 
   const runAction = useCallback(
@@ -105,7 +104,7 @@ export const useMapEditorActions = ({
         setPendingAction(null);
       }
     },
-    [pendingAction],
+    [pendingAction]
   );
 
   const savePolygonDraft = useCallback(async () => {
@@ -128,14 +127,14 @@ export const useMapEditorActions = ({
                   expectedRevision: editorRevision,
                   mapId: id,
                   params: polygonDraft.params,
-                  vertices: polygonDraft.vertices,
+                  vertices: polygonDraft.vertices
                 })
               : await client.maps.updateSourcePolygon({
                   expectedRevision: editorRevision,
                   id: polygonDraft.id ?? '',
                   mapId: id,
                   params: polygonDraft.params,
-                  vertices: polygonDraft.vertices,
+                  vertices: polygonDraft.vertices
                 });
 
           setEditorRevision(result.mapRevision);
@@ -146,9 +145,7 @@ export const useMapEditorActions = ({
           setSelectedControlPointId(null);
           setSelectedIslandId(null);
           toast.success(
-            polygonDraft.kind === 'create'
-              ? 'Polygon created'
-              : 'Polygon saved',
+            polygonDraft.kind === 'create' ? 'Polygon created' : 'Polygon saved'
           );
         } catch (error) {
           if (getErrorCode(error) === 'CONFLICT') {
@@ -160,7 +157,7 @@ export const useMapEditorActions = ({
 
           toast.error(toMessage(error, 'Failed to save polygon'));
         }
-      },
+      }
     );
   }, [
     editorRevision,
@@ -175,7 +172,7 @@ export const useMapEditorActions = ({
     setSelectedControlPointId,
     setSelectedIslandId,
     setSelectedPolygonIds,
-    setTool,
+    setTool
   ]);
 
   const saveControlPointDraft = useCallback(async () => {
@@ -197,14 +194,14 @@ export const useMapEditorActions = ({
             strength: controlPointDraft.strength,
             type: controlPointDraft.type,
             x: controlPointDraft.x,
-            z: controlPointDraft.z,
+            z: controlPointDraft.z
           };
           const result =
             controlPointDraft.kind === 'create'
               ? await client.maps.createControlPoint(payload)
               : await client.maps.updateControlPoint({
                   ...payload,
-                  id: controlPointDraft.id ?? '',
+                  id: controlPointDraft.id ?? ''
                 });
 
           setEditorRevision(result.mapRevision);
@@ -217,7 +214,7 @@ export const useMapEditorActions = ({
           toast.success(
             controlPointDraft.kind === 'create'
               ? 'Control point created'
-              : 'Control point saved',
+              : 'Control point saved'
           );
         } catch (error) {
           if (getErrorCode(error) === 'CONFLICT') {
@@ -229,7 +226,7 @@ export const useMapEditorActions = ({
 
           toast.error(toMessage(error, 'Failed to save control point'));
         }
-      },
+      }
     );
   }, [
     controlPointDraft,
@@ -243,7 +240,7 @@ export const useMapEditorActions = ({
     setSelectedControlPointId,
     setSelectedIslandId,
     setSelectedPolygonIds,
-    setTool,
+    setTool
   ]);
 
   const saveIslandDraft = useCallback(async () => {
@@ -259,7 +256,7 @@ export const useMapEditorActions = ({
           expectedRevision: editorRevision,
           id: islandDraft.id,
           mapId: id,
-          name: islandDraft.name.trim() || null,
+          name: islandDraft.name.trim() || null
         });
 
         setEditorRevision(result.mapRevision);
@@ -285,7 +282,7 @@ export const useMapEditorActions = ({
     islandDraft,
     runAction,
     setEditorRevision,
-    setIslandDraft,
+    setIslandDraft
   ]);
 
   const applyBooleanOperation = useCallback(
@@ -300,13 +297,13 @@ export const useMapEditorActions = ({
             expectedRevision: editorRevision,
             mapId: id,
             operation,
-            polygonIds: selectedPolygonIds,
+            polygonIds: selectedPolygonIds
           });
 
           setEditorRevision(result.mapRevision);
           await invalidateTerrainMutation(result.dirtyBounds);
           setSelectedPolygonIds(
-            result.createdPolygons.map((polygon) => polygon.id),
+            result.createdPolygons.map(polygon => polygon.id)
           );
           setSelectedControlPointId(null);
           setSelectedIslandId(null);
@@ -345,8 +342,8 @@ export const useMapEditorActions = ({
       setSelectedControlPointId,
       setSelectedIslandId,
       setSelectedPolygonIds,
-      setTool,
-    ],
+      setTool
+    ]
   );
 
   const confirmDelete = useCallback(async () => {
@@ -360,7 +357,7 @@ export const useMapEditorActions = ({
           const result = await client.maps.deleteSourcePolygon({
             expectedRevision: editorRevision,
             id: deleteTarget.id,
-            mapId: id,
+            mapId: id
           });
 
           setEditorRevision(result.mapRevision);
@@ -373,7 +370,7 @@ export const useMapEditorActions = ({
           const result = await client.maps.deleteControlPoint({
             expectedRevision: editorRevision,
             id: deleteTarget.id,
-            mapId: id,
+            mapId: id
           });
 
           setEditorRevision(result.mapRevision);
@@ -414,7 +411,7 @@ export const useMapEditorActions = ({
     setPolygonDraft,
     setSelectedControlPointId,
     setSelectedPolygonIds,
-    setTool,
+    setTool
   ]);
 
   return {
@@ -423,6 +420,6 @@ export const useMapEditorActions = ({
     pendingAction,
     saveControlPointDraft,
     saveIslandDraft,
-    savePolygonDraft,
+    savePolygonDraft
   };
 };

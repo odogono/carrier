@@ -1,16 +1,18 @@
-import Konva from "konva";
-import { useEffect, useMemo, useRef } from "react";
-import { Image, Layer, Rect, Stage } from "react-konva";
+import {
+  isFiniteMap,
+  type MapMetadata,
+  type RuntimeMapChunk
+} from 'carrier-contracts/types';
+import Konva from 'konva';
+import { useEffect, useMemo, useRef } from 'react';
+import { Image, Layer, Rect, Stage } from 'react-konva';
 
-import { isFiniteMap, type MapMetadata, type RuntimeMapChunk } from "carrier-contracts/types";
+import type { Viewport } from '@/hooks/use-map-viewport';
+import { clearBitmapCache, getChunkBitmap } from '@/lib/chunk-bitmap';
 
-import { clearBitmapCache, getChunkBitmap } from "@/lib/chunk-bitmap";
+import { GridLines } from './grid-lines';
 
-import type { Viewport } from "@/hooks/use-map-viewport";
-
-import { GridLines } from "./grid-lines";
-
-const BACKGROUND_COLOR = "#0a1320";
+const BACKGROUND_COLOR = '#0a1320';
 
 type MapStageProps = {
   canvasHeight: number;
@@ -25,7 +27,7 @@ export function MapStage({
   canvasWidth,
   chunks,
   map,
-  viewport,
+  viewport
 }: MapStageProps) {
   const terrainLayerRef = useRef<Konva.Layer>(null);
 
@@ -46,13 +48,13 @@ export function MapStage({
   }, [map.id]);
 
   const chunkImages = useMemo(() => {
-    return Array.from(chunks.values()).map((chunk) => ({
+    return Array.from(chunks.values()).map(chunk => ({
       height: chunk.tileHeight,
       image: getChunkBitmap(chunk),
       key: `${chunk.chunkX}:${chunk.chunkZ}`,
       width: chunk.tileWidth,
       x: chunk.originTileX,
-      y: chunk.originTileZ,
+      y: chunk.originTileZ
     }));
   }, [chunks]);
 
@@ -68,7 +70,7 @@ export function MapStage({
       style={{ background: BACKGROUND_COLOR }}
     >
       <Layer ref={terrainLayerRef}>
-        {chunkImages.map((ci) => (
+        {chunkImages.map(ci => (
           <Image
             key={ci.key}
             image={ci.image}

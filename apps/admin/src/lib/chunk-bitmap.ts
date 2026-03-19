@@ -1,6 +1,6 @@
-import type { RuntimeMapChunk } from "carrier-contracts/types";
+import type { RuntimeMapChunk } from 'carrier-contracts/types';
 
-import { tileColorRgb } from "@/lib/terrain-colors";
+import { tileColorRgb } from '@/lib/terrain-colors';
 
 type ChunkBitmapEntry = {
   bitmap: HTMLCanvasElement;
@@ -32,10 +32,10 @@ const cacheKey = (chunk: RuntimeMapChunk) =>
 const renderChunkToCanvas = (chunk: RuntimeMapChunk): HTMLCanvasElement => {
   const w = chunk.tileWidth;
   const h = chunk.tileHeight;
-  const canvas = document.createElement("canvas");
+  const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext('2d')!;
   const imageData = ctx.createImageData(w, h);
   const pixels = imageData.data;
 

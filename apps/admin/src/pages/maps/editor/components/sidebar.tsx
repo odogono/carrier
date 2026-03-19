@@ -1,12 +1,11 @@
-import { Save, Trash2 } from 'lucide-react';
-
 import type {
   ControlPoint,
   DerivedIsland,
   SourcePolygon,
   WorldBounds,
-  WorldPoint,
+  WorldPoint
 } from 'carrier-contracts/types';
+import { Save, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -14,23 +13,24 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
+  CardTitle
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+
 import { DEFAULT_SOURCE_POLYGON_PARAMS, canSavePolygonDraft } from '../helpers';
 import {
   createControlPointDraft,
   createIslandDraft,
   createPolygonDraft,
   getBoundsCenter,
-  parseNumber,
+  parseNumber
 } from '../helpers/drafts';
 import type {
   ControlPointDraft,
   IslandDraft,
-  PolygonDraft,
+  PolygonDraft
 } from '../helpers/types';
 import { OverviewPane } from './overview-pane';
 
@@ -114,7 +114,7 @@ export function EditorSidebar({
   onSaveControlPointDraft,
   onSaveIslandDraft,
   onSavePolygonDraft,
-  viewportBounds,
+  viewportBounds
 }: EditorSidebarProps) {
   return (
     <div className="space-y-4">
@@ -154,16 +154,16 @@ export function EditorSidebar({
                 id="polygon-noise-scale"
                 label="Noise Scale"
                 value={currentPolygonForInspector.params.noiseScaleMeters}
-                onChange={(noiseScaleMeters) => {
-                  setPolygonDraft((draft) => ({
+                onChange={noiseScaleMeters => {
+                  setPolygonDraft(draft => ({
                     ...(draft ??
                       createPolygonDraft(selectedPolygon ?? undefined)),
                     params: {
                       ...(draft?.params ??
                         selectedPolygon?.params ??
                         DEFAULT_SOURCE_POLYGON_PARAMS),
-                      noiseScaleMeters,
-                    },
+                      noiseScaleMeters
+                    }
                   }));
                 }}
               />
@@ -171,16 +171,16 @@ export function EditorSidebar({
                 id="polygon-displacement"
                 label="Max Displacement"
                 value={currentPolygonForInspector.params.maxDisplacementMeters}
-                onChange={(maxDisplacementMeters) => {
-                  setPolygonDraft((draft) => ({
+                onChange={maxDisplacementMeters => {
+                  setPolygonDraft(draft => ({
                     ...(draft ??
                       createPolygonDraft(selectedPolygon ?? undefined)),
                     params: {
                       ...(draft?.params ??
                         selectedPolygon?.params ??
                         DEFAULT_SOURCE_POLYGON_PARAMS),
-                      maxDisplacementMeters,
-                    },
+                      maxDisplacementMeters
+                    }
                   }));
                 }}
               />
@@ -189,16 +189,16 @@ export function EditorSidebar({
                 label="Roughness"
                 step="0.05"
                 value={currentPolygonForInspector.params.roughness}
-                onChange={(roughness) => {
-                  setPolygonDraft((draft) => ({
+                onChange={roughness => {
+                  setPolygonDraft(draft => ({
                     ...(draft ??
                       createPolygonDraft(selectedPolygon ?? undefined)),
                     params: {
                       ...(draft?.params ??
                         selectedPolygon?.params ??
                         DEFAULT_SOURCE_POLYGON_PARAMS),
-                      roughness,
-                    },
+                      roughness
+                    }
                   }));
                 }}
               />
@@ -208,18 +208,20 @@ export function EditorSidebar({
                     !polygonDraft ||
                     !canSavePolygonDraft(
                       currentPolygonForInspector.vertices,
-                      currentPolygonForInspector.params,
+                      currentPolygonForInspector.params
                     ) ||
                     !polygonDirty
                   }
-                  onClick={onSavePolygonDraft}>
+                  onClick={onSavePolygonDraft}
+                >
                   <Save className="mr-2 h-4 w-4" />
                   Save
                 </Button>
                 <Button
                   disabled={!polygonDraft}
                   onClick={onResetPolygonDraft}
-                  variant="outline">
+                  variant="outline"
+                >
                   Cancel
                 </Button>
                 {selectedPolygon && (
@@ -227,10 +229,11 @@ export function EditorSidebar({
                     onClick={() =>
                       setDeleteTarget({
                         id: selectedPolygon.id,
-                        kind: 'polygon',
+                        kind: 'polygon'
                       })
                     }
-                    variant="destructive">
+                    variant="destructive"
+                  >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
                   </Button>
@@ -261,15 +264,16 @@ export function EditorSidebar({
                   <Select
                     id="control-type"
                     value={currentControlPointForInspector.type}
-                    onChange={(event) =>
-                      setControlPointDraft((draft) => ({
+                    onChange={event =>
+                      setControlPointDraft(draft => ({
                         ...(draft ??
                           createControlPointDraft(
-                            selectedControlPoint ?? undefined,
+                            selectedControlPoint ?? undefined
                           )),
-                        type: event.target.value as ControlPoint['type'],
+                        type: event.target.value as ControlPoint['type']
                       }))
-                    }>
+                    }
+                  >
                     <option value="plain">Plain</option>
                     <option value="peak">Peak</option>
                     <option value="valley">Valley</option>
@@ -280,13 +284,13 @@ export function EditorSidebar({
                   label="Strength"
                   step="0.1"
                   value={currentControlPointForInspector.strength}
-                  onChange={(strength) =>
-                    setControlPointDraft((draft) => ({
+                  onChange={strength =>
+                    setControlPointDraft(draft => ({
                       ...(draft ??
                         createControlPointDraft(
-                          selectedControlPoint ?? undefined,
+                          selectedControlPoint ?? undefined
                         )),
-                      strength,
+                      strength
                     }))
                   }
                 />
@@ -296,13 +300,13 @@ export function EditorSidebar({
                   id="control-elevation"
                   label="Elevation"
                   value={currentControlPointForInspector.elevationMeters}
-                  onChange={(elevationMeters) =>
-                    setControlPointDraft((draft) => ({
+                  onChange={elevationMeters =>
+                    setControlPointDraft(draft => ({
                       ...(draft ??
                         createControlPointDraft(
-                          selectedControlPoint ?? undefined,
+                          selectedControlPoint ?? undefined
                         )),
-                      elevationMeters,
+                      elevationMeters
                     }))
                   }
                 />
@@ -310,13 +314,13 @@ export function EditorSidebar({
                   id="control-influence"
                   label="Influence Radius"
                   value={currentControlPointForInspector.influenceMeters}
-                  onChange={(influenceMeters) =>
-                    setControlPointDraft((draft) => ({
+                  onChange={influenceMeters =>
+                    setControlPointDraft(draft => ({
                       ...(draft ??
                         createControlPointDraft(
-                          selectedControlPoint ?? undefined,
+                          selectedControlPoint ?? undefined
                         )),
-                      influenceMeters,
+                      influenceMeters
                     }))
                   }
                 />
@@ -326,13 +330,13 @@ export function EditorSidebar({
                   id="control-x"
                   label="X"
                   value={currentControlPointForInspector.x}
-                  onChange={(x) =>
-                    setControlPointDraft((draft) => ({
+                  onChange={x =>
+                    setControlPointDraft(draft => ({
                       ...(draft ??
                         createControlPointDraft(
-                          selectedControlPoint ?? undefined,
+                          selectedControlPoint ?? undefined
                         )),
-                      x,
+                      x
                     }))
                   }
                 />
@@ -340,13 +344,13 @@ export function EditorSidebar({
                   id="control-z"
                   label="Z"
                   value={currentControlPointForInspector.z}
-                  onChange={(z) =>
-                    setControlPointDraft((draft) => ({
+                  onChange={z =>
+                    setControlPointDraft(draft => ({
                       ...(draft ??
                         createControlPointDraft(
-                          selectedControlPoint ?? undefined,
+                          selectedControlPoint ?? undefined
                         )),
-                      z,
+                      z
                     }))
                   }
                 />
@@ -354,14 +358,16 @@ export function EditorSidebar({
               <div className="flex flex-wrap gap-2">
                 <Button
                   disabled={!controlPointDraft}
-                  onClick={onSaveControlPointDraft}>
+                  onClick={onSaveControlPointDraft}
+                >
                   <Save className="mr-2 h-4 w-4" />
                   Save
                 </Button>
                 <Button
                   disabled={!controlPointDraft}
                   onClick={onResetControlPointDraft}
-                  variant="outline">
+                  variant="outline"
+                >
                   Cancel
                 </Button>
                 {selectedControlPoint && (
@@ -369,10 +375,11 @@ export function EditorSidebar({
                     onClick={() =>
                       setDeleteTarget({
                         id: selectedControlPoint.id,
-                        kind: 'control-point',
+                        kind: 'control-point'
                       })
                     }
-                    variant="destructive">
+                    variant="destructive"
+                  >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
                   </Button>
@@ -402,7 +409,7 @@ export function EditorSidebar({
                 No derived islands yet.
               </div>
             )}
-            {derivedIslands.map((island) => (
+            {derivedIslands.map(island => (
               <Button
                 className="w-full justify-between"
                 key={island.id}
@@ -413,9 +420,8 @@ export function EditorSidebar({
                   setSelectedPolygonIds([]);
                   onRecenter(getBoundsCenter(island.bbox));
                 }}
-                variant={
-                  selectedIslandId === island.id ? 'default' : 'outline'
-                }>
+                variant={selectedIslandId === island.id ? 'default' : 'outline'}
+              >
                 <span className="truncate">{island.name ?? island.id}</span>
                 <span className="text-xs">
                   {Math.round(island.areaMeters2)}m²
@@ -429,19 +435,17 @@ export function EditorSidebar({
                 id="island-name"
                 label="Name"
                 value={islandInspectorDraft.name}
-                onChange={(name) =>
-                  setIslandDraft((draft) =>
-                    draft ? { ...draft, name } : draft,
-                  )
+                onChange={name =>
+                  setIslandDraft(draft => (draft ? { ...draft, name } : draft))
                 }
               />
               <TextInput
                 id="island-owner"
                 label="Default Owner"
                 value={islandInspectorDraft.defaultOwner}
-                onChange={(defaultOwner) =>
-                  setIslandDraft((draft) =>
-                    draft ? { ...draft, defaultOwner } : draft,
+                onChange={defaultOwner =>
+                  setIslandDraft(draft =>
+                    draft ? { ...draft, defaultOwner } : draft
                   )
                 }
               />
@@ -449,9 +453,9 @@ export function EditorSidebar({
                 id="island-faction"
                 label="Default Faction"
                 value={islandInspectorDraft.defaultFaction}
-                onChange={(defaultFaction) =>
-                  setIslandDraft((draft) =>
-                    draft ? { ...draft, defaultFaction } : draft,
+                onChange={defaultFaction =>
+                  setIslandDraft(draft =>
+                    draft ? { ...draft, defaultFaction } : draft
                   )
                 }
               />
@@ -464,10 +468,11 @@ export function EditorSidebar({
                   disabled={!islandDraft}
                   onClick={() =>
                     setIslandDraft(
-                      selectedIsland ? createIslandDraft(selectedIsland) : null,
+                      selectedIsland ? createIslandDraft(selectedIsland) : null
                     )
                   }
-                  variant="outline">
+                  variant="outline"
+                >
                   Cancel
                 </Button>
               </div>
@@ -496,7 +501,7 @@ function NumberInput({ id, label, onChange, step, value }: NumberInputProps) {
         step={step}
         type="number"
         value={value}
-        onChange={(event) => onChange(parseNumber(event.target.value, value))}
+        onChange={event => onChange(parseNumber(event.target.value, value))}
       />
     </div>
   );
@@ -516,7 +521,7 @@ function TextInput({ id, label, onChange, value }: TextInputProps) {
       <Input
         id={id}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={event => onChange(event.target.value)}
       />
     </div>
   );
@@ -535,7 +540,7 @@ function PolygonParamInput({
   label,
   onChange,
   step,
-  value,
+  value
 }: PolygonParamInputProps) {
   return (
     <NumberInput

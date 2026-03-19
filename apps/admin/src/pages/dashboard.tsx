@@ -1,21 +1,21 @@
-import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { Map, Plus } from "lucide-react";
+import { Map, Plus } from 'lucide-react';
 
-import { Button } from "@/components/ui/button";
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { client } from "@/lib/api-client";
+  CardTitle
+} from '@/components/ui/card';
+import { client } from '@/lib/api-client';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 
 export function DashboardPage() {
   const mapsQuery = useQuery({
     queryFn: () => client.maps.list({}),
-    queryKey: ["maps"],
+    queryKey: ['maps']
   });
 
   const maps = mapsQuery.data ?? [];
@@ -36,7 +36,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {mapsQuery.isLoading ? "..." : maps.length}
+              {mapsQuery.isLoading ? '...' : maps.length}
             </div>
           </CardContent>
         </Card>
@@ -50,17 +50,22 @@ export function DashboardPage() {
             {latestMap ? (
               <>
                 <div className="text-2xl font-bold">
-                  {latestMap.name ?? "Unnamed"}
+                  {latestMap.name ?? 'Unnamed'}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {latestMap.extent.kind === 'finite'
-                    ? <>{latestMap.extent.widthTiles}&times;{latestMap.extent.heightTiles} tiles</>
-                    : 'Infinite'}
+                  {latestMap.extent.kind === 'finite' ? (
+                    <>
+                      {latestMap.extent.widthTiles}&times;
+                      {latestMap.extent.heightTiles} tiles
+                    </>
+                  ) : (
+                    'Infinite'
+                  )}
                 </p>
               </>
             ) : (
               <div className="text-sm text-muted-foreground">
-                {mapsQuery.isLoading ? "Loading..." : "No maps yet"}
+                {mapsQuery.isLoading ? 'Loading...' : 'No maps yet'}
               </div>
             )}
           </CardContent>
@@ -95,7 +100,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {maps.slice(0, 5).map((map) => (
+              {maps.slice(0, 5).map(map => (
                 <Link
                   key={map.id}
                   to="/maps/$id"
@@ -103,11 +108,16 @@ export function DashboardPage() {
                   className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent"
                 >
                   <div>
-                    <div className="font-medium">{map.name ?? "Unnamed"}</div>
+                    <div className="font-medium">{map.name ?? 'Unnamed'}</div>
                     <div className="text-sm text-muted-foreground">
-                      {map.extent.kind === 'finite'
-                        ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles} tiles</>
-                        : 'Infinite'}{" "}
+                      {map.extent.kind === 'finite' ? (
+                        <>
+                          {map.extent.widthTiles}&times;{map.extent.heightTiles}{' '}
+                          tiles
+                        </>
+                      ) : (
+                        'Infinite'
+                      )}{' '}
                       &middot; {map.kind}
                     </div>
                   </div>

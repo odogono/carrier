@@ -1,14 +1,14 @@
 import { StrictMode } from 'react';
-
-import { RouterProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { Toaster } from 'sonner';
 
+import { RouterProvider } from '@tanstack/react-router';
+
 import './index.css';
 
+import { QueryProvider } from '@/contexts/query/provider';
 import { ThemeProvider } from '@/contexts/theme/provider';
 import { router } from '@/router';
-import { QueryProvider } from '@/contexts/query/provider';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,5 +18,5 @@ createRoot(document.getElementById('root')!).render(
         <Toaster />
       </ThemeProvider>
     </QueryProvider>
-  </StrictMode>,
+  </StrictMode>
 );
