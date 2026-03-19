@@ -5,7 +5,13 @@ import type {
   WorldPoint
 } from 'carrier-contracts/types';
 import { Home, Minus, Plus } from 'lucide-react';
-import type { KeyboardEvent, PointerEvent, RefObject, WheelEvent } from 'react';
+import type {
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+  RefObject,
+  WheelEvent
+} from 'react';
 
 import { MapStage } from '@/components/map-viewer/map-stage';
 import { Button } from '@/components/ui/button';
@@ -14,14 +20,14 @@ import type { Viewport } from '@/hooks/use-map-viewport';
 import {
   canSavePolygonDraft,
   getPolygonEdgeInsertPosition,
-  nextOrderedSelection,
   type EditorTool
 } from '../helpers';
 import { STOP_PROPAGATION } from '../helpers/drafts';
 import type {
   CanvasDragState,
   ControlPointDraft,
-  PolygonDraft
+  PolygonDraft,
+  SourcePolygonLike
 } from '../helpers/types';
 
 type EditorCanvasProps = {
@@ -46,12 +52,6 @@ type EditorCanvasProps = {
       | ((current: PolygonDraft | null) => PolygonDraft | null),
     record?: boolean
   ) => void;
-  setSelectedControlPointId: (value: string | null, record?: boolean) => void;
-  setSelectedIslandId: (value: string | null, record?: boolean) => void;
-  setSelectedPolygonIds: (
-    value: string[] | ((current: string[]) => string[]),
-    record?: boolean
-  ) => void;
   size: { height: number; width: number };
   toScreenPoint: (point: Pick<WorldPoint, 'x' | 'z'>) => {
     x: number;
@@ -67,6 +67,14 @@ type EditorCanvasProps = {
   zoomIn: () => void;
   zoomOut: () => void;
   fitToView: () => void;
+  onControlPointClick: (
+    event: MouseEvent<SVGCircleElement>,
+    point: ControlPoint
+  ) => void;
+  onControlPointPointerDown: (
+    event: PointerEvent<SVGCircleElement>,
+    point: ControlPoint
+  ) => void;
   onCanvasClick: (event: PointerEvent<SVGSVGElement>) => void;
   onCanvasKeyDown: (event: KeyboardEvent<SVGSVGElement>) => void;
   onCanvasPointerCancel: (event: PointerEvent<SVGSVGElement>) => void;
@@ -74,6 +82,14 @@ type EditorCanvasProps = {
   onCanvasPointerLeave: (event: PointerEvent<SVGSVGElement>) => void;
   onCanvasPointerMove: (event: PointerEvent<SVGSVGElement>) => void;
   onCanvasPointerUp: (event: PointerEvent<SVGSVGElement>) => void;
+  onPolygonClick: (
+    event: MouseEvent<SVGPolygonElement>,
+    polygon: SourcePolygonLike
+  ) => void;
+  onPolygonPointerDown: (
+    event: PointerEvent<SVGPolygonElement>,
+    polygon: SourcePolygonLike
+  ) => void;
   onWheel: (event: WheelEvent<SVGSVGElement>) => void;
   onWheelCapture: (event: WheelEvent<HTMLDivElement>) => void;
 };
@@ -89,6 +105,8 @@ export function EditorCanvas({
   highlightedIslandPolygonIds,
   interactionRef,
   map,
+  onControlPointClick,
+  onControlPointPointerDown,
   onCanvasClick,
   onCanvasKeyDown,
   onCanvasPointerCancel,
@@ -96,6 +114,8 @@ export function EditorCanvas({
   onCanvasPointerLeave,
   onCanvasPointerMove,
   onCanvasPointerUp,
+  onPolygonClick,
+  onPolygonPointerDown,
   onWheel,
   onWheelCapture,
   overlayPolygons,
@@ -104,9 +124,6 @@ export function EditorCanvas({
   selectedPolygonIds,
   setDragState,
   setPolygonDraft,
-  setSelectedControlPointId,
-  setSelectedIslandId,
-  setSelectedPolygonIds,
   size,
   toScreenPoint,
   toWorldPoint,
@@ -117,6 +134,11 @@ export function EditorCanvas({
 }: EditorCanvasProps) {
   const selectedPolygonSet = new Set(selectedPolygonIds);
   const zoomPercent = Math.round(viewport.zoom * 100);
+  const showEditVertices =
+    polygonDraft?.kind === 'edit' &&
+    (tool === 'select' || tool === 'edit-vertices');
+  const marqueeBounds =
+    dragState?.kind === 'marquee' ? dragState.bounds : null;
 
   return (
     <div className="space-y-4">
@@ -190,21 +212,9 @@ export function EditorCanvas({
                           }
                           onClick={event => {
                             STOP_PROPAGATION(event);
-                            setSelectedPolygonIds(selection =>
-                              nextOrderedSelection(
-                                selection,
-                                polygon.id,
-                                event.shiftKey
-                              ),
-                              true
-                            );
-                            setSelectedControlPointId(null);
-                            setSelectedIslandId(null);
-                            if (tool !== 'edit-vertices') {
-                              setPolygonDraft(null);
-                            }
+                            onPolygonClick(event, polygon);
                           }}
-                          onPointerDown={STOP_PROPAGATION}
+                          onPointerDown={event => onPolygonPointerDown(event, polygon)}
                           points={points}
                           stroke={
                             selected
@@ -218,7 +228,12 @@ export function EditorCanvas({
                       );
                     })}
 
-                    {polygonDraft && (
+                    {polygonDraft && (() => {
+                      const draftAsSource: SourcePolygonLike | null =
+                        polygonDraft.kind === 'edit' && polygonDraft.id
+                          ? { id: polygonDraft.id, params: polygonDraft.params, vertices: polygonDraft.vertices }
+                          : null;
+                      return (
                       <>
                         <polygon
                           fill={
@@ -226,6 +241,21 @@ export function EditorCanvas({
                               ? 'rgba(34,197,94,0.18)'
                               : 'rgba(250,204,21,0.18)'
                           }
+                          onClick={event => {
+                            if (!draftAsSource) {
+                              return;
+                            }
+
+                            STOP_PROPAGATION(event);
+                            onPolygonClick(event, draftAsSource);
+                          }}
+                          onPointerDown={event => {
+                            if (!draftAsSource) {
+                              return;
+                            }
+
+                            onPolygonPointerDown(event, draftAsSource);
+                          }}
                           points={polygonDraft.vertices
                             .map(vertex => {
                               const screen = toScreenPoint(vertex);
@@ -280,7 +310,7 @@ export function EditorCanvas({
                               }}
                               onPointerDown={event => {
                                 STOP_PROPAGATION(event);
-                                if (tool !== 'edit-vertices') {
+                                if (!showEditVertices) {
                                   return;
                                 }
 
@@ -304,7 +334,7 @@ export function EditorCanvas({
                             />
                           );
                         })}
-                        {tool === 'edit-vertices' &&
+                        {showEditVertices &&
                           polygonDraft.vertices.map((vertex, index) => {
                             const next =
                               polygonDraft.vertices[
@@ -320,11 +350,14 @@ export function EditorCanvas({
                             return (
                               <line
                                 key={`edge-${index}`}
-                                onClick={event => {
-                                  STOP_PROPAGATION(event);
-                                  const world = toWorldPoint(
-                                    event as unknown as PointerEvent<SVGSVGElement>
-                                  );
+                            onClick={event => {
+                              STOP_PROPAGATION(event);
+                              if (!showEditVertices) {
+                                return;
+                              }
+                              const world = toWorldPoint(
+                                event as unknown as PointerEvent<SVGSVGElement>
+                              );
                                   const insertAt = getPolygonEdgeInsertPosition(
                                     vertex,
                                     next,
@@ -348,7 +381,7 @@ export function EditorCanvas({
                                     true
                                   );
                                 }}
-                                onPointerDown={STOP_PROPAGATION}
+                            onPointerDown={STOP_PROPAGATION}
                                 stroke="transparent"
                                 strokeWidth={14}
                                 x1={from.x}
@@ -359,7 +392,8 @@ export function EditorCanvas({
                             );
                           })}
                       </>
-                    )}
+                      );
+                    })()}
 
                     {controlPoints.map(point => {
                       const screen = toScreenPoint(point);
@@ -372,25 +406,11 @@ export function EditorCanvas({
                             fill={selected ? '#f97316' : '#e2e8f0'}
                             onClick={event => {
                               STOP_PROPAGATION(event);
-                              setSelectedControlPointId(point.id);
-                              setSelectedPolygonIds([]);
-                              setSelectedIslandId(null);
-                              setPolygonDraft(null);
+                              onControlPointClick(event, point);
                             }}
-                            onPointerDown={event => {
-                              STOP_PROPAGATION(event);
-                              interactionRef.current?.setPointerCapture(
-                                event.pointerId
-                              );
-                              setSelectedControlPointId(point.id);
-                              setSelectedPolygonIds([]);
-                              setSelectedIslandId(null);
-                              setDragState({
-                                kind: 'control-point',
-                                pointId: point.id,
-                                pointerId: event.pointerId
-                              });
-                            }}
+                            onPointerDown={event =>
+                              onControlPointPointerDown(event, point)
+                            }
                             r={7}
                             stroke="#0f172a"
                             strokeWidth={2}
@@ -417,33 +437,60 @@ export function EditorCanvas({
                       );
                     })}
 
-                    {controlPointDraft && (
-                      <>
-                        <circle
-                          cx={toScreenPoint(controlPointDraft).x}
-                          cy={toScreenPoint(controlPointDraft).z}
-                          fill="transparent"
+                    {controlPointDraft && (() => {
+                      const screenDraft = toScreenPoint(controlPointDraft);
+                      return (
+                        <>
+                          <circle
+                            cx={screenDraft.x}
+                            cy={screenDraft.z}
+                            fill="transparent"
+                            pointerEvents="none"
+                            r={
+                              (controlPointDraft.influenceMeters /
+                                map.resolution.metersPerTile) *
+                              viewport.zoom
+                            }
+                            stroke="rgba(251,146,60,0.4)"
+                            strokeDasharray="8 6"
+                            strokeWidth={2}
+                          />
+                          <circle
+                            cx={screenDraft.x}
+                            cy={screenDraft.z}
+                            fill="#fb923c"
+                            pointerEvents="none"
+                            r={8}
+                            stroke="#fff7ed"
+                            strokeWidth={2}
+                          />
+                        </>
+                      );
+                    })()}
+
+                    {marqueeBounds && (() => {
+                      const screenMin = toScreenPoint({
+                        x: marqueeBounds.minX,
+                        z: marqueeBounds.minZ
+                      });
+                      const screenMax = toScreenPoint({
+                        x: marqueeBounds.maxX,
+                        z: marqueeBounds.maxZ
+                      });
+                      return (
+                        <rect
+                          fill="rgba(56, 189, 248, 0.16)"
+                          height={Math.abs(screenMax.z - screenMin.z) || 1}
                           pointerEvents="none"
-                          r={
-                            (controlPointDraft.influenceMeters /
-                              map.resolution.metersPerTile) *
-                            viewport.zoom
-                          }
-                          stroke="rgba(251,146,60,0.4)"
-                          strokeDasharray="8 6"
+                          stroke="#38bdf8"
+                          strokeDasharray="8 4"
                           strokeWidth={2}
+                          width={Math.abs(screenMax.x - screenMin.x) || 1}
+                          x={Math.min(screenMin.x, screenMax.x)}
+                          y={Math.min(screenMin.z, screenMax.z)}
                         />
-                        <circle
-                          cx={toScreenPoint(controlPointDraft).x}
-                          cy={toScreenPoint(controlPointDraft).z}
-                          fill="#fb923c"
-                          pointerEvents="none"
-                          r={8}
-                          stroke="#fff7ed"
-                          strokeWidth={2}
-                        />
-                      </>
-                    )}
+                      );
+                    })()}
                   </svg>
                 </div>
                 <div className="absolute right-3 bottom-3 flex gap-1">
@@ -483,7 +530,9 @@ export function EditorCanvas({
             <span>
               {tool === 'draw-polygon'
                 ? 'Click to place vertices · Enter or first vertex to save · Esc to cancel'
-                : 'Drag to pan · Scroll to zoom · Delete removes selected items'}
+                : tool === 'pan'
+                  ? 'Drag to pan · Scroll to zoom · Delete removes selected items'
+                  : 'Click to select · Drag selected polygon to move · Drag empty space for marquee'}
             </span>
           </div>
         </div>
@@ -500,8 +549,8 @@ function CardShell({ children }: { children: React.ReactNode }) {
           Terrain Editor
         </h3>
         <p className="text-sm text-muted-foreground">
-          Drag to pan, scroll to zoom, click to author objects, and use
-          shift-click for ordered boolean selection.
+          Use pan for viewport movement, select for editing, and shift-click
+          for ordered boolean selection.
         </p>
       </div>
       <div className="p-6 pt-0">{children}</div>

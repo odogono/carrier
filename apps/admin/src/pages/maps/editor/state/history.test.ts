@@ -30,10 +30,11 @@ describe('editor history state', () => {
             { x: 10, z: 10 }
           ]
         },
+        polygonControlPointDrafts: [],
         tool: 'draw-polygon'
       },
       before: initial,
-      remoteTransition: null
+      remoteTransitions: []
     });
 
     expect(store.get(editorSnapshotAtom).polygonDraft?.vertices).toHaveLength(3);
@@ -60,6 +61,7 @@ describe('editor history state', () => {
         }),
         id: 'polygon-1'
       },
+      polygonControlPointDrafts: [],
       selectedPolygonIds: ['polygon-1']
     };
 
@@ -71,14 +73,15 @@ describe('editor history state', () => {
         before: [
           {
             bbox: { maxX: 10, maxZ: 10, minX: 0, minZ: 0 },
-            centroid: { x: 5, z: 5 },
             createdAt: '',
             id: 'polygon-1',
+            mapId: 'map-1',
             params: {
               maxDisplacementMeters: 12,
               noiseScaleMeters: 64,
               roughness: 0.5
             },
+            retiredAt: null,
             status: 'active',
             updatedAt: '',
             vertices: [

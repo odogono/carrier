@@ -37,6 +37,7 @@ type SnapshotUpdater<T> = (value: T | ((current: T) => T), record?: boolean) => 
 
 type UseMapEditorActionsOptions = {
   controlPointDraft: ControlPointDraft | null;
+  controlPoints: ControlPoint[];
   deleteTarget: DeleteTarget;
   editorRevision: number | null;
   fitToWorldBounds: (
@@ -52,6 +53,7 @@ type UseMapEditorActionsOptions = {
   islandDraft: IslandDraft | null;
   map: MapMetadata | null | undefined;
   polygonDraft: PolygonDraft | null;
+  polygonControlPointDrafts: ControlPointDraft[];
   polygons: SourcePolygon[];
   recordHistory: (entry: HistoryEntry) => void;
   reloadAll: () => Promise<MapMetadata | null>;
@@ -117,6 +119,7 @@ const toControlPointTransition = (
 
 export const useMapEditorActions = ({
   controlPointDraft,
+  controlPoints,
   deleteTarget,
   editorRevision,
   fitToWorldBounds,
@@ -128,6 +131,7 @@ export const useMapEditorActions = ({
   islandDraft,
   map,
   polygonDraft,
+  polygonControlPointDrafts,
   polygons,
   recordHistory,
   reloadAll,
@@ -375,37 +379,48 @@ export const useMapEditorActions = ({
           let nextSnapshot = direction === 'undo' ? entry.before : entry.after;
           let nextRevision = editorRevision;
 
-          if (entry.remoteTransition) {
-            const result = await executeRemoteTransition(
-              entry.remoteTransition,
-              targetSide,
-              editorRevision
-            );
+          if (entry.remoteTransitions.length > 0) {
+            const remappedTransitions: RemoteTransition[] = [];
+            let combinedDirtyBounds: WorldBounds | null = null;
 
-            nextRevision = result.revision;
-            nextEntry = {
-              ...entry,
-              remoteTransition: result.transition
-            };
-            nextSnapshot = remapSnapshotForTransition(
-              nextSnapshot,
-              result.transition,
-              targetSide
-            );
+            for (const transition of entry.remoteTransitions) {
+              const result = await executeRemoteTransition(
+                transition,
+                targetSide,
+                nextRevision
+              );
 
-            if (result.dirtyBounds) {
-              await invalidateTerrainMutation(result.dirtyBounds);
+              nextRevision = result.revision;
+              remappedTransitions.push(result.transition);
+              nextSnapshot = remapSnapshotForTransition(
+                nextSnapshot,
+                result.transition,
+                targetSide
+              );
+              combinedDirtyBounds = mergeWorldBounds(
+                combinedDirtyBounds,
+                result.dirtyBounds
+              );
+
+              if (result.transition.kind === 'polygon') {
+                const focusBounds = boundsFromPolygons(
+                  targetSide === 'before'
+                    ? result.transition.before
+                    : result.transition.after
+                );
+                if (focusBounds) {
+                  fitToWorldBounds(focusBounds);
+                }
+              }
             }
 
-            if (result.transition.kind === 'polygon') {
-              const focusBounds = boundsFromPolygons(
-                targetSide === 'before'
-                  ? result.transition.before
-                  : result.transition.after
-              );
-              if (focusBounds) {
-                fitToWorldBounds(focusBounds);
-              }
+            nextEntry = {
+              ...entry,
+              remoteTransitions: remappedTransitions
+            };
+
+            if (combinedDirtyBounds) {
+              await invalidateTerrainMutation(combinedDirtyBounds);
             }
           }
 
@@ -463,46 +478,90 @@ export const useMapEditorActions = ({
       polygonDraft.kind === 'create' ? 'create-polygon' : 'save-polygon',
       async () => {
         try {
-          const result =
+          let nextRevision = editorRevision;
+          const remoteTransitions: RemoteTransition[] = [];
+          const polygonResult =
             polygonDraft.kind === 'create'
               ? await client.maps.createSourcePolygon({
-                  expectedRevision: editorRevision,
+                  expectedRevision: nextRevision,
                   mapId: id,
                   params: polygonDraft.params,
                   vertices: polygonDraft.vertices
                 })
               : await client.maps.updateSourcePolygon({
-                  expectedRevision: editorRevision,
+                  expectedRevision: nextRevision,
                   id: polygonDraft.id ?? '',
                   mapId: id,
                   params: polygonDraft.params,
                   vertices: polygonDraft.vertices
                 });
 
-          setEditorRevision(result.mapRevision);
-          await invalidateTerrainMutation(result.dirtyBounds);
+          nextRevision = polygonResult.mapRevision;
+          let dirtyBounds: Pick<
+            WorldBounds,
+            'maxX' | 'maxZ' | 'minX' | 'minZ'
+          > | null = polygonResult.dirtyBounds;
+
+          const polygonTransition =
+            polygonDraft.kind === 'create'
+              ? toPolygonTransition('create', [], [polygonResult.polygon])
+              : selectedPolygon
+                ? toPolygonTransition('save', [selectedPolygon], [polygonResult.polygon])
+                : null;
+
+          if (polygonTransition) {
+            remoteTransitions.push(polygonTransition);
+          }
+
+          for (const controlPointDraft of polygonControlPointDrafts) {
+            if (!controlPointDraft.id) {
+              continue;
+            }
+
+            const beforeControlPoint =
+              controlPoints.find(
+                point => point.id === controlPointDraft.id
+              ) ?? null;
+
+            const result = await client.maps.updateControlPoint({
+              ...toControlPointCreateInput(controlPointDraft, nextRevision, id),
+              id: controlPointDraft.id
+            });
+
+            nextRevision = result.mapRevision;
+            dirtyBounds = mergeWorldBounds(dirtyBounds, result.dirtyBounds);
+
+            if (beforeControlPoint) {
+              remoteTransitions.push(
+                toControlPointTransition(
+                  'save',
+                  [beforeControlPoint as ControlPoint],
+                  [result.controlPoint]
+                )
+              );
+            }
+          }
+
+          setEditorRevision(nextRevision);
+          if (dirtyBounds) {
+            await invalidateTerrainMutation(dirtyBounds);
+          }
 
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
             polygonDraft: null,
+            polygonControlPointDrafts: [],
             selectedControlPointId: null,
             selectedIslandId: null,
-            selectedPolygonIds: [result.polygon.id],
+            selectedPolygonIds: [polygonResult.polygon.id],
             tool: 'select'
           };
 
-          const remoteTransition =
-            polygonDraft.kind === 'create'
-              ? toPolygonTransition('create', [], [result.polygon])
-              : selectedPolygon
-                ? toPolygonTransition('save', [selectedPolygon], [result.polygon])
-                : null;
-
-          if (remoteTransition) {
+          if (remoteTransitions.length > 0) {
             commitHistoryEntry({
               after: nextSnapshot,
               before: historySnapshot,
-              remoteTransition
+              remoteTransitions
             });
           } else {
             setSnapshot(nextSnapshot);
@@ -523,6 +582,7 @@ export const useMapEditorActions = ({
     );
   }, [
     commitHistoryEntry,
+    controlPoints,
     editorRevision,
     handleConflict,
     historySnapshot,
@@ -530,6 +590,7 @@ export const useMapEditorActions = ({
     invalidateTerrainMutation,
     map,
     polygonDraft,
+    polygonControlPointDrafts,
     runAction,
     selectedPolygon,
     setEditorRevision,
@@ -566,6 +627,7 @@ export const useMapEditorActions = ({
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
             controlPointDraft: null,
+            polygonControlPointDrafts: [],
             selectedControlPointId: result.controlPoint.id,
             selectedIslandId: null,
             selectedPolygonIds: [],
@@ -587,7 +649,7 @@ export const useMapEditorActions = ({
             commitHistoryEntry({
               after: nextSnapshot,
               before: historySnapshot,
-              remoteTransition
+              remoteTransitions: [remoteTransition]
             });
           } else {
             setSnapshot(nextSnapshot);
@@ -695,6 +757,7 @@ export const useMapEditorActions = ({
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
             polygonDraft: null,
+            polygonControlPointDrafts: [],
             selectedControlPointId: null,
             selectedIslandId: null,
             selectedPolygonIds: result.createdPolygons.map(polygon => polygon.id),
@@ -704,13 +767,15 @@ export const useMapEditorActions = ({
           commitHistoryEntry({
             after: nextSnapshot,
             before: historySnapshot,
-            remoteTransition: toPolygonTransition(
-              'boolean',
-              operands,
-              result.createdPolygons,
-              'after',
-              operation
-            )
+            remoteTransitions: [
+              toPolygonTransition(
+                'boolean',
+                operands,
+                result.createdPolygons,
+                'after',
+                operation
+              )
+            ]
           });
 
           const resultBounds = boundsFromPolygons(result.createdPolygons);
@@ -771,11 +836,12 @@ export const useMapEditorActions = ({
             after: {
               ...historySnapshot,
               polygonDraft: null,
+              polygonControlPointDrafts: [],
               selectedPolygonIds: [],
               tool: 'select'
             },
             before: historySnapshot,
-            remoteTransition: toPolygonTransition('delete', [target], [])
+            remoteTransitions: [toPolygonTransition('delete', [target], [])]
           });
           toast.success('Polygon deleted');
         } else {
@@ -797,11 +863,12 @@ export const useMapEditorActions = ({
             after: {
               ...historySnapshot,
               controlPointDraft: null,
+              polygonControlPointDrafts: [],
               selectedControlPointId: null,
               tool: 'select'
             },
             before: historySnapshot,
-            remoteTransition: toControlPointTransition('delete', [target], [])
+            remoteTransitions: [toControlPointTransition('delete', [target], [])]
           });
           toast.success('Control point deleted');
         }

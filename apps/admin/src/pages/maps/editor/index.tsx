@@ -1,3 +1,6 @@
+import type {
+  ControlPoint
+} from 'carrier-contracts/types';
 import { isInfiniteMap } from 'carrier-contracts/types';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { ArrowLeft } from 'lucide-react';
@@ -8,6 +11,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type WheelEvent
 } from 'react';
@@ -43,6 +47,9 @@ import {
   canDeleteVertex,
   canSavePolygonDraft,
   mergeWorldBounds,
+  nextOrderedSelection,
+  pointInPolygon,
+  polygonIntersectsBounds,
   type EditorTool
 } from './helpers';
 import {
@@ -50,12 +57,15 @@ import {
   createIslandDraft,
   createPolygonDraft,
   expandBounds,
-  isDraftDirty
+  isDraftDirty,
+  translateControlPointDraft,
+  translatePolygonDraft
 } from './helpers/drafts';
 import type {
   CanvasDragState,
   DeleteTarget
 } from './helpers/types';
+import type { SourcePolygonLike } from './helpers/types';
 import { useElementSize } from './hooks/use-element-size';
 import { useMapEditorActions } from './hooks/use-map-editor-actions';
 import {
@@ -94,11 +104,14 @@ export function MapEditorPage() {
   );
   const snapshotRef = useRef(snapshot);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
+  const suppressCanvasClickRef = useRef(false);
+  const suppressPolygonClickRef = useRef<string | null>(null);
 
   const {
     controlPointDraft,
     islandDraft,
     polygonDraft,
+    polygonControlPointDrafts,
     selectedControlPointId,
     selectedIslandId,
     selectedPolygonIds,
@@ -117,9 +130,15 @@ export function MapEditorPage() {
     reloadAll
   } = useMapEditorData(id);
 
-  const polygons = polygonsQuery.data ?? [];
-  const controlPoints = controlPointsQuery.data ?? [];
-  const derivedIslands = derivedIslandsQuery.data ?? [];
+  const polygons = useMemo(() => polygonsQuery.data ?? [], [polygonsQuery.data]);
+  const controlPoints = useMemo(
+    () => controlPointsQuery.data ?? [],
+    [controlPointsQuery.data]
+  );
+  const derivedIslands = useMemo(
+    () => derivedIslandsQuery.data ?? [],
+    [derivedIslandsQuery.data]
+  );
 
   const selectedPolygon =
     selectedPolygonIds.length === 1
@@ -181,7 +200,7 @@ export function MapEditorPage() {
         recordHistory({
           after,
           before,
-          remoteTransition: null
+          remoteTransitions: []
         });
       } else {
         setSnapshot(after);
@@ -206,7 +225,8 @@ export function MapEditorPage() {
           ...current,
           selectedControlPointId: null,
           selectedIslandId: null,
-          selectedPolygonIds: []
+          selectedPolygonIds: [],
+          polygonControlPointDrafts: []
         }),
         record
       );
@@ -233,6 +253,9 @@ export function MapEditorPage() {
   const setSelectedPolygonIds = snapshotFieldSetter('selectedPolygonIds');
   const setSelectedControlPointId = snapshotFieldSetter('selectedControlPointId');
   const setSelectedIslandId = snapshotFieldSetter('selectedIslandId');
+  const setPolygonControlPointDrafts = snapshotFieldSetter(
+    'polygonControlPointDrafts'
+  );
 
   useEffect(() => {
     if (map && editorRevision === null) {
@@ -389,6 +412,7 @@ export function MapEditorPage() {
     updateSnapshot(current => ({
       ...current,
       polygonDraft: null,
+      polygonControlPointDrafts: [],
       tool: 'select'
     }));
   }, [updateSnapshot]);
@@ -397,6 +421,7 @@ export function MapEditorPage() {
     updateSnapshot(current => ({
       ...current,
       controlPointDraft: null,
+      polygonControlPointDrafts: [],
       tool: 'select'
     }));
   }, [updateSnapshot]);
@@ -410,6 +435,7 @@ export function MapEditorPage() {
       ...current,
       controlPointDraft: null,
       polygonDraft: createPolygonDraft(selectedPolygon),
+      polygonControlPointDrafts: [],
       tool: 'edit-vertices'
     }), true);
   }, [selectedPolygon, updateSnapshot]);
@@ -425,6 +451,7 @@ export function MapEditorPage() {
     undo
   } = useMapEditorActions({
     controlPointDraft,
+    controlPoints,
     deleteTarget,
     editorRevision,
     fitToWorldBounds,
@@ -437,6 +464,7 @@ export function MapEditorPage() {
     map,
     polygons,
     polygonDraft,
+    polygonControlPointDrafts,
     recordHistory,
     reloadAll,
     selectedControlPoint,
@@ -465,11 +493,36 @@ export function MapEditorPage() {
         return;
       }
 
-      if (tool === 'pan' || tool === 'select' || tool === 'edit-vertices') {
+      if (tool === 'pan') {
+        onViewportPointerDown(event);
+        return;
+      }
+
+      if (tool === 'select') {
+        const world = toWorldPoint(event);
+        interactionRef.current?.setPointerCapture(event.pointerId);
+        setDragState({
+          bounds: {
+            maxX: world.x,
+            maxZ: world.z,
+            minX: world.x,
+            minZ: world.z
+          },
+          currentPoint: world,
+          kind: 'marquee',
+          pointerId: event.pointerId,
+          startPoint: world
+        });
+        suppressCanvasClickRef.current = false;
+        suppressPolygonClickRef.current = null;
+        return;
+      }
+
+      if (tool === 'edit-vertices') {
         onViewportPointerDown(event);
       }
     },
-    [dragState, onViewportPointerDown, tool]
+    [dragState, onViewportPointerDown, setDragState, toWorldPoint, tool]
   );
 
   const handleCanvasPointerMove = useCallback(
@@ -489,6 +542,52 @@ export function MapEditorPage() {
             )
           };
         });
+        return;
+      }
+
+      if (dragState?.kind === 'marquee') {
+        const currentPoint = toWorldPoint(event);
+        setDragState({
+          ...dragState,
+          bounds: {
+            maxX: Math.max(dragState.startPoint.x, currentPoint.x),
+            maxZ: Math.max(dragState.startPoint.z, currentPoint.z),
+            minX: Math.min(dragState.startPoint.x, currentPoint.x),
+            minZ: Math.min(dragState.startPoint.z, currentPoint.z)
+          },
+          currentPoint
+        });
+        return;
+      }
+
+      if (dragState?.kind === 'polygon') {
+        const world = toWorldPoint(event);
+        const delta = {
+          x: world.x - dragState.startPoint.x,
+          z: world.z - dragState.startPoint.z
+        };
+
+        suppressCanvasClickRef.current = true;
+        suppressPolygonClickRef.current = dragState.polygonId;
+        setPolygonDraft(draft =>
+          draft
+            ? {
+                ...translatePolygonDraft(
+                  {
+                    ...draft,
+                    vertices: dragState.originalVertices
+                  },
+                  delta
+                ),
+                selectedVertexIndex: draft.selectedVertexIndex
+              }
+            : draft
+        );
+        setPolygonControlPointDrafts(
+          dragState.controlPoints.map(controlPoint =>
+            translateControlPointDraft(controlPoint, delta)
+          )
+        );
         return;
       }
 
@@ -522,6 +621,7 @@ export function MapEditorPage() {
       onViewportPointerMove,
       polygonDraft,
       setControlPointDraft,
+      setPolygonControlPointDrafts,
       setPolygonDraft,
       selectedControlPoint,
       toWorldPoint
@@ -532,13 +632,13 @@ export function MapEditorPage() {
     const before = dragSnapshotRef.current;
     const after = snapshotRef.current;
 
-    if (before && !snapshotsEqual(before, after)) {
-      recordHistory({
-        after,
-        before,
-        remoteTransition: null
-      });
-    }
+      if (before && !snapshotsEqual(before, after)) {
+        recordHistory({
+          after,
+          before,
+          remoteTransitions: []
+        });
+      }
 
     dragSnapshotRef.current = null;
     setDragState(null);
@@ -546,10 +646,72 @@ export function MapEditorPage() {
 
   const handleCanvasPointerUp = useCallback(
     (event: PointerEvent<SVGSVGElement>) => {
+      if (dragState?.kind === 'marquee') {
+        const width = Math.abs(
+          dragState.currentPoint.x - dragState.startPoint.x
+        );
+        const height = Math.abs(
+          dragState.currentPoint.z - dragState.startPoint.z
+        );
+
+        if (width < 1 && height < 1) {
+          clearSelections();
+          setPolygonDraft(null);
+        } else {
+          const selectedIds = polygons
+            .filter(polygon =>
+              polygonIntersectsBounds(polygon.vertices, dragState.bounds)
+            )
+            .map(polygon => polygon.id);
+
+          if (selectedIds.length === 1) {
+            const polygon = polygons.find(
+              candidate => candidate.id === selectedIds[0]
+            );
+            updateSnapshot(
+              current => ({
+                ...current,
+                controlPointDraft: null,
+                polygonControlPointDrafts: [],
+                polygonDraft: polygon ? createPolygonDraft(polygon) : null,
+                selectedControlPointId: null,
+                selectedIslandId: null,
+                selectedPolygonIds: selectedIds,
+                tool: current.tool
+              }),
+              true
+            );
+          } else {
+            updateSnapshot(
+              current => ({
+                ...current,
+                controlPointDraft: null,
+                polygonControlPointDrafts: [],
+                polygonDraft: null,
+                selectedControlPointId: null,
+                selectedIslandId: null,
+                selectedPolygonIds: selectedIds,
+                tool: current.tool
+              }),
+              true
+            );
+          }
+          suppressCanvasClickRef.current = true;
+        }
+      }
+
       releaseCanvasDrag();
       onViewportPointerUp(event);
     },
-    [onViewportPointerUp, releaseCanvasDrag]
+    [
+      clearSelections,
+      dragState,
+      onViewportPointerUp,
+      polygons,
+      releaseCanvasDrag,
+      setPolygonDraft,
+      updateSnapshot
+    ]
   );
 
   const handleCanvasPointerCancel = useCallback(
@@ -593,6 +755,7 @@ export function MapEditorPage() {
               x: world.x,
               z: world.z
             },
+            polygonControlPointDrafts: [],
             selectedControlPointId: null,
             selectedIslandId: null,
             selectedPolygonIds: []
@@ -603,11 +766,148 @@ export function MapEditorPage() {
       }
 
       if (tool === 'select') {
+        if (suppressCanvasClickRef.current) {
+          suppressCanvasClickRef.current = false;
+          return;
+        }
+
         clearSelections();
         setPolygonDraft(null);
       }
     },
     [clearSelections, map, setPolygonDraft, toWorldPoint, tool, updateSnapshot]
+  );
+
+  const handlePolygonClick = useCallback(
+    (event: MouseEvent<SVGPolygonElement>, polygon: SourcePolygonLike) => {
+      if (suppressPolygonClickRef.current === polygon.id) {
+        suppressPolygonClickRef.current = null;
+        return;
+      }
+
+      if (tool !== 'select' && tool !== 'edit-vertices') {
+        return;
+      }
+
+      updateSnapshot(
+        current => {
+          const nextSelection = nextOrderedSelection(
+            current.selectedPolygonIds,
+            polygon.id,
+            event.shiftKey
+          );
+
+          return {
+            ...current,
+            controlPointDraft: null,
+            polygonControlPointDrafts: [],
+            polygonDraft:
+              event.shiftKey || nextSelection.length !== 1
+                ? null
+                : createPolygonDraft(polygon),
+            selectedControlPointId: null,
+            selectedIslandId: null,
+            selectedPolygonIds: nextSelection
+          };
+        },
+        true
+      );
+    },
+    [tool, updateSnapshot]
+  );
+
+  const handlePolygonPointerDown = useCallback(
+    (event: PointerEvent<SVGPolygonElement>, polygon: SourcePolygonLike) => {
+      if (tool === 'pan') {
+        return;
+      }
+
+      event.stopPropagation();
+
+      if (
+        tool !== 'select' ||
+        event.shiftKey ||
+        selectedPolygon?.id !== polygon.id
+      ) {
+        return;
+      }
+
+      const editablePolygon =
+        polygonDraft?.kind === 'edit' && polygonDraft.id === polygon.id
+          ? polygonDraft
+          : createPolygonDraft(polygon);
+
+      interactionRef.current?.setPointerCapture(event.pointerId);
+      setDragState({
+        controlPoints: controlPoints
+          .filter(point => pointInPolygon(point, editablePolygon.vertices))
+          .map(point => createControlPointDraft(point)),
+        kind: 'polygon',
+        originalVertices: editablePolygon.vertices.map(vertex => ({ ...vertex })),
+        pointerId: event.pointerId,
+        polygonId: polygon.id,
+        startPoint: toWorldPoint(event)
+      });
+      suppressCanvasClickRef.current = false;
+      suppressPolygonClickRef.current = null;
+    },
+    [controlPoints, interactionRef, polygonDraft, selectedPolygon, setDragState, toWorldPoint, tool]
+  );
+
+  const handleControlPointClick = useCallback(
+    (_event: MouseEvent<SVGCircleElement>, point: ControlPoint) => {
+      if (tool !== 'select') {
+        return;
+      }
+
+      updateSnapshot(
+        current => ({
+          ...current,
+          controlPointDraft: null,
+          polygonControlPointDrafts: [],
+          polygonDraft: null,
+          selectedControlPointId: point.id,
+          selectedIslandId: null,
+          selectedPolygonIds: []
+        }),
+        true
+      );
+    },
+    [tool, updateSnapshot]
+  );
+
+  const handleControlPointPointerDown = useCallback(
+    (event: PointerEvent<SVGCircleElement>, point: ControlPoint) => {
+      if (tool === 'pan') {
+        return;
+      }
+
+      event.stopPropagation();
+
+      if (tool !== 'select') {
+        return;
+      }
+
+      interactionRef.current?.setPointerCapture(event.pointerId);
+      updateSnapshot(
+        current => ({
+          ...current,
+          controlPointDraft: null,
+          polygonControlPointDrafts: [],
+          polygonDraft: null,
+          selectedControlPointId: point.id,
+          selectedIslandId: null,
+          selectedPolygonIds: []
+        }),
+        true
+      );
+      setDragState({
+        kind: 'control-point',
+        pointId: point.id,
+        pointerId: event.pointerId
+      });
+    },
+    [interactionRef, setDragState, tool, updateSnapshot]
   );
 
   const commitDrawPolygon = useCallback(() => {
@@ -740,11 +1040,12 @@ export function MapEditorPage() {
   const islandInspectorDraft =
     islandDraft ?? (selectedIsland ? createIslandDraft(selectedIsland) : null);
   const polygonDirty =
-    polygonDraft !== null &&
-    isDraftDirty(
-      polygonDraft,
-      selectedPolygon && polygonDraft.kind === 'edit' ? selectedPolygon : null
-    );
+    (polygonDraft !== null &&
+      isDraftDirty(
+        polygonDraft,
+        selectedPolygon && polygonDraft.kind === 'edit' ? selectedPolygon : null
+      )) ||
+    polygonControlPointDrafts.length > 0;
 
   const canApplyUnionLike = selectedPolygonIds.length >= 2 && !polygonDraft;
   const canApplyDifference = selectedPolygonIds.length === 2 && !polygonDraft;
@@ -791,6 +1092,7 @@ export function MapEditorPage() {
               ...current,
               controlPointDraft: null,
               polygonDraft: null,
+              polygonControlPointDrafts: [],
               selectedControlPointId: null,
               selectedIslandId: null,
               selectedPolygonIds: [],
@@ -805,6 +1107,7 @@ export function MapEditorPage() {
               ...current,
               controlPointDraft: null,
               polygonDraft: createPolygonDraft(),
+              polygonControlPointDrafts: [],
               selectedControlPointId: null,
               selectedIslandId: null,
               selectedPolygonIds: [],
@@ -834,6 +1137,8 @@ export function MapEditorPage() {
           highlightedIslandPolygonIds={highlightedIslandPolygonIds}
           interactionRef={interactionRef}
           map={map}
+          onControlPointClick={handleControlPointClick}
+          onControlPointPointerDown={handleControlPointPointerDown}
           onCanvasClick={handleCanvasClick}
           onCanvasKeyDown={handleKeyDown}
           onCanvasPointerCancel={handleCanvasPointerCancel}
@@ -841,6 +1146,8 @@ export function MapEditorPage() {
           onCanvasPointerLeave={handleCanvasPointerLeave}
           onCanvasPointerMove={handleCanvasPointerMove}
           onCanvasPointerUp={handleCanvasPointerUp}
+          onPolygonClick={handlePolygonClick}
+          onPolygonPointerDown={handlePolygonPointerDown}
           onWheel={onWheel}
           onWheelCapture={handleWheelCapture}
           overlayPolygons={overlayPolygons}
@@ -849,9 +1156,6 @@ export function MapEditorPage() {
           selectedPolygonIds={selectedPolygonIds}
           setDragState={setDragState}
           setPolygonDraft={setPolygonDraft}
-          setSelectedControlPointId={setSelectedControlPointId}
-          setSelectedIslandId={setSelectedIslandId}
-          setSelectedPolygonIds={setSelectedPolygonIds}
           size={size}
           toScreenPoint={toScreenPoint}
           toWorldPoint={toWorldPoint}

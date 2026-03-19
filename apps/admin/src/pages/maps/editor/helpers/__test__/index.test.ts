@@ -14,7 +14,9 @@ import {
   chunkIntersectsDirtyBounds,
   getChunkWorldBounds,
   mergeWorldBounds,
-  nextOrderedSelection
+  nextOrderedSelection,
+  pointInPolygon,
+  polygonIntersectsBounds
 } from '../index';
 
 const infiniteMap: MapMetadata = {
@@ -161,5 +163,35 @@ describe('editor utilities', () => {
       minX: -320,
       minZ: 640
     });
+  });
+
+  test('detects polygon containment and marquee intersection', () => {
+    const polygon = [
+      { x: 0, z: 0 },
+      { x: 20, z: 0 },
+      { x: 20, z: 20 },
+      { x: 0, z: 20 }
+    ];
+
+    expect(pointInPolygon({ x: 10, z: 10 }, polygon)).toBe(true);
+    expect(pointInPolygon({ x: 30, z: 30 }, polygon)).toBe(false);
+
+    expect(
+      polygonIntersectsBounds(polygon, {
+        maxX: 5,
+        maxZ: 5,
+        minX: -5,
+        minZ: -5
+      })
+    ).toBe(true);
+
+    expect(
+      polygonIntersectsBounds(polygon, {
+        maxX: 40,
+        maxZ: 40,
+        minX: 30,
+        minZ: 30
+      })
+    ).toBe(false);
   });
 });

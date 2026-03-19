@@ -16,6 +16,7 @@ export type EditorSnapshot = {
   controlPointDraft: ControlPointDraft | null;
   islandDraft: IslandDraft | null;
   polygonDraft: PolygonDraft | null;
+  polygonControlPointDrafts: ControlPointDraft[];
   selectedControlPointId: string | null;
   selectedIslandId: string | null;
   selectedPolygonIds: string[];
@@ -55,7 +56,7 @@ export type RemoteTransition = PolygonTransition | ControlPointTransition;
 export type HistoryEntry = {
   after: EditorSnapshot;
   before: EditorSnapshot;
-  remoteTransition: RemoteTransition | null;
+  remoteTransitions: RemoteTransition[];
 };
 
 export type EditorHistoryState = {
@@ -68,6 +69,7 @@ export const createEmptyEditorSnapshot = (): EditorSnapshot => ({
   controlPointDraft: null,
   islandDraft: null,
   polygonDraft: null,
+  polygonControlPointDrafts: [],
   selectedControlPointId: null,
   selectedIslandId: null,
   selectedPolygonIds: [],
@@ -134,6 +136,7 @@ export const snapshotsEqual = (
   left.selectedControlPointId === right.selectedControlPointId &&
   left.selectedIslandId === right.selectedIslandId &&
   left.polygonDraft === right.polygonDraft &&
+  left.polygonControlPointDrafts === right.polygonControlPointDrafts &&
   left.controlPointDraft === right.controlPointDraft &&
   left.islandDraft === right.islandDraft &&
   left.selectedPolygonIds === right.selectedPolygonIds;
@@ -171,6 +174,7 @@ export const remapSnapshotForTransition = (
               id: remapId(snapshot.polygonDraft.id, originals, replacements)
             }
           : snapshot.polygonDraft,
+      polygonControlPointDrafts: snapshot.polygonControlPointDrafts,
       selectedPolygonIds: snapshot.selectedPolygonIds.map(id =>
         remapId(id, originals, replacements)
       )
@@ -199,6 +203,14 @@ export const remapSnapshotForTransition = (
             )
           }
         : snapshot.controlPointDraft,
+    polygonControlPointDrafts: snapshot.polygonControlPointDrafts.map(draft =>
+      draft.id
+        ? {
+            ...draft,
+            id: remapId(draft.id, originals, replacements)
+          }
+        : draft
+    ),
     selectedControlPointId: snapshot.selectedControlPointId
       ? remapId(snapshot.selectedControlPointId, originals, replacements)
       : snapshot.selectedControlPointId
