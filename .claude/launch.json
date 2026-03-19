@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "admin",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["./index.html", "--port", "3001"],
+      "port": 3001,
+      "cwd": "apps/admin"
+    },
+    {
+      "name": "client",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["./index.html", "--port", "3000"],
+      "port": 3000,
+      "cwd": "apps/client"
+    }
+  ]
+}

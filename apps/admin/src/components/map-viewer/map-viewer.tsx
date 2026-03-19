@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-
 import type { MapMetadata } from 'carrier-contracts/types';
 import { Home, Minus, Plus } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent
+} from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useMapChunks } from '@/hooks/use-map-chunks';
 import { getVisibleChunkRange, useMapViewport } from '@/hooks/use-map-viewport';
 
-import { MapCanvas } from './map-canvas';
+import { MapStage } from './map-stage';
 
 type MapViewerProps = {
   map: MapMetadata;
@@ -16,7 +21,13 @@ type MapViewerProps = {
 
 export function MapViewer({ map, mapId }: MapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ height: 0, width: 0 });
+
+  const handleWheelCapture = useCallback((e: WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const measureContainer = useCallback(() => {
     const el = containerRef.current;
@@ -48,7 +59,9 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     fitToView,
     isDragging,
     onKeyDown,
+    onPointerCancel,
     onPointerDown,
+    onPointerLeave,
     onPointerMove,
     onPointerUp,
     onWheel,
@@ -56,6 +69,14 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     zoomIn,
     zoomOut
   } = useMapViewport(map, size.width, size.height);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      interactionRef.current?.focus();
+      onPointerDown(e);
+    },
+    [onPointerDown]
+  );
 
   // Refit when canvas size first becomes available
   const hasFitted = useRef(false);
@@ -67,7 +88,12 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     }
   }, [size.width, size.height, fitToView]);
 
-  const chunkRange = getVisibleChunkRange(viewport, size.width, size.height, map);
+  const chunkRange = getVisibleChunkRange(
+    viewport,
+    size.width,
+    size.height,
+    map
+  );
   const chunks = useMapChunks(mapId, chunkRange);
 
   const zoomPercent = Math.round(viewport.zoom * 100);
@@ -79,35 +105,76 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
         className="relative h-[500px] overflow-hidden rounded-md border bg-[#0a1320]"
       >
         {size.width > 0 && size.height > 0 && (
-          <MapCanvas
-            canvasWidth={size.width}
-            canvasHeight={size.height}
-            chunks={chunks}
-            isDragging={isDragging}
-            map={map}
-            onKeyDown={onKeyDown}
-            onPointerDown={onPointerDown}
+          <div
+            ref={interactionRef}
+            onPointerDown={handlePointerDown}
             onPointerMove={onPointerMove}
+            onPointerCancel={onPointerCancel}
+            onPointerLeave={onPointerLeave}
             onPointerUp={onPointerUp}
+            onWheelCapture={handleWheelCapture}
             onWheel={onWheel}
-            viewport={viewport}
-          />
+            onKeyDown={onKeyDown}
+            tabIndex={0}
+            className="outline-none"
+            style={{
+              cursor: isDragging ? 'grabbing' : 'crosshair',
+              display: 'block',
+              height: size.height,
+              overscrollBehavior: 'contain',
+              touchAction: 'none',
+              width: size.width
+            }}
+          >
+            <MapStage
+              canvasWidth={size.width}
+              canvasHeight={size.height}
+              chunks={chunks}
+              map={map}
+              viewport={viewport}
+            />
+          </div>
         )}
         <div className="absolute right-3 bottom-3 flex gap-1">
-          <Button variant="secondary" size="icon" className="h-8 w-8" onClick={zoomIn} title="Zoom in">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8"
+            onClick={zoomIn}
+            title="Zoom in"
+          >
             <Plus className="h-4 w-4" />
           </Button>
-          <Button variant="secondary" size="icon" className="h-8 w-8" onClick={zoomOut} title="Zoom out">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8"
+            onClick={zoomOut}
+            title="Zoom out"
+          >
             <Minus className="h-4 w-4" />
           </Button>
-          <Button variant="secondary" size="icon" className="h-8 w-8" onClick={fitToView} title="Reset view">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8"
+            onClick={fitToView}
+            title="Reset view"
+          >
             <Home className="h-4 w-4" />
           </Button>
         </div>
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {map.widthTiles}&times;{map.heightTiles} tiles &middot; Zoom {zoomPercent}%
+          {map.extent.kind === 'finite' ? (
+            <>
+              {map.extent.widthTiles}&times;{map.extent.heightTiles} tiles
+            </>
+          ) : (
+            'Infinite'
+          )}{' '}
+          &middot; Zoom {zoomPercent}%
         </span>
         <span>Drag to pan &middot; Scroll to zoom &middot; Home to reset</span>
       </div>

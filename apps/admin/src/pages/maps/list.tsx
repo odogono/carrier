@@ -1,8 +1,6 @@
-import { useState } from 'react';
-
-import { Link } from '@tanstack/react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isFiniteMap } from 'carrier-contracts/types';
 import { MoreHorizontal, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +22,8 @@ import {
   TableRow
 } from '@/components/ui/table';
 import { client } from '@/lib/api-client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 
 export function MapsListPage() {
   const queryClient = useQueryClient();
@@ -54,9 +54,7 @@ export function MapsListPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Maps</h2>
-          <p className="text-muted-foreground">
-            Manage maps in the system
-          </p>
+          <p className="text-muted-foreground">Manage maps in the system</p>
         </div>
         <Link to="/maps/new">
           <Button>
@@ -83,9 +81,10 @@ export function MapsListPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Kind</TableHead>
               <TableHead>Dimensions</TableHead>
               <TableHead>Generator</TableHead>
-              <TableHead>Seed</TableHead>
+              <TableHead>Seed / Source</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Updated</TableHead>
               <TableHead className="w-[50px]" />
@@ -100,17 +99,41 @@ export function MapsListPage() {
                     params={{ id: map.id }}
                     className="font-medium hover:underline"
                   >
-                    {map.name ?? <span className="text-muted-foreground italic">Unnamed</span>}
+                    {map.name ?? (
+                      <span className="text-muted-foreground italic">
+                        Unnamed
+                      </span>
+                    )}
                   </Link>
                 </TableCell>
                 <TableCell>
-                  {map.widthTiles}&times;{map.heightTiles}
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">{map.kind}</Badge>
+                    {map.export && (
+                      <Badge variant="secondary">
+                        src rev {map.export.sourceRevision}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{map.generator}</Badge>
+                  {isFiniteMap(map) ? (
+                    <>
+                      {map.extent.widthTiles}&times;{map.extent.heightTiles}
+                    </>
+                  ) : (
+                    'Infinite'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {map.generator ? (
+                    <Badge variant="secondary">{map.generator}</Badge>
+                  ) : (
+                    <span className="text-muted-foreground">&mdash;</span>
+                  )}
                 </TableCell>
                 <TableCell className="max-w-[200px] truncate font-mono text-xs">
-                  {map.seed}
+                  {map.export ? map.export.sourceMapId : map.seed}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {new Date(map.createdAt).toLocaleDateString()}
@@ -141,7 +164,10 @@ export function MapsListPage() {
         </Table>
       )}
 
-      <Dialog open={!!deleteId} onOpenChange={open => !open && setDeleteId(null)}>
+      <Dialog
+        open={!!deleteId}
+        onOpenChange={open => !open && setDeleteId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Map</DialogTitle>

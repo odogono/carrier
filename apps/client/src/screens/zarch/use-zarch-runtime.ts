@@ -7,6 +7,7 @@ import {
 } from 'react';
 
 import { clampZoom } from '@/helpers/zarch-terrain';
+import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 
 export type ZarchRuntimeState = {
   camX: number;
@@ -41,6 +42,7 @@ const PREVENT_SCROLL_KEYS = new Set([
 export const useZarchRuntime = ({
   containerElement
 }: UseZarchRuntimeArgs) => {
+  const configRef = useSceneConfigRef();
   const runtimeRef = useRef<ZarchRuntimeState>({
     camX: 0,
     camYaw: 0,
@@ -67,8 +69,11 @@ export const useZarchRuntime = ({
 
     const handleWheel = (event: globalThis.WheelEvent) => {
       event.preventDefault();
+      const config = configRef.current;
       runtimeRef.current.camZoomTarget = clampZoom(
-        runtimeRef.current.camZoomTarget + event.deltaY * 0.001
+        runtimeRef.current.camZoomTarget + event.deltaY * 0.001,
+        config.zoomMin,
+        config.zoomMax
       );
     };
 

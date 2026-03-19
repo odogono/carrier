@@ -16,22 +16,22 @@ import {
   Plane,
   Vector3
 } from 'three';
-import type { PerspectiveCamera } from 'three';
+import type { AmbientLight, DirectionalLight, PerspectiveCamera } from 'three';
 
 import {
   clampZoom,
-  SEA_Y,
   TILE,
   TILE_POOL_SIZE,
   TREE_POOL_SIZE,
-  VIEW_R_BASE,
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
+import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 
 import type {
   ZarchInputState,
   ZarchRuntimeState
 } from './use-zarch-runtime';
+import { wrapWorldCoordinate } from './zarch-minimap';
 
 type TileMesh = Mesh<BufferGeometry, MeshLambertMaterial>;
 
@@ -54,8 +54,6 @@ type ZarchSceneProps = {
 
 const TILE_BASE_COLOR = new Color();
 const TREE_BASE_COLOR = new Color();
-const KEYBOARD_ZOOM_SPEED = 1.4;
-const ZOOM_DAMPING = 7;
 
 const createClipPlanes = () => [
   new Plane(new Vector3(1, 0, 0), 0),
@@ -221,8 +219,11 @@ export const ZarchScene = ({
   runtimeRef,
   terrain
 }: ZarchSceneProps) => {
+  const configRef = useSceneConfigRef();
+  const ambientRef = useRef<AmbientLight>(null);
   const cameraRef = useRef<PerspectiveCamera>(null);
   const clipPlanesRef = useRef<Plane[] | null>(null);
+  const directionalRef = useRef<DirectionalLight>(null);
   const forwardRef = useRef(new Vector3());
   const poolsRef = useRef<ScenePools | null>(null);
   const rightRef = useRef(new Vector3());
@@ -252,6 +253,7 @@ export const ZarchScene = ({
 
   useFrame((_, delta) => {
     const camera = cameraRef.current;
+    const config = configRef.current;
     const runtime = runtimeRef.current;
     const input = inputRef.current;
     const clipPlanes = clipPlanesRef.current;
@@ -262,6 +264,22 @@ export const ZarchScene = ({
 
     if (!camera || !clipPlanes || !pools) {
       return;
+    }
+
+    // Imperative camera/light updates from config
+    if (camera.fov !== config.cameraFov) {
+      camera.fov = config.cameraFov;
+      camera.updateProjectionMatrix();
+    }
+
+    if (ambientRef.current) {
+      ambientRef.current.intensity = config.ambientIntensity;
+    }
+
+    if (directionalRef.current) {
+      directionalRef.current.intensity = config.directionalIntensity;
+      directionalRef.current.position.set(...config.directionalPosition);
+      directionalRef.current.shadow.bias = config.shadowBias;
     }
 
     forward.set(-Math.sin(runtime.camYaw), 0, -Math.cos(runtime.camYaw));
@@ -288,12 +306,16 @@ export const ZarchScene = ({
     }
     if (input.keys.q || input.keys.Q) {
       runtime.camZoomTarget = clampZoom(
-        runtime.camZoomTarget - KEYBOARD_ZOOM_SPEED * dt
+        runtime.camZoomTarget - config.keyboardZoomSpeed * dt,
+        config.zoomMin,
+        config.zoomMax
       );
     }
     if (input.keys.e || input.keys.E) {
       runtime.camZoomTarget = clampZoom(
-        runtime.camZoomTarget + KEYBOARD_ZOOM_SPEED * dt
+        runtime.camZoomTarget + config.keyboardZoomSpeed * dt,
+        config.zoomMin,
+        config.zoomMax
       );
     }
 
@@ -303,31 +325,39 @@ export const ZarchScene = ({
     runtime.velZ -= runtime.velZ * 2.5 * dt;
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
-    runtime.camX = MathUtils.clamp(
-      runtime.camX,
-      0,
-      Math.max((terrain.widthTiles - 1) * TILE, 0)
-    );
-    runtime.camZ = MathUtils.clamp(
-      runtime.camZ,
-      0,
-      Math.max((terrain.heightTiles - 1) * TILE, 0)
-    );
+    if (terrain.widthTiles !== null && terrain.wrapX) {
+      runtime.camX = wrapWorldCoordinate(runtime.camX, terrain.widthTiles * TILE);
+    } else if (terrain.widthTiles !== null) {
+      runtime.camX = MathUtils.clamp(
+        runtime.camX,
+        0,
+        Math.max((terrain.widthTiles - 1) * TILE, 0)
+      );
+    }
+    if (terrain.heightTiles !== null && terrain.wrapZ) {
+      runtime.camZ = wrapWorldCoordinate(runtime.camZ, terrain.heightTiles * TILE);
+    } else if (terrain.heightTiles !== null) {
+      runtime.camZ = MathUtils.clamp(
+        runtime.camZ,
+        0,
+        Math.max((terrain.heightTiles - 1) * TILE, 0)
+      );
+    }
     runtime.camZoom = MathUtils.damp(
       runtime.camZoom,
       runtime.camZoomTarget,
-      ZOOM_DAMPING,
+      config.zoomDamping,
       dt
     );
     runtime.score += Math.trunc(
       Math.round(Math.abs(runtime.velX) + Math.abs(runtime.velZ)) * dt
     );
 
-    const zoomRadius = VIEW_R_BASE * runtime.camZoom;
+    const zoomRadius = config.viewRadiusBase * runtime.camZoom;
     const viewRadius = Math.ceil(zoomRadius);
     const clipRadius = Math.max((zoomRadius - 0.6) * TILE, TILE);
-    const pullBack = clipRadius * 1.8;
-    const cameraHeight = clipRadius * 1.35;
+    const pullBack = clipRadius * config.cameraPullbackMultiplier;
+    const cameraHeight = clipRadius * config.cameraHeightMultiplier;
 
     camera.position.set(
       -Math.sin(runtime.camYaw) * pullBack,
@@ -392,10 +422,10 @@ export const ZarchScene = ({
           terrain.isWaterTile(gx + 1, gz) ||
           terrain.isWaterTile(gx, gz + 1) ||
           terrain.isWaterTile(gx + 1, gz + 1);
-        const h00 = isWater || c00Water ? SEA_Y : h00Raw;
-        const h10 = isWater || c10Water ? SEA_Y : h10Raw;
-        const h01 = isWater || c01Water ? SEA_Y : h01Raw;
-        const h11 = isWater || c11Water ? SEA_Y : h11Raw;
+        const h00 = isWater || c00Water ? config.seaY : h00Raw;
+        const h10 = isWater || c10Water ? config.seaY : h10Raw;
+        const h01 = isWater || c01Water ? config.seaY : h01Raw;
+        const h11 = isWater || c11Water ? config.seaY : h11Raw;
         const tileCenterX = worldX + TILE * 0.5;
         const tileCenterZ = worldZ + TILE * 0.5;
         const distance = Math.sqrt(
@@ -404,14 +434,25 @@ export const ZarchScene = ({
             (tileCenterZ - camera.position.z) ** 2
         );
         const brightness = Math.max(
-          0.12,
-          1 - MathUtils.clamp(distance / (clipRadius * 2.8), 0, 1) ** 2 * 0.88
+          config.brightnessMin,
+          1 -
+            MathUtils.clamp(
+              distance / (clipRadius * config.brightnessDistanceFactor),
+              0,
+              1
+            ) **
+              config.brightnessFalloffPower *
+              config.brightnessFalloffScale
         );
-        const positions = tileMesh.geometry.attributes.position as BufferAttribute;
+        const positions = tileMesh.geometry.attributes
+          .position as BufferAttribute;
         const tileKey = `${gx}:${gz}`;
 
         terrain.tileColor(gx, gz, elevation, TILE_BASE_COLOR);
-        tileMesh.material.color.copy(TILE_BASE_COLOR).multiplyScalar(brightness);
+        tileMesh.material.color
+          .copy(TILE_BASE_COLOR)
+          .multiplyScalar(brightness);
+        tileMesh.material.wireframe = config.wireframe;
         tileMesh.visible = true;
         positions.setXYZ(0, worldX, h00, worldZ);
         positions.setXYZ(1, worldX + TILE, h10, worldZ);
@@ -427,6 +468,7 @@ export const ZarchScene = ({
         tileIndex += 1;
 
         const canPlaceTree =
+          config.showTrees &&
           treeIndex < TREE_POOL_SIZE &&
           !isWater &&
           !(c00Water || c10Water || c01Water || c11Water) &&
@@ -469,34 +511,36 @@ export const ZarchScene = ({
     clipPlanes[3].setComponents(0, 0, -1, clipRadius);
   });
 
-  const shadowExtent = VIEW_R_BASE * 2.5 * TILE * 1.2;
+  const config = configRef.current;
+  const shadowExtent = config.viewRadiusBase * 2.5 * TILE * 1.2;
 
   return (
     <>
-      <color args={['#000000']} attach="background" />
+      <color args={[config.backgroundColor]} attach="background" />
       <PerspectiveCameraImpl
         far={5000}
-        fov={70}
+        fov={config.cameraFov}
         makeDefault
         near={1}
         position={[0, 0, 0]}
         ref={cameraRef}
       />
       <group ref={worldRef} />
-      <ambientLight intensity={0.6} />
+      <ambientLight intensity={config.ambientIntensity} ref={ambientRef} />
       <directionalLight
         castShadow
-        intensity={0.8}
-        position={[200, 400, 100]}
-        shadow-bias={-0.001}
+        intensity={config.directionalIntensity}
+        position={config.directionalPosition}
+        ref={directionalRef}
+        shadow-bias={config.shadowBias}
         shadow-camera-bottom={-shadowExtent}
         shadow-camera-far={2000}
         shadow-camera-left={-shadowExtent}
         shadow-camera-near={1}
         shadow-camera-right={shadowExtent}
         shadow-camera-top={shadowExtent}
-        shadow-mapSize-height={1024}
-        shadow-mapSize-width={1024}
+        shadow-mapSize-height={config.shadowMapSize}
+        shadow-mapSize-width={config.shadowMapSize}
       />
     </>
   );

@@ -1,12 +1,12 @@
 import {
-  type MouseEvent,
-  type ReactNode,
   createContext,
   useCallback,
   useContext,
   useEffect,
   useRef,
-  useState
+  useState,
+  type MouseEvent,
+  type ReactNode
 } from 'react';
 
 import { cn } from '@/lib/utils';

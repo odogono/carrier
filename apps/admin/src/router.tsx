@@ -1,15 +1,15 @@
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet
-} from '@tanstack/react-router';
-
 import { Layout } from '@/components/layout';
+import { DashboardPage } from '@/pages/dashboard';
 import { CreateMapPage } from '@/pages/maps/create';
 import { MapDetailPage } from '@/pages/maps/detail';
+import { MapEditorPage } from '@/pages/maps/editor';
 import { MapsListPage } from '@/pages/maps/list';
-import { DashboardPage } from '@/pages/dashboard';
+import {
+  Outlet,
+  createRootRoute,
+  createRoute,
+  createRouter
+} from '@tanstack/react-router';
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -43,10 +43,17 @@ const mapDetailRoute = createRoute({
   path: '/maps/$id'
 });
 
+const mapEditorRoute = createRoute({
+  component: MapEditorPage,
+  getParentRoute: () => rootRoute,
+  path: '/maps/$id/editor'
+});
+
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   mapsRoute,
   createMapRoute,
+  mapEditorRoute,
   mapDetailRoute
 ]);
 

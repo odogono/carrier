@@ -2,7 +2,11 @@
 import { useEffectEvent, useMemo } from 'react';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { MapMetadata } from 'carrier-contracts/types';
+import {
+  MapMetadataSchema,
+  decodeMapChunkBinary,
+  type MapMetadata
+} from 'carrier-contracts/types';
 
 import { client } from '@/helpers/api-link';
 import {
@@ -20,6 +24,11 @@ const MAP_CHUNK_GC_MS = 10 * 60_000;
 const getRequestedMapId = () =>
   new URLSearchParams(window.location.search).get('mapId');
 
+const normalizeMapMetadata = (value: unknown): MapMetadata | null => {
+  const parsed = MapMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
+
 export const useServerMapTerrain = () => {
   const queryClient = useQueryClient();
   const requestedMapId = useMemo(getRequestedMapId, []);
@@ -28,13 +37,16 @@ export const useServerMapTerrain = () => {
     gcTime: MAP_METADATA_GC_MS,
     queryFn: () => client.maps.list({}),
     queryKey: getMapListQueryKey(),
+    refetchOnMount: 'always',
     staleTime: MAP_METADATA_CACHE_MS
   });
 
   // Two map selection paths:
   // 1. Explicit: ?mapId=... query param → fetch metadata via selectedMapQuery
   // 2. Fallback: no query param → use first map from the list query directly
-  const fallbackMap = requestedMapId ? null : (mapsQuery.data?.[0] ?? null);
+  const fallbackMap = requestedMapId
+    ? null
+    : normalizeMapMetadata(mapsQuery.data?.[0] ?? null);
   const selectedMapId = requestedMapId ?? fallbackMap?.id ?? null;
 
   const selectedMapQuery = useQuery({
@@ -42,15 +54,21 @@ export const useServerMapTerrain = () => {
     gcTime: MAP_METADATA_GC_MS,
     queryFn: () => client.maps.find({ id: selectedMapId! }),
     queryKey: getMapMetadataQueryKey(selectedMapId ?? ''),
+    refetchOnMount: 'always',
     staleTime: MAP_METADATA_CACHE_MS
   });
 
-  const map = (requestedMapId ? selectedMapQuery.data : fallbackMap) ?? null;
+  const map = requestedMapId
+    ? normalizeMapMetadata(selectedMapQuery.data ?? null)
+    : fallbackMap;
 
   const prefetchChunk = useEffectEvent((activeMap: MapMetadata, chunkX: number, chunkZ: number) => {
     void queryClient.prefetchQuery({
       gcTime: MAP_CHUNK_GC_MS,
-      queryFn: () => client.maps.getChunk({ chunkX, chunkZ, mapId: activeMap.id }),
+      queryFn: async () =>
+        decodeMapChunkBinary(
+          await client.maps.getChunkBinary({ chunkX, chunkZ, mapId: activeMap.id })
+        ),
       queryKey: getMapChunkQueryKey(activeMap.id, chunkX, chunkZ),
       staleTime: MAP_CHUNK_CACHE_MS
     });

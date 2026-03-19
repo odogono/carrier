@@ -9,10 +9,16 @@ type ZarchMinimapProps = {
   terrain: ZarchTerrain;
 };
 
+export const wrapWorldCoordinate = (value: number, size: number) =>
+  size <= 0 ? 0 : ((value % size) + size) % size;
+
 export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    const { widthTiles, heightTiles } = terrain;
+    if (widthTiles === null || heightTiles === null) return;
+
     const canvas = canvasRef.current;
 
     if (!canvas) {
@@ -41,14 +47,14 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
 
       for (let pixelY = 0; pixelY < drawSize; pixelY += 1) {
         const gz = Math.min(
-          Math.floor((pixelY / drawSize) * terrain.heightTiles),
-          terrain.heightTiles - 1
+          Math.floor((pixelY / drawSize) * heightTiles),
+          heightTiles - 1
         );
 
         for (let pixelX = 0; pixelX < drawSize; pixelX += 1) {
           const gx = Math.min(
-            Math.floor((pixelX / drawSize) * terrain.widthTiles),
-            terrain.widthTiles - 1
+            Math.floor((pixelX / drawSize) * widthTiles),
+            widthTiles - 1
           );
           const elevation = terrain.getTileAverageHeight(gx, gz);
           const index = (pixelY * drawSize + pixelX) * 4;
@@ -88,7 +94,11 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
         Math.max(
           0,
           Math.round(
-            ((runtimeRef.current?.camX ?? 0) / Math.max(terrain.widthTiles * TILE, TILE)) *
+            (wrapWorldCoordinate(
+              runtimeRef.current?.camX ?? 0,
+              Math.max(widthTiles * TILE, TILE)
+            ) /
+              Math.max(widthTiles * TILE, TILE)) *
               drawSize
           )
         )
@@ -98,7 +108,11 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
         Math.max(
           0,
           Math.round(
-            ((runtimeRef.current?.camZ ?? 0) / Math.max(terrain.heightTiles * TILE, TILE)) *
+            (wrapWorldCoordinate(
+              runtimeRef.current?.camZ ?? 0,
+              Math.max(heightTiles * TILE, TILE)
+            ) /
+              Math.max(heightTiles * TILE, TILE)) *
               drawSize
           )
         )
@@ -117,6 +131,8 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
       window.cancelAnimationFrame(animationFrameId);
     };
   }, [runtimeRef, terrain]);
+
+  if (terrain.widthTiles === null || terrain.heightTiles === null) return null;
 
   return (
     <canvas

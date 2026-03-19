@@ -1,11 +1,10 @@
-import { type ReactNode } from 'react';
-
-import { Link, useRouterState } from '@tanstack/react-router';
 import { LayoutDashboard, Map, Moon, Sun } from 'lucide-react';
+import { type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/contexts/theme/context';
 import { cn } from '@/lib/utils';
+import { Link, useRouterState } from '@tanstack/react-router';
 
 const navItems = [
   { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -32,9 +31,7 @@ function NavLink({
       to={href}
       className={cn(
         'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
-        isActive
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground'
+        isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
       )}
     >
       <Icon className="h-4 w-4" />

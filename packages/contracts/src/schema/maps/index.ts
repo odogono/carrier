@@ -2,53 +2,168 @@ import { z } from 'zod';
 
 import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
+import { oz } from '@orpc/zod';
+
+import { WorldBoundsSchema, authoredMapsContract } from './authored';
+
+export * from './authored';
 
 export const MAP_GENERATOR = 'diamond-square' as const;
 export const MAP_GENERATOR_ISLANDS = 'island-clusters' as const;
 export const MAP_CHUNK_SIZE_TILES = 32;
 export const MAP_METERS_PER_TILE = 10;
-export const MAP_RENDER_UNITS_PER_TILE = 24;
 export const MAX_MAP_TILES = 4096;
+export const MAX_MAP_METERS = MAX_MAP_TILES * MAP_METERS_PER_TILE;
+
+export {
+  classifySurfaceMaterialFromElevation,
+  getSurfaceMaterialById,
+  getSurfaceMaterialId,
+  getSurfaceMaterialColorRgb,
+  MAP_SURFACE_MATERIALS,
+  resolveSurfaceMaterial,
+  tileHash,
+  type MapSurfaceMaterialId,
+  type MapSurfaceMaterial,
+  type RgbTuple
+} from './surface';
+
+// --- Map Kind ---
+
+export const MapKind = z.enum([
+  'wrapped-classic',
+  'infinite-vector',
+  'finite-vector-slice',
+  'wrapped-classic-slice'
+]);
+export type MapKind = z.infer<typeof MapKind>;
+
+export const MapExportKind = z.enum(['finite-vector-slice', 'wrapped-classic-slice']);
+export type MapExportKind = z.infer<typeof MapExportKind>;
+
+// --- Map Extent ---
+
+export const FiniteExtentSchema = z.object({
+  kind: z.literal('finite'),
+  widthMeters: z.number().positive(),
+  heightMeters: z.number().positive(),
+  widthTiles: z.number().int().positive(),
+  heightTiles: z.number().int().positive(),
+  wrapX: z.boolean(),
+  wrapZ: z.boolean()
+});
+export type FiniteExtent = z.infer<typeof FiniteExtentSchema>;
+
+export const InfiniteExtentSchema = z.object({
+  kind: z.literal('infinite')
+});
+export type InfiniteExtent = z.infer<typeof InfiniteExtentSchema>;
+
+export const MapExtentSchema = z.discriminatedUnion('kind', [
+  FiniteExtentSchema,
+  InfiniteExtentSchema
+]);
+export type MapExtent = z.infer<typeof MapExtentSchema>;
+
+// --- Map Resolution ---
+
+export const MapResolutionSchema = z.object({
+  metersPerTile: z.number().positive(),
+  chunkSizeTiles: z.number().int().positive()
+});
+export type MapResolution = z.infer<typeof MapResolutionSchema>;
+
+// --- Generator ---
 
 export const MapGenerator = z.enum([MAP_GENERATOR, MAP_GENERATOR_ISLANDS]);
 export type MapGenerator = z.infer<typeof MapGenerator>;
 
-export const MapHeightLayerSchema = z.object({
+// --- Height Layers ---
+
+export const MapHeightFloat32LayerSchema = z.object({
   encoding: z.literal('float32'),
   unit: z.literal('metres')
 });
+export type MapHeightFloat32Layer = z.infer<typeof MapHeightFloat32LayerSchema>;
+
+export const MapHeightUint16LayerSchema = z.object({
+  encoding: z.literal('uint16'),
+  minHeight: z.number(),
+  step: z.number().nonnegative(),
+  unit: z.literal('metres')
+});
+export type MapHeightUint16Layer = z.infer<typeof MapHeightUint16LayerSchema>;
+
+export const MapHeightLayerSchema = z.discriminatedUnion('encoding', [
+  MapHeightFloat32LayerSchema,
+  MapHeightUint16LayerSchema
+]);
 export type MapHeightLayer = z.infer<typeof MapHeightLayerSchema>;
 
 export const MapChunkLayersSchema = z.object({
-  height: MapHeightLayerSchema
+  height: MapHeightLayerSchema,
+  material: z
+    .object({
+      encoding: z.literal('uint8'),
+      unit: z.literal('surface-material')
+    })
+    .optional()
 });
 export type MapChunkLayers = z.infer<typeof MapChunkLayersSchema>;
 
+// --- Map Metadata ---
+
 export const MapMetadataSchema = z.object({
-  chunkSizeTiles: z.number().int().positive(),
-  createdAt: z.string(),
-  generator: MapGenerator,
-  heightMeters: z.number().positive(),
-  heightTiles: z.number().int().positive(),
   id: z.string().min(1),
-  metersPerTile: z.number().positive(),
   name: z.string().nullable(),
-  renderUnitsPerTile: z.number().positive(),
+  kind: MapKind,
+  extent: MapExtentSchema,
+  export: z
+    .object({
+      bounds: WorldBoundsSchema,
+      exportedAt: z.string(),
+      sourceMapId: z.string().min(1),
+      sourceRevision: z.number().int().nonnegative()
+    })
+    .optional(),
+  resolution: MapResolutionSchema,
+  revision: z.number().int().nonnegative(),
+  generator: MapGenerator.optional(),
   seed: z.string().min(1),
-  updatedAt: z.string(),
-  widthMeters: z.number().positive(),
-  widthTiles: z.number().int().positive()
+  createdAt: z.string(),
+  updatedAt: z.string()
 });
 export type MapMetadata = z.infer<typeof MapMetadataSchema>;
 
+// --- Type Guards ---
+
+export const isFiniteMap = (
+  meta: MapMetadata | null | undefined
+): meta is MapMetadata & { extent: FiniteExtent } =>
+  meta?.extent?.kind === 'finite';
+
+export const isInfiniteMap = (
+  meta: MapMetadata | null | undefined
+): meta is MapMetadata & { extent: InfiniteExtent } =>
+  meta?.extent?.kind === 'infinite';
+
+export const getMapChunkSizeTiles = (meta: MapMetadata): number =>
+  meta.resolution.chunkSizeTiles;
+
+export const getMapMetersPerTile = (meta: MapMetadata): number =>
+  meta.resolution.metersPerTile;
+
+// --- Chunk Schemas (signed coordinates) ---
+
 export const MapChunkSchema = z.object({
-  chunkX: z.number().int().min(0),
-  chunkZ: z.number().int().min(0),
+  chunkX: z.number().int(),
+  chunkZ: z.number().int(),
   heights: z.array(z.number()),
   layers: MapChunkLayersSchema,
+  materials: z.array(z.number().int().min(0)).optional(),
   mapId: z.string().min(1),
-  originTileX: z.number().int().min(0),
-  originTileZ: z.number().int().min(0),
+  originTileX: z.number().int(),
+  originTileZ: z.number().int(),
   samplesHigh: z.number().int().min(2),
   samplesWide: z.number().int().min(2),
   tileHeight: z.number().int().positive(),
@@ -56,17 +171,58 @@ export const MapChunkSchema = z.object({
 });
 export type MapChunk = z.infer<typeof MapChunkSchema>;
 
-export const CreateMapInput = z.object({
+export const MapChunkMetadataSchema = MapChunkSchema.omit({
+  heights: true
+});
+export type MapChunkMetadata = z.infer<typeof MapChunkMetadataSchema>;
+
+export const MapChunkBinarySchema = MapChunkMetadataSchema.extend({
+  heights: oz.blob(),
+  materials: oz.blob().optional()
+});
+export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
+
+// --- Create Map Input (discriminated) ---
+
+const CreateWrappedClassicMapInput = z.object({
+  kind: z.literal('wrapped-classic'),
   generator: MapGenerator.default(MAP_GENERATOR),
-  heightTiles: z.number().int().min(1).max(MAX_MAP_TILES),
+  heightMeters: z
+    .number()
+    .int()
+    .min(MAP_METERS_PER_TILE)
+    .max(MAX_MAP_METERS)
+    .refine(value => value % MAP_METERS_PER_TILE === 0, {
+      message: `heightMeters must be a multiple of ${MAP_METERS_PER_TILE}`
+    }),
   name: z.string().trim().min(1).max(120).optional(),
   seed: z.string().trim().min(1).max(120).optional(),
-  widthTiles: z.number().int().min(1).max(MAX_MAP_TILES)
+  widthMeters: z
+    .number()
+    .int()
+    .min(MAP_METERS_PER_TILE)
+    .max(MAX_MAP_METERS)
+    .refine(value => value % MAP_METERS_PER_TILE === 0, {
+      message: `widthMeters must be a multiple of ${MAP_METERS_PER_TILE}`
+    })
 });
+
+const CreateInfiniteVectorMapInput = z.object({
+  kind: z.literal('infinite-vector'),
+  name: z.string().trim().min(1).max(120).optional(),
+  seed: z.string().trim().min(1).max(120).optional()
+});
+
+export const CreateMapInput = z.discriminatedUnion('kind', [
+  CreateWrappedClassicMapInput,
+  CreateInfiniteVectorMapInput
+]);
 export type CreateMapInput = z.infer<typeof CreateMapInput>;
 
 export const CreateMapOutput = MapMetadataSchema;
 export type CreateMapOutput = z.infer<typeof CreateMapOutput>;
+
+// --- Other Inputs/Outputs ---
 
 export const DeleteMapInput = z.object({
   id: z.string().min(1)
@@ -88,8 +244,8 @@ export const GetMapOutput = MapMetadataSchema;
 export type GetMapOutput = z.infer<typeof GetMapOutput>;
 
 export const GetMapChunkInput = z.object({
-  chunkX: z.coerce.number().int().min(0),
-  chunkZ: z.coerce.number().int().min(0),
+  chunkX: z.coerce.number().int(),
+  chunkZ: z.coerce.number().int(),
   mapId: z.string().min(1)
 });
 export type GetMapChunkInput = z.infer<typeof GetMapChunkInput>;
@@ -97,11 +253,49 @@ export type GetMapChunkInput = z.infer<typeof GetMapChunkInput>;
 export const GetMapChunkOutput = MapChunkSchema;
 export type GetMapChunkOutput = z.infer<typeof GetMapChunkOutput>;
 
+export const GetMapChunkBinaryOutput = MapChunkBinarySchema;
+export type GetMapChunkBinaryOutput = z.infer<typeof GetMapChunkBinaryOutput>;
+
 export const ListMapsInput = z.object({});
 export type ListMapsInput = z.infer<typeof ListMapsInput>;
 
 export const ListMapsOutput = z.array(MapMetadataSchema);
 export type ListMapsOutput = z.infer<typeof ListMapsOutput>;
+
+export const CreateMapExportInput = z.object({
+  bounds: WorldBoundsSchema.refine(
+    bounds => bounds.maxX > bounds.minX && bounds.maxZ > bounds.minZ,
+    {
+      message: 'Export bounds must have positive width and height'
+    }
+  ),
+  chunkSizeTiles: z.number().int().positive(),
+  expectedRevision: z.number().int().nonnegative(),
+  kind: MapExportKind.default('finite-vector-slice'),
+  mapId: z.string().min(1),
+  metersPerTile: z.number().positive(),
+  name: z.string().trim().min(1).max(120).optional()
+});
+export type CreateMapExportInput = z.infer<typeof CreateMapExportInput>;
+
+export const CreateMapExportOutput = MapMetadataSchema;
+export type CreateMapExportOutput = z.infer<typeof CreateMapExportOutput>;
+
+export const FindMapExportInput = z.object({
+  id: z.string().min(1)
+});
+export type FindMapExportInput = z.infer<typeof FindMapExportInput>;
+
+export const FindMapExportOutput = MapMetadataSchema;
+export type FindMapExportOutput = z.infer<typeof FindMapExportOutput>;
+
+export const ListMapExportsInput = z.object({
+  mapId: z.string().min(1)
+});
+export type ListMapExportsInput = z.infer<typeof ListMapExportsInput>;
+
+export const ListMapExportsOutput = z.array(MapMetadataSchema);
+export type ListMapExportsOutput = z.infer<typeof ListMapExportsOutput>;
 
 export const UpdateMapInput = z.object({
   id: z.string().min(1),
@@ -111,6 +305,8 @@ export type UpdateMapInput = z.infer<typeof UpdateMapInput>;
 
 export const UpdateMapOutput = MapMetadataSchema;
 export type UpdateMapOutput = z.infer<typeof UpdateMapOutput>;
+
+// --- Routes ---
 
 export const CreateMapRoute: Route = {
   description: 'Create and persist a generated map',
@@ -140,6 +336,34 @@ export const GetMapChunkRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const GetMapChunkBinaryRoute: Route = {
+  description: 'Retrieve a single map chunk with binary height data',
+  method: 'GET',
+  path: '/maps/{mapId}/chunks/{chunkX}/{chunkZ}/binary',
+  tags: ['maps']
+} as const;
+
+export const CreateMapExportRoute: Route = {
+  description: 'Create a finite exported slice from an infinite-vector map',
+  method: 'POST',
+  path: '/maps/{mapId}/exports',
+  tags: ['maps']
+} as const;
+
+export const FindMapExportRoute: Route = {
+  description: 'Retrieve exported slice metadata',
+  method: 'GET',
+  path: '/maps/exports/{id}',
+  tags: ['maps']
+} as const;
+
+export const ListMapExportsRoute: Route = {
+  description: 'List exported slices for an infinite-vector map',
+  method: 'GET',
+  path: '/maps/{mapId}/exports',
+  tags: ['maps']
+} as const;
+
 export const ListMapsRoute: Route = {
   description: 'List maps ordered by most recently updated first',
   method: 'GET',
@@ -155,13 +379,36 @@ export const UpdateMapRoute: Route = {
 } as const;
 
 export const mapsContract = {
+  ...authoredMapsContract,
   create: oc.route(CreateMapRoute).input(CreateMapInput).output(CreateMapOutput),
+  createExport: oc
+    .route(CreateMapExportRoute)
+    .input(CreateMapExportInput)
+    .output(CreateMapExportOutput),
   delete: oc.route(DeleteMapRoute).input(DeleteMapInput).output(DeleteMapOutput),
   find: oc.route(GetMapRoute).input(GetMapInput).output(GetMapOutput),
+  findExport: oc
+    .route(FindMapExportRoute)
+    .input(FindMapExportInput)
+    .output(FindMapExportOutput),
   getChunk: oc
     .route(GetMapChunkRoute)
     .input(GetMapChunkInput)
     .output(GetMapChunkOutput),
+  getChunkBinary: oc
+    .route(GetMapChunkBinaryRoute)
+    .input(GetMapChunkInput)
+    .output(GetMapChunkBinaryOutput),
+  listExports: oc
+    .route(ListMapExportsRoute)
+    .input(ListMapExportsInput)
+    .output(ListMapExportsOutput),
   list: oc.route(ListMapsRoute).input(ListMapsInput).output(ListMapsOutput),
   update: oc.route(UpdateMapRoute).input(UpdateMapInput).output(UpdateMapOutput)
 };
+
+export {
+  decodeFloat32HeightsBlob,
+  decodeMapChunkBinary,
+  type RuntimeMapChunk
+} from './binary';
