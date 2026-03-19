@@ -39,12 +39,19 @@ type EditorCanvasProps = {
   selectedControlPointId: string | null;
   selectedPolygonIds: string[];
   setDragState: React.Dispatch<React.SetStateAction<CanvasDragState>>;
-  setPolygonDraft: React.Dispatch<React.SetStateAction<PolygonDraft | null>>;
-  setSelectedControlPointId: React.Dispatch<
-    React.SetStateAction<string | null>
-  >;
-  setSelectedIslandId: React.Dispatch<React.SetStateAction<string | null>>;
-  setSelectedPolygonIds: React.Dispatch<React.SetStateAction<string[]>>;
+  setPolygonDraft: (
+    value:
+      | PolygonDraft
+      | null
+      | ((current: PolygonDraft | null) => PolygonDraft | null),
+    record?: boolean
+  ) => void;
+  setSelectedControlPointId: (value: string | null, record?: boolean) => void;
+  setSelectedIslandId: (value: string | null, record?: boolean) => void;
+  setSelectedPolygonIds: (
+    value: string[] | ((current: string[]) => string[]),
+    record?: boolean
+  ) => void;
   size: { height: number; width: number };
   toScreenPoint: (point: Pick<WorldPoint, 'x' | 'z'>) => {
     x: number;
@@ -188,7 +195,8 @@ export function EditorCanvas({
                                 selection,
                                 polygon.id,
                                 event.shiftKey
-                              )
+                              ),
+                              true
                             );
                             setSelectedControlPointId(null);
                             setSelectedIslandId(null);
@@ -266,7 +274,8 @@ export function EditorCanvas({
                                 setPolygonDraft(draft =>
                                   draft
                                     ? { ...draft, selectedVertexIndex: index }
-                                    : draft
+                                    : draft,
+                                  true
                                 );
                               }}
                               onPointerDown={event => {
@@ -335,7 +344,8 @@ export function EditorCanvas({
                                             ...draft.vertices.slice(index + 1)
                                           ]
                                         }
-                                      : draft
+                                      : draft,
+                                    true
                                   );
                                 }}
                                 onPointerDown={STOP_PROPAGATION}

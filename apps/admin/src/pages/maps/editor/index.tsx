@@ -1,4 +1,5 @@
 import { isInfiniteMap } from 'carrier-contracts/types';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { ArrowLeft } from 'lucide-react';
 import {
   useCallback,
@@ -53,13 +54,21 @@ import {
 } from './helpers/drafts';
 import type {
   CanvasDragState,
-  ControlPointDraft,
-  DeleteTarget,
-  IslandDraft,
-  PolygonDraft
+  DeleteTarget
 } from './helpers/types';
 import { useElementSize } from './hooks/use-element-size';
 import { useMapEditorActions } from './hooks/use-map-editor-actions';
+import {
+  canRedoAtom,
+  canUndoAtom,
+  createEmptyEditorSnapshot,
+  editorHistoryStateAtom,
+  editorSnapshotAtom,
+  recordEditorHistoryAtom,
+  resetEditorHistoryAtom,
+  snapshotsEqual,
+  type EditorSnapshot
+} from './state/history';
 
 export function MapEditorPage() {
   const { id } = useParams({ from: '/maps/$id/editor' });
@@ -69,19 +78,32 @@ export function MapEditorPage() {
   const initialFitRef = useRef(false);
   const size = useElementSize(containerRef);
 
-  const [tool, setTool] = useState<EditorTool>('select');
   const [editorRevision, setEditorRevision] = useState<number | null>(null);
-  const [selectedPolygonIds, setSelectedPolygonIds] = useState<string[]>([]);
-  const [selectedControlPointId, setSelectedControlPointId] = useState<
-    string | null
-  >(null);
-  const [selectedIslandId, setSelectedIslandId] = useState<string | null>(null);
-  const [polygonDraft, setPolygonDraft] = useState<PolygonDraft | null>(null);
-  const [controlPointDraft, setControlPointDraft] =
-    useState<ControlPointDraft | null>(null);
-  const [islandDraft, setIslandDraft] = useState<IslandDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [dragState, setDragState] = useState<CanvasDragState>(null);
+  const [snapshot, setSnapshot] = useAtom(editorSnapshotAtom);
+  const canUndo = useAtomValue(canUndoAtom);
+  const canRedo = useAtomValue(canRedoAtom);
+  const resetHistory = useSetAtom(resetEditorHistoryAtom);
+  const recordHistory = useSetAtom(recordEditorHistoryAtom);
+  const setHistoryState = useSetAtom(editorHistoryStateAtom);
+  const store = useStore();
+  const getHistoryState = useCallback(
+    () => store.get(editorHistoryStateAtom),
+    [store]
+  );
+  const snapshotRef = useRef(snapshot);
+  const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
+
+  const {
+    controlPointDraft,
+    islandDraft,
+    polygonDraft,
+    selectedControlPointId,
+    selectedIslandId,
+    selectedPolygonIds,
+    tool
+  } = snapshot;
 
   const {
     controlPointsQuery,
@@ -114,6 +136,103 @@ export function MapEditorPage() {
     () => new Set(selectedIsland?.sourcePolygonIds ?? []),
     [selectedIsland]
   );
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (dragState && dragSnapshotRef.current === null) {
+      dragSnapshotRef.current = snapshotRef.current;
+      return;
+    }
+
+    if (!dragState) {
+      dragSnapshotRef.current = null;
+    }
+  }, [dragState]);
+
+  useEffect(() => {
+    resetHistory(createEmptyEditorSnapshot());
+    setDeleteTarget(null);
+    setDragState(null);
+  }, [id, resetHistory]);
+
+  const updateSnapshot = useCallback(
+    (
+      updater:
+        | EditorSnapshot
+        | ((current: EditorSnapshot) => EditorSnapshot),
+      record = false
+    ) => {
+      const before = snapshotRef.current;
+      const after =
+        typeof updater === 'function'
+          ? updater(before)
+          : updater;
+
+      if (snapshotsEqual(before, after)) {
+        return before;
+      }
+
+      snapshotRef.current = after;
+
+      if (record) {
+        recordHistory({
+          after,
+          before,
+          remoteTransition: null
+        });
+      } else {
+        setSnapshot(after);
+      }
+
+      return after;
+    },
+    [recordHistory, setSnapshot]
+  );
+
+  const setTool = useCallback(
+    (nextTool: EditorTool, record = false) => {
+      updateSnapshot(current => ({ ...current, tool: nextTool }), record);
+    },
+    [updateSnapshot]
+  );
+
+  const clearSelections = useCallback(
+    (record = false) => {
+      updateSnapshot(
+        current => ({
+          ...current,
+          selectedControlPointId: null,
+          selectedIslandId: null,
+          selectedPolygonIds: []
+        }),
+        record
+      );
+    },
+    [updateSnapshot]
+  );
+
+  const snapshotFieldSetter = <K extends keyof EditorSnapshot>(field: K) =>
+    (value: EditorSnapshot[K] | ((current: EditorSnapshot[K]) => EditorSnapshot[K]), record = false) => {
+      updateSnapshot(
+        current => ({
+          ...current,
+          [field]: typeof value === 'function'
+            ? (value as (current: EditorSnapshot[K]) => EditorSnapshot[K])(current[field])
+            : value
+        }),
+        record
+      );
+    };
+
+  const setPolygonDraft = snapshotFieldSetter('polygonDraft');
+  const setControlPointDraft = snapshotFieldSetter('controlPointDraft');
+  const setIslandDraft = snapshotFieldSetter('islandDraft');
+  const setSelectedPolygonIds = snapshotFieldSetter('selectedPolygonIds');
+  const setSelectedControlPointId = snapshotFieldSetter('selectedControlPointId');
+  const setSelectedIslandId = snapshotFieldSetter('selectedIslandId');
 
   useEffect(() => {
     if (map && editorRevision === null) {
@@ -266,61 +385,68 @@ export function MapEditorPage() {
     [map, size.height, size.width, viewport]
   );
 
-  const clearSelections = useCallback(() => {
-    setSelectedPolygonIds([]);
-    setSelectedControlPointId(null);
-    setSelectedIslandId(null);
-  }, []);
-
   const resetPolygonDraft = useCallback(() => {
-    setPolygonDraft(null);
-    setTool('select');
-  }, []);
+    updateSnapshot(current => ({
+      ...current,
+      polygonDraft: null,
+      tool: 'select'
+    }));
+  }, [updateSnapshot]);
 
   const resetControlPointDraft = useCallback(() => {
-    setControlPointDraft(null);
-    setTool('select');
-  }, []);
+    updateSnapshot(current => ({
+      ...current,
+      controlPointDraft: null,
+      tool: 'select'
+    }));
+  }, [updateSnapshot]);
 
   const beginVertexEdit = useCallback(() => {
     if (!selectedPolygon) {
       return;
     }
 
-    setPolygonDraft(createPolygonDraft(selectedPolygon));
-    setControlPointDraft(null);
-    setTool('edit-vertices');
-  }, [selectedPolygon]);
+    updateSnapshot(current => ({
+      ...current,
+      controlPointDraft: null,
+      polygonDraft: createPolygonDraft(selectedPolygon),
+      tool: 'edit-vertices'
+    }), true);
+  }, [selectedPolygon, updateSnapshot]);
 
   const {
     applyBooleanOperation,
     confirmDelete,
     pendingAction,
+    redo,
     saveControlPointDraft,
     saveIslandDraft,
-    savePolygonDraft
+    savePolygonDraft,
+    undo
   } = useMapEditorActions({
     controlPointDraft,
     deleteTarget,
     editorRevision,
     fitToWorldBounds,
+    getHistoryState,
+    historySnapshot: snapshot,
     id,
     invalidateIslandMetadataQueries,
     invalidateTerrainMutation,
     islandDraft,
     map,
+    polygons,
     polygonDraft,
+    recordHistory,
     reloadAll,
+    selectedControlPoint,
+    selectedPolygon,
     selectedPolygonIds,
-    setControlPointDraft,
     setDeleteTarget,
     setEditorRevision,
+    setHistoryState,
     setIslandDraft,
-    setPolygonDraft,
-    setSelectedControlPointId,
-    setSelectedIslandId,
-    setSelectedPolygonIds,
-    setTool
+    setSnapshot
   });
 
   const handleWheelCapture = useCallback(
@@ -395,14 +521,28 @@ export function MapEditorPage() {
       dragState,
       onViewportPointerMove,
       polygonDraft,
+      setControlPointDraft,
+      setPolygonDraft,
       selectedControlPoint,
       toWorldPoint
     ]
   );
 
   const releaseCanvasDrag = useCallback(() => {
+    const before = dragSnapshotRef.current;
+    const after = snapshotRef.current;
+
+    if (before && !snapshotsEqual(before, after)) {
+      recordHistory({
+        after,
+        before,
+        remoteTransition: null
+      });
+    }
+
+    dragSnapshotRef.current = null;
     setDragState(null);
-  }, []);
+  }, [recordHistory]);
 
   const handleCanvasPointerUp = useCallback(
     (event: PointerEvent<SVGSVGElement>) => {
@@ -439,20 +579,26 @@ export function MapEditorPage() {
         setPolygonDraft(draft => {
           const nextDraft = draft ?? createPolygonDraft();
           return { ...nextDraft, vertices: [...nextDraft.vertices, world] };
-        });
+        }, true);
         return;
       }
 
       if (tool === 'place-control-point') {
         const world = toWorldPoint(event);
-        setControlPointDraft({
-          ...createControlPointDraft(),
-          x: world.x,
-          z: world.z
-        });
-        setSelectedPolygonIds([]);
-        setSelectedControlPointId(null);
-        setSelectedIslandId(null);
+        updateSnapshot(
+          current => ({
+            ...current,
+            controlPointDraft: {
+              ...createControlPointDraft(),
+              x: world.x,
+              z: world.z
+            },
+            selectedControlPointId: null,
+            selectedIslandId: null,
+            selectedPolygonIds: []
+          }),
+          true
+        );
         return;
       }
 
@@ -461,7 +607,7 @@ export function MapEditorPage() {
         setPolygonDraft(null);
       }
     },
-    [clearSelections, map, toWorldPoint, tool]
+    [clearSelections, map, setPolygonDraft, toWorldPoint, tool, updateSnapshot]
   );
 
   const commitDrawPolygon = useCallback(() => {
@@ -475,6 +621,26 @@ export function MapEditorPage() {
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<SVGSVGElement>) => {
+      const modifierPressed = event.metaKey || event.ctrlKey;
+      if (modifierPressed && !pendingAction) {
+        const isUndo = event.key.toLowerCase() === 'z' && !event.shiftKey;
+        const isRedo =
+          (event.key.toLowerCase() === 'z' && event.shiftKey) ||
+          event.key.toLowerCase() === 'y';
+
+        if (isUndo && canUndo) {
+          event.preventDefault();
+          void undo();
+          return;
+        }
+
+        if (isRedo && canRedo) {
+          event.preventDefault();
+          void redo();
+          return;
+        }
+      }
+
       if (event.key === 'Escape') {
         event.preventDefault();
         if (polygonDraft) {
@@ -521,7 +687,7 @@ export function MapEditorPage() {
                 (_vertex, index) => index !== draft.selectedVertexIndex
               )
             };
-          });
+          }, true);
           return;
         }
 
@@ -545,16 +711,21 @@ export function MapEditorPage() {
     },
     [
       clearSelections,
+      canRedo,
+      canUndo,
       commitDrawPolygon,
       controlPointDraft,
       onViewportKeyDown,
       pendingAction,
       polygonDraft,
+      redo,
       resetControlPointDraft,
       resetPolygonDraft,
       selectedControlPoint,
       selectedPolygon,
-      tool
+      setPolygonDraft,
+      tool,
+      undo
     ]
   );
 
@@ -611,21 +782,42 @@ export function MapEditorPage() {
       <EditorToolbar
         canApplyDifference={canApplyDifference}
         canApplyUnionLike={canApplyUnionLike}
+        canRedo={canRedo}
+        canUndo={canUndo}
         onApplyBoolean={operation => void applyBooleanOperation(operation)}
         onBeginControlPoint={() => {
-          setTool('place-control-point');
-          setControlPointDraft(null);
-          setPolygonDraft(null);
-          clearSelections();
+          updateSnapshot(
+            current => ({
+              ...current,
+              controlPointDraft: null,
+              polygonDraft: null,
+              selectedControlPointId: null,
+              selectedIslandId: null,
+              selectedPolygonIds: [],
+              tool: 'place-control-point'
+            }),
+            true
+          );
         }}
         onBeginDrawPolygon={() => {
-          setTool('draw-polygon');
-          setPolygonDraft(createPolygonDraft());
-          setControlPointDraft(null);
-          clearSelections();
+          updateSnapshot(
+            current => ({
+              ...current,
+              controlPointDraft: null,
+              polygonDraft: createPolygonDraft(),
+              selectedControlPointId: null,
+              selectedIslandId: null,
+              selectedPolygonIds: [],
+              tool: 'draw-polygon'
+            }),
+            true
+          );
         }}
         onBeginVertexEdit={beginVertexEdit}
-        onSelectTool={setTool}
+        onRedo={() => void redo()}
+        onSelectTool={nextTool => setTool(nextTool, true)}
+        onUndo={() => void undo()}
+        pendingAction={pendingAction !== null}
         selectedPolygon={Boolean(selectedPolygon)}
         tool={tool}
       />

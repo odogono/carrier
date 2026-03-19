@@ -59,9 +59,13 @@ type EditorSidebarProps = {
   selectedIsland: DerivedIsland | null;
   selectedIslandId: string | null;
   selectedPolygon: SourcePolygon | null;
-  setControlPointDraft: React.Dispatch<
-    React.SetStateAction<ControlPointDraft | null>
-  >;
+  setControlPointDraft: (
+    value:
+      | ControlPointDraft
+      | null
+      | ((current: ControlPointDraft | null) => ControlPointDraft | null),
+    record?: boolean
+  ) => void;
   setDeleteTarget: React.Dispatch<
     React.SetStateAction<
       | { id: string; kind: 'control-point' }
@@ -69,13 +73,26 @@ type EditorSidebarProps = {
       | null
     >
   >;
-  setIslandDraft: React.Dispatch<React.SetStateAction<IslandDraft | null>>;
-  setSelectedControlPointId: React.Dispatch<
-    React.SetStateAction<string | null>
-  >;
-  setSelectedIslandId: React.Dispatch<React.SetStateAction<string | null>>;
-  setSelectedPolygonIds: React.Dispatch<React.SetStateAction<string[]>>;
-  setPolygonDraft: React.Dispatch<React.SetStateAction<PolygonDraft | null>>;
+  setIslandDraft: (
+    value:
+      | IslandDraft
+      | null
+      | ((current: IslandDraft | null) => IslandDraft | null),
+    record?: boolean
+  ) => void;
+  setSelectedControlPointId: (value: string | null, record?: boolean) => void;
+  setSelectedIslandId: (value: string | null, record?: boolean) => void;
+  setSelectedPolygonIds: (
+    value: string[] | ((current: string[]) => string[]),
+    record?: boolean
+  ) => void;
+  setPolygonDraft: (
+    value:
+      | PolygonDraft
+      | null
+      | ((current: PolygonDraft | null) => PolygonDraft | null),
+    record?: boolean
+  ) => void;
   onRecenter: (point: Pick<WorldPoint, 'x' | 'z'>) => void;
   onResetControlPointDraft: () => void;
   onResetPolygonDraft: () => void;
@@ -164,7 +181,7 @@ export function EditorSidebar({
                         DEFAULT_SOURCE_POLYGON_PARAMS),
                       noiseScaleMeters
                     }
-                  }));
+                  }), true);
                 }}
               />
               <PolygonParamInput
@@ -181,7 +198,7 @@ export function EditorSidebar({
                         DEFAULT_SOURCE_POLYGON_PARAMS),
                       maxDisplacementMeters
                     }
-                  }));
+                  }), true);
                 }}
               />
               <PolygonParamInput
@@ -199,7 +216,7 @@ export function EditorSidebar({
                         DEFAULT_SOURCE_POLYGON_PARAMS),
                       roughness
                     }
-                  }));
+                  }), true);
                 }}
               />
               <div className="flex flex-wrap gap-2">
@@ -268,10 +285,10 @@ export function EditorSidebar({
                       setControlPointDraft(draft => ({
                         ...(draft ??
                           createControlPointDraft(
-                            selectedControlPoint ?? undefined
-                          )),
-                        type: event.target.value as ControlPoint['type']
-                      }))
+                        selectedControlPoint ?? undefined
+                      )),
+                      type: event.target.value as ControlPoint['type']
+                      }), true)
                     }
                   >
                     <option value="plain">Plain</option>
@@ -291,7 +308,7 @@ export function EditorSidebar({
                           selectedControlPoint ?? undefined
                         )),
                       strength
-                    }))
+                    }), true)
                   }
                 />
               </div>
@@ -307,7 +324,7 @@ export function EditorSidebar({
                           selectedControlPoint ?? undefined
                         )),
                       elevationMeters
-                    }))
+                    }), true)
                   }
                 />
                 <NumberInput
@@ -321,7 +338,7 @@ export function EditorSidebar({
                           selectedControlPoint ?? undefined
                         )),
                       influenceMeters
-                    }))
+                    }), true)
                   }
                 />
               </div>
@@ -337,7 +354,7 @@ export function EditorSidebar({
                           selectedControlPoint ?? undefined
                         )),
                       x
-                    }))
+                    }), true)
                   }
                 />
                 <NumberInput
@@ -351,7 +368,7 @@ export function EditorSidebar({
                           selectedControlPoint ?? undefined
                         )),
                       z
-                    }))
+                    }), true)
                   }
                 />
               </div>
