@@ -305,6 +305,89 @@ describe('API server map routes', () => {
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
   });
 
+  test('supports exported slice routes through the public API', async () => {
+    const createdResponse = await request('POST', '/api/maps', {
+      kind: 'infinite-vector',
+      name: 'Export source',
+      seed: 'export-api-seed'
+    });
+    const created = createdResponse.json as Record<string, unknown>;
+
+    const polygonResponse = await request(
+      'POST',
+      `/api/maps/${created.id as string}/polygons`,
+      {
+        expectedRevision: 0,
+        mapId: created.id,
+        params: {
+          maxDisplacementMeters: 16,
+          noiseScaleMeters: 96,
+          roughness: 0.6
+        },
+        vertices: [
+          { x: 0, z: 0 },
+          { x: 320, z: 0 },
+          { x: 320, z: 320 },
+          { x: 0, z: 320 }
+        ]
+      }
+    );
+    expect((polygonResponse.json as Record<string, unknown>).mapRevision).toBe(1);
+
+    const exportResponse = await request(
+      'POST',
+      `/api/maps/${created.id as string}/exports`,
+      {
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 1,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Slice A'
+      }
+    );
+    const exported = exportResponse.json as Record<string, unknown>;
+    expect(exported.kind).toBe('finite-vector-slice');
+    expect((exported.export as Record<string, unknown>).sourceMapId).toBe(created.id);
+
+    const listedExportsResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}/exports`
+    );
+    const listedExports = listedExportsResponse.json as Array<Record<string, unknown>>;
+    expect(listedExports).toHaveLength(1);
+    expect(listedExports[0]?.id).toBe(exported.id);
+
+    const fetchedExportResponse = await request(
+      'GET',
+      `/api/maps/exports/${exported.id as string}`
+    );
+    const fetchedExport = fetchedExportResponse.json as Record<string, unknown>;
+    expect((fetchedExport.export as Record<string, unknown>).sourceRevision).toBe(1);
+
+    const chunk = await decodeMapChunkBinary(
+      await (await createTestClient()).maps.getChunkBinary({
+        chunkX: 0,
+        chunkZ: 0,
+        mapId: exported.id as string
+      })
+    );
+    expect(chunk.mapId).toBe(exported.id as string);
+    expect(chunk.tileWidth).toBe(16);
+
+    const outOfBoundsChunkResponse = await request(
+      'GET',
+      `/api/maps/${exported.id as string}/chunks/2/0`
+    );
+    expect(outOfBoundsChunkResponse.response.status).toBe(404);
+  });
+
   test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {
     const { app } = await createServer();
     const response = await app.handle(

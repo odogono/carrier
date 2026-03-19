@@ -587,24 +587,39 @@ const sampleIslandHeight = (
 export const generateVectorChunk = (
   artifact: CompiledVectorTerrainArtifact,
   chunkX: number,
-  chunkZ: number
+  chunkZ: number,
+  options: {
+    mapId?: string;
+    materialOriginTileX?: number;
+    materialOriginTileZ?: number;
+    metersPerTile?: number;
+    originTileX?: number;
+    originTileZ?: number;
+    tileHeight?: number;
+    tileWidth?: number;
+    worldOriginX?: number;
+    worldOriginZ?: number;
+  } = {}
 ): GeneratedMapChunkRecord => {
   const {
     chunkSizeTiles,
-    metersPerTile
+    metersPerTile: mapMetersPerTile
   } = artifact.map.resolution;
-  const originTileX = chunkX * chunkSizeTiles;
-  const originTileZ = chunkZ * chunkSizeTiles;
-  const tileWidth = chunkSizeTiles;
-  const tileHeight = chunkSizeTiles;
+  const metersPerTile = options.metersPerTile ?? mapMetersPerTile;
+  const originTileX = options.originTileX ?? chunkX * chunkSizeTiles;
+  const originTileZ = options.originTileZ ?? chunkZ * chunkSizeTiles;
+  const tileWidth = options.tileWidth ?? chunkSizeTiles;
+  const tileHeight = options.tileHeight ?? chunkSizeTiles;
   const samplesWide = tileWidth + 1;
   const samplesHigh = tileHeight + 1;
   const heights = new Float32Array(samplesWide * samplesHigh);
+  const materialOriginTileX = options.materialOriginTileX ?? originTileX;
+  const materialOriginTileZ = options.materialOriginTileZ ?? originTileZ;
   const chunkWorldBounds = {
-    maxX: (chunkX + 1) * chunkSizeTiles * metersPerTile,
-    maxZ: (chunkZ + 1) * chunkSizeTiles * metersPerTile,
-    minX: chunkX * chunkSizeTiles * metersPerTile,
-    minZ: chunkZ * chunkSizeTiles * metersPerTile
+    maxX: (options.worldOriginX ?? originTileX * metersPerTile) + tileWidth * metersPerTile,
+    maxZ: (options.worldOriginZ ?? originTileZ * metersPerTile) + tileHeight * metersPerTile,
+    minX: options.worldOriginX ?? originTileX * metersPerTile,
+    minZ: options.worldOriginZ ?? originTileZ * metersPerTile
   };
   const candidateIslands = artifact.islands.filter(island =>
     bboxesIntersect(island.bbox, chunkWorldBounds)
@@ -630,7 +645,7 @@ export const generateVectorChunk = (
     chunkX,
     chunkZ,
     heights,
-    mapId: artifact.map.id,
+    mapId: options.mapId ?? artifact.map.id,
     originTileX,
     originTileZ,
     samplesHigh,
@@ -647,8 +662,8 @@ export const generateVectorChunk = (
       const elevation = (h00 + h10 + h01 + h11) * 0.25;
       return getSurfaceMaterialId(
         classifySurfaceMaterialFromElevation(
-          originTileX + localX,
-          originTileZ + localZ,
+          materialOriginTileX + localX,
+          materialOriginTileZ + localZ,
           elevation
         )
       );

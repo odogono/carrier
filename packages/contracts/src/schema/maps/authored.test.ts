@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   ApplyBooleanOutput,
   ApplyBooleanInput,
+  CreateMapExportInput,
   CreateControlPointOutput,
   CreateControlPointInput,
   CreateSourcePolygonOutput,
@@ -72,9 +73,28 @@ describe('authored map schemas', () => {
     expect(
       MapMetadataSchema.parse({
         createdAt: new Date().toISOString(),
-        extent: { kind: 'infinite' },
+        extent: {
+          heightMeters: 640,
+          heightTiles: 64,
+          kind: 'finite',
+          widthMeters: 640,
+          widthTiles: 64,
+          wrapX: false,
+          wrapZ: false
+        },
+        export: {
+          bounds: {
+            maxX: 640,
+            maxZ: 640,
+            minX: 0,
+            minZ: 0
+          },
+          exportedAt: new Date().toISOString(),
+          sourceMapId: 'source-1',
+          sourceRevision: 2
+        },
         id: 'map-1',
-        kind: 'infinite-vector',
+        kind: 'finite-vector-slice',
         name: 'World',
         resolution: {
           chunkSizeTiles: 32,
@@ -85,6 +105,22 @@ describe('authored map schemas', () => {
         updatedAt: new Date().toISOString()
       }).revision
     ).toBe(4);
+
+    expect(
+      CreateMapExportInput.parse({
+        bounds: {
+          maxX: 640,
+          maxZ: 640,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 32,
+        expectedRevision: 4,
+        kind: 'finite-vector-slice',
+        mapId: 'map-1',
+        metersPerTile: 10
+      }).kind
+    ).toBe('finite-vector-slice');
   });
 
   test('validates overview payloads with nullable bounds', () => {

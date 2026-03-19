@@ -549,7 +549,9 @@ export const deriveChunkMaterialIds = (
   tileWidth: number,
   tileHeight: number,
   originTileX: number,
-  originTileZ: number
+  originTileZ: number,
+  materialOriginTileX = originTileX,
+  materialOriginTileZ = originTileZ
 ) => {
   const materials = new Array<number>(tileWidth * tileHeight);
 
@@ -561,8 +563,8 @@ export const deriveChunkMaterialIds = (
       const h11 = heights[(localZ + 1) * samplesWide + localX + 1]!;
       const elevation = (h00 + h10 + h01 + h11) * 0.25;
       const material = classifySurfaceMaterialFromElevation(
-        originTileX + localX,
-        originTileZ + localZ,
+        materialOriginTileX + localX,
+        materialOriginTileZ + localZ,
         elevation
       );
 

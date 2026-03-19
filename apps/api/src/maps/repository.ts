@@ -6,6 +6,7 @@ import type {
   ApplyBooleanOutput,
   BooleanOperation,
   ControlPoint,
+  CreateMapExportInput,
   CreateMapInput,
   DerivedIsland,
   MapChunk,
@@ -54,6 +55,11 @@ type MapRow = {
   chunkSizeTiles: number;
   createdAt: string;
   extentKind: string;
+  exportBoundsMaxX: number | null;
+  exportBoundsMaxZ: number | null;
+  exportBoundsMinX: number | null;
+  exportBoundsMinZ: number | null;
+  exportedAt: string | null;
   generator: string | null;
   heightTiles: number | null;
   id: string;
@@ -62,6 +68,8 @@ type MapRow = {
   name: string | null;
   revision: number;
   seed: string;
+  sourceMapId: string | null;
+  sourceRevision: number | null;
   terrainRevision: number;
   updatedAt: string;
   widthTiles: number | null;
@@ -174,6 +182,11 @@ const MAP_ROW_COLUMNS = `
   chunk_size_tiles AS chunkSizeTiles,
   created_at AS createdAt,
   extent_kind AS extentKind,
+  export_bounds_max_x AS exportBoundsMaxX,
+  export_bounds_max_z AS exportBoundsMaxZ,
+  export_bounds_min_x AS exportBoundsMinX,
+  export_bounds_min_z AS exportBoundsMinZ,
+  exported_at AS exportedAt,
   generator,
   height_tiles AS heightTiles,
   id,
@@ -182,6 +195,8 @@ const MAP_ROW_COLUMNS = `
   name,
   revision,
   seed,
+  source_map_id AS sourceMapId,
+  source_revision AS sourceRevision,
   terrain_revision AS terrainRevision,
   updated_at AS updatedAt,
   width_tiles AS widthTiles,
@@ -246,6 +261,18 @@ const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
   return tiles;
 };
 
+const deriveTileCoordinateFromMeters = (meters: number, metersPerTile: number) => {
+  const tiles = meters / metersPerTile;
+
+  if (!Number.isInteger(tiles)) {
+    throw new Error(
+      `Map coordinate ${meters}m is invalid for metersPerTile=${metersPerTile}`
+    );
+  }
+
+  return tiles;
+};
+
 const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
   Math.max(Math.ceil(tileCount / chunkSizeTiles), 1);
 
@@ -262,6 +289,26 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
     chunkSizeTiles: row.chunkSizeTiles,
     metersPerTile: row.metersPerTile
   };
+  const exportMetadata =
+    row.sourceMapId &&
+    row.sourceRevision !== null &&
+    row.exportedAt &&
+    row.exportBoundsMinX !== null &&
+    row.exportBoundsMinZ !== null &&
+    row.exportBoundsMaxX !== null &&
+    row.exportBoundsMaxZ !== null
+      ? {
+          bounds: {
+            maxX: row.exportBoundsMaxX,
+            maxZ: row.exportBoundsMaxZ,
+            minX: row.exportBoundsMinX,
+            minZ: row.exportBoundsMinZ
+          },
+          exportedAt: row.exportedAt,
+          sourceMapId: row.sourceMapId,
+          sourceRevision: row.sourceRevision
+        }
+      : undefined;
 
   if (row.extentKind === 'finite' && row.widthTiles !== null && row.heightTiles !== null) {
     return {
@@ -275,7 +322,8 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
         wrapX: row.wrapX === 1,
         wrapZ: row.wrapZ === 1
       },
-      generator: row.generator as MapMetadata['generator'],
+      export: exportMetadata,
+      generator: row.kind === 'wrapped-classic' ? (row.generator as MapMetadata['generator']) : undefined,
       id: row.id,
       kind: row.kind as MapMetadata['kind'],
       name: row.name,
@@ -289,6 +337,7 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
   return {
     createdAt: row.createdAt,
     extent: { kind: 'infinite' as const },
+    export: exportMetadata,
     generator: undefined,
     id: row.id,
     kind: row.kind as MapMetadata['kind'],
@@ -310,6 +359,13 @@ const rowToBounds = (
   minX: row.bboxMinX,
   minZ: row.bboxMinZ
 });
+
+const worldBoundsToPolygon = (bounds: WorldBounds): WorldPoint[] => [
+  { x: bounds.minX, z: bounds.minZ },
+  { x: bounds.maxX, z: bounds.minZ },
+  { x: bounds.maxX, z: bounds.maxZ },
+  { x: bounds.minX, z: bounds.maxZ }
+];
 
 const parseJson = <Value>(value: string) => JSON.parse(value) as Value;
 
@@ -460,6 +516,16 @@ export class MapRepository {
     return row;
   }
 
+  private ensureExportedMapRow(id: string) {
+    const row = this.getMapRowOrThrow(id);
+
+    if (row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
+      throw new MapRepositoryError('BAD_REQUEST', `Map ${id} is not an exported slice`);
+    }
+
+    return row;
+  }
+
   private assertExpectedRevision(row: MapRow, expectedRevision: number) {
     if (row.revision !== expectedRevision) {
       throw new MapRepositoryError(
@@ -487,6 +553,38 @@ export class MapRepository {
         WHERE map_id = ? AND chunk_x = ? AND chunk_z = ?
       `)
       .get(mapId, chunkX, chunkZ);
+  }
+
+  private resolveStoredFiniteChunkRow(
+    row: MapRow,
+    requestedChunkX: number,
+    requestedChunkZ: number
+  ) {
+    if (row.widthTiles === null || row.heightTiles === null) {
+      return null;
+    }
+
+    const chunkCountX = getChunkCount(row.widthTiles, row.chunkSizeTiles);
+    const chunkCountZ = getChunkCount(row.heightTiles, row.chunkSizeTiles);
+    const wrapped = row.wrapX === 1 && row.wrapZ === 1;
+
+    if (!wrapped) {
+      if (
+        requestedChunkX < 0 ||
+        requestedChunkZ < 0 ||
+        requestedChunkX >= chunkCountX ||
+        requestedChunkZ >= chunkCountZ
+      ) {
+        return null;
+      }
+
+      return this.getChunkRow(row.id, requestedChunkX, requestedChunkZ);
+    }
+
+    const canonicalChunkX = toCanonicalChunkCoordinate(requestedChunkX, chunkCountX);
+    const canonicalChunkZ = toCanonicalChunkCoordinate(requestedChunkZ, chunkCountZ);
+
+    return this.getChunkRow(row.id, canonicalChunkX, canonicalChunkZ);
   }
 
   private listSourcePolygonRows(
@@ -1025,6 +1123,225 @@ export class MapRepository {
     );
   }
 
+  private snapshotDerivedIslandsForExport(
+    sourceMapId: string,
+    exportMapId: string,
+    bounds: WorldBounds,
+    now: string
+  ) {
+    const clipPolygon = worldBoundsToPolygon(bounds);
+    const islands = this.listDerivedIslandRows(sourceMapId).map(derivedIslandRowToModel);
+    const insertDerivedIsland = this.db.prepare(`
+      INSERT INTO map_derived_islands (
+        id, map_id, name, default_owner, default_faction,
+        bbox_min_x, bbox_min_z, bbox_max_x, bbox_max_z,
+        area_meters2, geometry_json, source_polygon_ids_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const island of islands) {
+      if (!bboxesIntersect(island.bbox, bounds)) {
+        continue;
+      }
+
+      const clippedFragments = intersectPolygons(island.geometry, clipPolygon);
+
+      clippedFragments.forEach((fragment, fragmentIndex) => {
+        const areaMeters2 = computePolygonArea(fragment);
+
+        if (areaMeters2 <= 1e-6) {
+          return;
+        }
+
+        const translated = canonicalizeVertices(
+          fragment.map(vertex => ({
+            x: vertex.x - bounds.minX,
+            z: vertex.z - bounds.minZ
+          }))
+        );
+        const bbox = computePolygonBbox(translated);
+
+        insertDerivedIsland.run(
+          `${island.id}:${fragmentIndex}`,
+          exportMapId,
+          island.name,
+          island.defaultOwner,
+          island.defaultFaction,
+          bbox.minX,
+          bbox.minZ,
+          bbox.maxX,
+          bbox.maxZ,
+          areaMeters2,
+          JSON.stringify(translated),
+          JSON.stringify(island.sourcePolygonIds),
+          now,
+          now
+        );
+      });
+    }
+  }
+
+  private createExportedVectorMap(input: CreateMapExportInput): MapMetadata {
+    return this.runInTransaction(() => {
+      const sourceRow = this.ensureInfiniteVectorMapRow(input.mapId);
+      this.assertExpectedRevision(sourceRow, input.expectedRevision);
+
+      let widthTiles: number;
+      let heightTiles: number;
+      let sourceTileOffsetX: number;
+      let sourceTileOffsetZ: number;
+
+      try {
+        const widthMeters = input.bounds.maxX - input.bounds.minX;
+        const heightMeters = input.bounds.maxZ - input.bounds.minZ;
+        widthTiles = deriveTileCountFromMeters(widthMeters, input.metersPerTile);
+        heightTiles = deriveTileCountFromMeters(heightMeters, input.metersPerTile);
+        sourceTileOffsetX = deriveTileCoordinateFromMeters(
+          input.bounds.minX,
+          input.metersPerTile
+        );
+        sourceTileOffsetZ = deriveTileCoordinateFromMeters(
+          input.bounds.minZ,
+          input.metersPerTile
+        );
+      } catch (error) {
+        throw new MapRepositoryError(
+          'BAD_REQUEST',
+          error instanceof Error ? error.message : 'Invalid export bounds'
+        );
+      }
+
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      const wrap = input.kind === 'wrapped-classic-slice';
+      const row: MapRow = {
+        chunkSizeTiles: input.chunkSizeTiles,
+        createdAt: now,
+        extentKind: 'finite',
+        exportBoundsMaxX: input.bounds.maxX,
+        exportBoundsMaxZ: input.bounds.maxZ,
+        exportBoundsMinX: input.bounds.minX,
+        exportBoundsMinZ: input.bounds.minZ,
+        exportedAt: now,
+        generator: null,
+        heightTiles,
+        id,
+        kind: input.kind,
+        metersPerTile: input.metersPerTile,
+        name: input.name ?? null,
+        revision: 0,
+        seed: sourceRow.seed,
+        sourceMapId: sourceRow.id,
+        sourceRevision: sourceRow.revision,
+        terrainRevision: 0,
+        updatedAt: now,
+        widthTiles,
+        wrapX: wrap ? 1 : 0,
+        wrapZ: wrap ? 1 : 0
+      };
+
+      this.db.prepare(`
+        INSERT INTO maps (
+          id, name, kind, extent_kind,
+          width_tiles, height_tiles, wrap_x, wrap_z,
+          meters_per_tile, chunk_size_tiles,
+          generator, seed, revision, terrain_revision,
+          source_map_id, source_revision, exported_at,
+          export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        row.id,
+        row.name,
+        row.kind,
+        row.extentKind,
+        row.widthTiles,
+        row.heightTiles,
+        row.wrapX,
+        row.wrapZ,
+        row.metersPerTile,
+        row.chunkSizeTiles,
+        row.generator,
+        row.seed,
+        row.revision,
+        row.terrainRevision,
+        row.sourceMapId,
+        row.sourceRevision,
+        row.exportedAt,
+        row.exportBoundsMinX,
+        row.exportBoundsMinZ,
+        row.exportBoundsMaxX,
+        row.exportBoundsMaxZ,
+        row.createdAt,
+        row.updatedAt
+      );
+
+      const sourceTerrainState = this.loadVectorTerrainState(sourceRow);
+      const artifact = getCompiledVectorTerrainArtifact({
+        controlPoints: sourceTerrainState.controlPoints,
+        derivedIslands: sourceTerrainState.derivedIslands.map(island => ({
+          areaMeters2: island.areaMeters2,
+          bbox: island.bbox,
+          id: island.id,
+          sourcePolygonIds: island.sourcePolygonIds,
+          vertices: island.geometry
+        })),
+        map: sourceTerrainState.map,
+        polygons: sourceTerrainState.polygons,
+        terrainRevision: sourceTerrainState.terrainRevision
+      });
+      const insertChunk = this.db.prepare(`
+        INSERT INTO map_chunks (
+          map_id, chunk_x, chunk_z,
+          origin_tile_x, origin_tile_z,
+          tile_width, tile_height,
+          samples_wide, samples_high, heights
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const chunkCountX = getChunkCount(widthTiles, input.chunkSizeTiles);
+      const chunkCountZ = getChunkCount(heightTiles, input.chunkSizeTiles);
+
+      for (let chunkZ = 0; chunkZ < chunkCountZ; chunkZ += 1) {
+        for (let chunkX = 0; chunkX < chunkCountX; chunkX += 1) {
+          const originTileX = chunkX * input.chunkSizeTiles;
+          const originTileZ = chunkZ * input.chunkSizeTiles;
+          const tileWidth = Math.min(input.chunkSizeTiles, widthTiles - originTileX);
+          const tileHeight = Math.min(input.chunkSizeTiles, heightTiles - originTileZ);
+          const generated = generateVectorChunk(artifact, chunkX, chunkZ, {
+            mapId: id,
+            materialOriginTileX: sourceTileOffsetX + originTileX,
+            materialOriginTileZ: sourceTileOffsetZ + originTileZ,
+            metersPerTile: input.metersPerTile,
+            originTileX,
+            originTileZ,
+            tileHeight,
+            tileWidth,
+            worldOriginX: input.bounds.minX + originTileX * input.metersPerTile,
+            worldOriginZ: input.bounds.minZ + originTileZ * input.metersPerTile
+          });
+
+          insertChunk.run(
+            id,
+            generated.chunkX,
+            generated.chunkZ,
+            generated.originTileX,
+            generated.originTileZ,
+            generated.tileWidth,
+            generated.tileHeight,
+            generated.samplesWide,
+            generated.samplesHigh,
+            encodeFloat32Heights(generated.heights)
+          );
+        }
+      }
+
+      this.snapshotDerivedIslandsForExport(sourceRow.id, id, input.bounds, now);
+
+      return mapRowToMetadata(row);
+    });
+  }
+
   private ensureWrappedClassicChunkRow(
     row: MapRow,
     requestedChunkX: number,
@@ -1105,6 +1422,18 @@ export class MapRepository {
     };
   }
 
+  private resolveChunkRowForMap(row: MapRow, chunkX: number, chunkZ: number) {
+    if (row.kind === 'wrapped-classic') {
+      return this.ensureWrappedClassicChunkRow(row, chunkX, chunkZ);
+    }
+
+    if (row.kind === 'infinite-vector') {
+      return this.buildInfiniteVectorChunkRow(row, chunkX, chunkZ);
+    }
+
+    return this.resolveStoredFiniteChunkRow(row, chunkX, chunkZ);
+  }
+
   private resolveChunkRow(mapId: string, chunkX: number, chunkZ: number) {
     const row = this.findMapRow(mapId);
 
@@ -1112,11 +1441,7 @@ export class MapRepository {
       return null;
     }
 
-    if (row.kind === 'wrapped-classic') {
-      return this.ensureWrappedClassicChunkRow(row, chunkX, chunkZ);
-    }
-
-    return this.buildInfiniteVectorChunkRow(row, chunkX, chunkZ);
+    return this.resolveChunkRowForMap(row, chunkX, chunkZ);
   }
 
   createMap(input: CreateMapInput): MapMetadata {
@@ -1140,6 +1465,11 @@ export class MapRepository {
         chunkSizeTiles: defaults.chunkSizeTiles,
         createdAt: now,
         extentKind: 'finite',
+        exportBoundsMaxX: null,
+        exportBoundsMaxZ: null,
+        exportBoundsMinX: null,
+        exportBoundsMinZ: null,
+        exportedAt: null,
         generator: input.generator,
         heightTiles,
         id,
@@ -1148,6 +1478,8 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        sourceMapId: null,
+        sourceRevision: null,
         terrainRevision: 0,
         updatedAt: now,
         widthTiles,
@@ -1159,6 +1491,11 @@ export class MapRepository {
         chunkSizeTiles: defaults.chunkSizeTiles,
         createdAt: now,
         extentKind: 'infinite',
+        exportBoundsMaxX: null,
+        exportBoundsMaxZ: null,
+        exportBoundsMinX: null,
+        exportBoundsMinZ: null,
+        exportedAt: null,
         generator: null,
         heightTiles: null,
         id,
@@ -1167,6 +1504,8 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        sourceMapId: null,
+        sourceRevision: null,
         terrainRevision: 0,
         updatedAt: now,
         widthTiles: null,
@@ -1180,8 +1519,11 @@ export class MapRepository {
         id, name, kind, extent_kind,
         width_tiles, height_tiles, wrap_x, wrap_z,
         meters_per_tile, chunk_size_tiles,
-        generator, seed, revision, terrain_revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        generator, seed, revision, terrain_revision,
+        source_map_id, source_revision, exported_at,
+        export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.id,
       row.name,
@@ -1197,11 +1539,22 @@ export class MapRepository {
       row.seed,
       row.revision,
       row.terrainRevision,
+      row.sourceMapId,
+      row.sourceRevision,
+      row.exportedAt,
+      row.exportBoundsMinX,
+      row.exportBoundsMinZ,
+      row.exportBoundsMaxX,
+      row.exportBoundsMaxZ,
       row.createdAt,
       row.updatedAt
     );
 
     return mapRowToMetadata(row);
+  }
+
+  createMapExport(input: CreateMapExportInput): MapMetadata {
+    return this.createExportedVectorMap(input);
   }
 
   deleteMap(id: string) {
@@ -1226,13 +1579,29 @@ export class MapRepository {
   }
 
   getMapChunkBinary(mapId: string, chunkX: number, chunkZ: number) {
-    const row = this.resolveChunkRow(mapId, chunkX, chunkZ);
+    const mapRow = this.findMapRow(mapId);
+
+    if (!mapRow) {
+      return null;
+    }
+
+    const row = this.resolveChunkRowForMap(mapRow, chunkX, chunkZ);
 
     if (!row) {
       return null;
     }
 
     const heights = decodeFloat32Heights(row.heights);
+    const materialOriginTileX =
+      mapRow.exportBoundsMinX !== null
+        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinX, mapRow.metersPerTile) +
+          row.originTileX
+        : row.originTileX;
+    const materialOriginTileZ =
+      mapRow.exportBoundsMinZ !== null
+        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinZ, mapRow.metersPerTile) +
+          row.originTileZ
+        : row.originTileZ;
     const quantized = quantizeUint16Heights(heights);
     const materials = deriveChunkMaterialIds(
       heights,
@@ -1240,7 +1609,9 @@ export class MapRepository {
       row.tileWidth,
       row.tileHeight,
       row.originTileX,
-      row.originTileZ
+      row.originTileZ,
+      materialOriginTileX,
+      materialOriginTileZ
     );
 
     return {
@@ -1282,6 +1653,30 @@ export class MapRepository {
         ORDER BY updated_at DESC, created_at DESC
       `)
       .all()
+      .map(mapRowToMetadata);
+  }
+
+  findExport(id: string) {
+    const row = this.findMapRow(id);
+
+    if (!row || row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
+      return null;
+    }
+
+    return mapRowToMetadata(row);
+  }
+
+  listExports(mapId: string) {
+    this.ensureInfiniteVectorMapRow(mapId);
+
+    return this.db
+      .query<MapRow, [string]>(`
+        SELECT ${MAP_ROW_COLUMNS}
+        FROM maps
+        WHERE source_map_id = ?
+        ORDER BY exported_at DESC, created_at DESC
+      `)
+      .all(mapId)
       .map(mapRowToMetadata);
   }
 
@@ -1864,8 +2259,16 @@ export class MapRepository {
         seed TEXT NOT NULL,
         revision INTEGER NOT NULL DEFAULT 0,
         terrain_revision INTEGER NOT NULL DEFAULT 0,
+        source_map_id TEXT,
+        source_revision INTEGER,
+        exported_at TEXT,
+        export_bounds_min_x REAL,
+        export_bounds_min_z REAL,
+        export_bounds_max_x REAL,
+        export_bounds_max_z REAL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (source_map_id) REFERENCES maps(id) ON DELETE SET NULL
       );
 
       CREATE TABLE IF NOT EXISTS map_chunks (
@@ -1955,6 +2358,18 @@ export class MapRepository {
 
     this.ensureColumnExists('maps', 'revision', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumnExists('maps', 'terrain_revision', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumnExists('maps', 'source_map_id', 'TEXT');
+    this.ensureColumnExists('maps', 'source_revision', 'INTEGER');
+    this.ensureColumnExists('maps', 'exported_at', 'TEXT');
+    this.ensureColumnExists('maps', 'export_bounds_min_x', 'REAL');
+    this.ensureColumnExists('maps', 'export_bounds_min_z', 'REAL');
+    this.ensureColumnExists('maps', 'export_bounds_max_x', 'REAL');
+    this.ensureColumnExists('maps', 'export_bounds_max_z', 'REAL');
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_maps_source_map
+        ON maps(source_map_id, exported_at);
+    `);
   }
 }
 

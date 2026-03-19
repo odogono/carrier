@@ -4,7 +4,7 @@ import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
 import { oz } from '@orpc/zod';
 
-import { authoredMapsContract } from './authored';
+import { WorldBoundsSchema, authoredMapsContract } from './authored';
 
 export * from './authored';
 
@@ -30,8 +30,16 @@ export {
 
 // --- Map Kind ---
 
-export const MapKind = z.enum(['wrapped-classic', 'infinite-vector']);
+export const MapKind = z.enum([
+  'wrapped-classic',
+  'infinite-vector',
+  'finite-vector-slice',
+  'wrapped-classic-slice'
+]);
 export type MapKind = z.infer<typeof MapKind>;
+
+export const MapExportKind = z.enum(['finite-vector-slice', 'wrapped-classic-slice']);
+export type MapExportKind = z.infer<typeof MapExportKind>;
 
 // --- Map Extent ---
 
@@ -110,6 +118,14 @@ export const MapMetadataSchema = z.object({
   name: z.string().nullable(),
   kind: MapKind,
   extent: MapExtentSchema,
+  export: z
+    .object({
+      bounds: WorldBoundsSchema,
+      exportedAt: z.string(),
+      sourceMapId: z.string().min(1),
+      sourceRevision: z.number().int().nonnegative()
+    })
+    .optional(),
   resolution: MapResolutionSchema,
   revision: z.number().int().nonnegative(),
   generator: MapGenerator.optional(),
@@ -246,6 +262,41 @@ export type ListMapsInput = z.infer<typeof ListMapsInput>;
 export const ListMapsOutput = z.array(MapMetadataSchema);
 export type ListMapsOutput = z.infer<typeof ListMapsOutput>;
 
+export const CreateMapExportInput = z.object({
+  bounds: WorldBoundsSchema.refine(
+    bounds => bounds.maxX > bounds.minX && bounds.maxZ > bounds.minZ,
+    {
+      message: 'Export bounds must have positive width and height'
+    }
+  ),
+  chunkSizeTiles: z.number().int().positive(),
+  expectedRevision: z.number().int().nonnegative(),
+  kind: MapExportKind.default('finite-vector-slice'),
+  mapId: z.string().min(1),
+  metersPerTile: z.number().positive(),
+  name: z.string().trim().min(1).max(120).optional()
+});
+export type CreateMapExportInput = z.infer<typeof CreateMapExportInput>;
+
+export const CreateMapExportOutput = MapMetadataSchema;
+export type CreateMapExportOutput = z.infer<typeof CreateMapExportOutput>;
+
+export const FindMapExportInput = z.object({
+  id: z.string().min(1)
+});
+export type FindMapExportInput = z.infer<typeof FindMapExportInput>;
+
+export const FindMapExportOutput = MapMetadataSchema;
+export type FindMapExportOutput = z.infer<typeof FindMapExportOutput>;
+
+export const ListMapExportsInput = z.object({
+  mapId: z.string().min(1)
+});
+export type ListMapExportsInput = z.infer<typeof ListMapExportsInput>;
+
+export const ListMapExportsOutput = z.array(MapMetadataSchema);
+export type ListMapExportsOutput = z.infer<typeof ListMapExportsOutput>;
+
 export const UpdateMapInput = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(1).max(120).nullable().optional()
@@ -292,6 +343,27 @@ export const GetMapChunkBinaryRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const CreateMapExportRoute: Route = {
+  description: 'Create a finite exported slice from an infinite-vector map',
+  method: 'POST',
+  path: '/maps/{mapId}/exports',
+  tags: ['maps']
+} as const;
+
+export const FindMapExportRoute: Route = {
+  description: 'Retrieve exported slice metadata',
+  method: 'GET',
+  path: '/maps/exports/{id}',
+  tags: ['maps']
+} as const;
+
+export const ListMapExportsRoute: Route = {
+  description: 'List exported slices for an infinite-vector map',
+  method: 'GET',
+  path: '/maps/{mapId}/exports',
+  tags: ['maps']
+} as const;
+
 export const ListMapsRoute: Route = {
   description: 'List maps ordered by most recently updated first',
   method: 'GET',
@@ -309,8 +381,16 @@ export const UpdateMapRoute: Route = {
 export const mapsContract = {
   ...authoredMapsContract,
   create: oc.route(CreateMapRoute).input(CreateMapInput).output(CreateMapOutput),
+  createExport: oc
+    .route(CreateMapExportRoute)
+    .input(CreateMapExportInput)
+    .output(CreateMapExportOutput),
   delete: oc.route(DeleteMapRoute).input(DeleteMapInput).output(DeleteMapOutput),
   find: oc.route(GetMapRoute).input(GetMapInput).output(GetMapOutput),
+  findExport: oc
+    .route(FindMapExportRoute)
+    .input(FindMapExportInput)
+    .output(FindMapExportOutput),
   getChunk: oc
     .route(GetMapChunkRoute)
     .input(GetMapChunkInput)
@@ -319,6 +399,10 @@ export const mapsContract = {
     .route(GetMapChunkBinaryRoute)
     .input(GetMapChunkInput)
     .output(GetMapChunkBinaryOutput),
+  listExports: oc
+    .route(ListMapExportsRoute)
+    .input(ListMapExportsInput)
+    .output(ListMapExportsOutput),
   list: oc.route(ListMapsRoute).input(ListMapsInput).output(ListMapsOutput),
   update: oc.route(UpdateMapRoute).input(UpdateMapInput).output(UpdateMapOutput)
 };

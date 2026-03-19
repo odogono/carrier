@@ -1,13 +1,19 @@
 import {
+  CreateMapExportInput,
+  CreateMapExportRoute,
   CreateMapInput,
   CreateMapRoute,
   DeleteMapInput,
   DeleteMapRoute,
+  FindMapExportInput,
+  FindMapExportRoute,
   GetMapChunkInput,
   GetMapChunkBinaryRoute,
   GetMapChunkRoute,
   GetMapInput,
   GetMapRoute,
+  ListMapExportsInput,
+  ListMapExportsRoute,
   ListMapsInput,
   ListMapsRoute,
   UpdateMapInput,
@@ -19,11 +25,23 @@ import { ORPCError, os } from '@orpc/server';
 import { getMapRepository } from '@/maps/repository';
 
 import { authored } from './authored';
+import { asOrpcError } from './errors';
 
 const create = os
   .route(CreateMapRoute)
   .input(CreateMapInput)
   .handler(async ({ input }) => getMapRepository().createMap(input));
+
+const createExport = os
+  .route(CreateMapExportRoute)
+  .input(CreateMapExportInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().createMapExport(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
 
 const remove = os
   .route(DeleteMapRoute)
@@ -50,6 +68,21 @@ const find = os
     if (!map) {
       throw new ORPCError('NOT_FOUND', {
         message: `Map ${input.id} was not found`
+      });
+    }
+
+    return map;
+  });
+
+const findExport = os
+  .route(FindMapExportRoute)
+  .input(FindMapExportInput)
+  .handler(async ({ input }) => {
+    const map = getMapRepository().findExport(input.id);
+
+    if (!map) {
+      throw new ORPCError('NOT_FOUND', {
+        message: `Export ${input.id} was not found`
       });
     }
 
@@ -109,6 +142,17 @@ const list = os
   .input(ListMapsInput)
   .handler(async () => getMapRepository().listMaps());
 
+const listExports = os
+  .route(ListMapExportsRoute)
+  .input(ListMapExportsInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listExports(input.mapId);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
 const update = os
   .route(UpdateMapRoute)
   .input(UpdateMapInput)
@@ -129,10 +173,13 @@ const update = os
 export const maps = {
   ...authored,
   create,
+  createExport,
   delete: remove,
   find,
+  findExport,
   getChunk,
   getChunkBinary,
+  listExports,
   list,
   update
 };

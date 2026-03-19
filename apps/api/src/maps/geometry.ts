@@ -239,10 +239,12 @@ const geometryToPolygons = (geometry: Geom): PolygonRing[] => {
   }
 
   if (typeof first[0] === 'number') {
-    return [fromPolyclipRing(geometry as [number, number][])];
+    return [fromPolyclipRing(geometry as unknown as [number, number][])];
   }
 
-  return (geometry as Array<Array<[number, number]>>).map(polygon => fromPolyclipRing(polygon[0]!));
+  return (geometry as unknown as Array<Array<Array<[number, number]>>>).map(polygon =>
+    fromPolyclipRing(polygon[0]!)
+  );
 };
 
 const assertHoleFreePolygons = (geometry: Geom) => {

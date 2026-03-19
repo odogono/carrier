@@ -4,10 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import {
-  MAP_METERS_PER_TILE,
-  type MapKind,
-} from "carrier-contracts/types";
+import { MAP_METERS_PER_TILE } from "carrier-contracts/types";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +17,9 @@ export function CreateMapPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [kind, setKind] = useState<MapKind>("wrapped-classic");
+  const [kind, setKind] = useState<"wrapped-classic" | "infinite-vector">(
+    "wrapped-classic",
+  );
   const [name, setName] = useState("");
   const [widthMeters, setWidthMeters] = useState("1280");
   const [heightMeters, setHeightMeters] = useState("1280");
@@ -100,7 +99,11 @@ export function CreateMapPage() {
               <Select
                 id="kind"
                 value={kind}
-                onChange={(e) => setKind(e.target.value as MapKind)}
+                onChange={(e) =>
+                  setKind(
+                    e.target.value as "wrapped-classic" | "infinite-vector",
+                  )
+                }
               >
                 <option value="wrapped-classic">Wrapped Classic</option>
                 <option value="infinite-vector">Infinite Vector</option>

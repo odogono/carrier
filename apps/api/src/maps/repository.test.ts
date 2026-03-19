@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import { isFiniteMap } from 'carrier-contracts/types';
+
 import { MapRepository, MapRepositoryError } from './repository';
 
 const polygonParams = {
@@ -245,6 +247,102 @@ describe('map repository', () => {
       expect(rejectMap.id).toBeTruthy();
       expect(repository.listSourcePolygons(rejectMap.id, 'active')).toHaveLength(2);
       expect(repository.getMap(rejectMap.id)?.revision).toBe(2);
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('creates immutable exported finite slices from infinite-vector maps', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Export World',
+        seed: 'export-seed'
+      });
+
+      repository.createSourcePolygon({
+        expectedRevision: 0,
+        mapId: created.id,
+        params: polygonParams,
+        vertices: square(0, 0, 320, 320)
+      });
+
+      const beforeExportChunk = repository.getMapChunk(created.id, 0, 0);
+      expect(beforeExportChunk).not.toBeNull();
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 1,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Playable Slice'
+      });
+
+      expect(exported.kind).toBe('finite-vector-slice');
+      expect(exported.export?.sourceMapId).toBe(created.id);
+      expect(exported.export?.sourceRevision).toBe(1);
+      expect(exported.extent.kind).toBe('finite');
+      expect(isFiniteMap(exported)).toBe(true);
+      if (!isFiniteMap(exported)) {
+        throw new Error('Expected exported map to be finite');
+      }
+      expect(exported.extent.widthTiles).toBe(32);
+      expect(repository.listExports(created.id)).toHaveLength(1);
+      expect(repository.findExport(exported.id)?.id).toBe(exported.id);
+      expect(repository.getMapChunk(exported.id, -1, 0)).toBeNull();
+      expect(repository.getMapChunk(exported.id, 2, 0)).toBeNull();
+
+      const exportedChunk = repository.getMapChunk(exported.id, 0, 0);
+      expect(exportedChunk).not.toBeNull();
+      expect(exportedChunk?.mapId).toBe(exported.id);
+
+      const snapshotCount =
+        repository.db
+          .query<{ count: number }, [string]>(
+            'SELECT COUNT(*) AS count FROM map_derived_islands WHERE map_id = ?'
+          )
+          .get(exported.id)?.count ?? 0;
+      expect(snapshotCount).toBeGreaterThan(0);
+
+      expect(() =>
+        repository.createMapExport({
+          bounds: {
+            maxX: 320,
+            maxZ: 320,
+            minX: 0,
+            minZ: 0
+          },
+          chunkSizeTiles: 16,
+          expectedRevision: 0,
+          kind: 'finite-vector-slice',
+          mapId: created.id,
+          metersPerTile: 10
+        })
+      ).toThrow(MapRepositoryError);
+
+      repository.createControlPoint({
+        elevationMeters: 120,
+        expectedRevision: 1,
+        influenceMeters: 120,
+        mapId: created.id,
+        strength: 1,
+        type: 'peak',
+        x: 160,
+        z: 160
+      });
+
+      expect(repository.findExport(exported.id)?.export?.sourceRevision).toBe(1);
+      expect(repository.getMapChunk(exported.id, 0, 0)?.heights).toEqual(exportedChunk?.heights);
+      expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(beforeExportChunk?.heights);
     } finally {
       repository.close();
     }

@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from 'bun:test';
 
-import type { MapMetadata } from "carrier-contracts/types";
+import type { MapMetadata } from 'carrier-contracts/types';
 
 import {
   DEFAULT_SOURCE_POLYGON_PARAMS,
@@ -10,30 +10,30 @@ import {
   getChunkWorldBounds,
   mergeWorldBounds,
   nextOrderedSelection,
-} from "./editor-utils";
+} from '../index';
 import {
   fitViewportToWorldBounds,
   screenToTilePoint,
   tileToScreenPoint,
-} from "@/hooks/use-map-viewport";
+} from '@/hooks/use-map-viewport';
 
 const infiniteMap: MapMetadata = {
   createdAt: new Date().toISOString(),
-  extent: { kind: "infinite" },
-  id: "map-1",
-  kind: "infinite-vector",
-  name: "Infinite",
+  extent: { kind: 'infinite' },
+  id: 'map-1',
+  kind: 'infinite-vector',
+  name: 'Infinite',
   resolution: {
     chunkSizeTiles: 32,
     metersPerTile: 10,
   },
   revision: 0,
-  seed: "seed",
+  seed: 'seed',
   updatedAt: new Date().toISOString(),
 };
 
-describe("editor utilities", () => {
-  test("round-trips screen and tile coordinates", () => {
+describe('editor utilities', () => {
+  test('round-trips screen and tile coordinates', () => {
     const viewport = {
       centerTileX: 40,
       centerTileZ: -12,
@@ -47,13 +47,13 @@ describe("editor utilities", () => {
     });
   });
 
-  test("preserves ordered boolean selection with shift-toggle semantics", () => {
-    expect(nextOrderedSelection([], "a", false)).toEqual(["a"]);
-    expect(nextOrderedSelection(["a"], "b", true)).toEqual(["a", "b"]);
-    expect(nextOrderedSelection(["a", "b"], "a", true)).toEqual(["b"]);
+  test('preserves ordered boolean selection with shift-toggle semantics', () => {
+    expect(nextOrderedSelection([], 'a', false)).toEqual(['a']);
+    expect(nextOrderedSelection(['a'], 'b', true)).toEqual(['a', 'b']);
+    expect(nextOrderedSelection(['a', 'b'], 'a', true)).toEqual(['b']);
   });
 
-  test("validates polygon draft lifecycle with seeded default params", () => {
+  test('validates polygon draft lifecycle with seeded default params', () => {
     expect(
       canSavePolygonDraft(
         [
@@ -77,7 +77,7 @@ describe("editor utilities", () => {
     ).toBe(false);
   });
 
-  test("enforces selected-vertex delete safety", () => {
+  test('enforces selected-vertex delete safety', () => {
     expect(
       canDeleteVertex(
         [
@@ -102,7 +102,7 @@ describe("editor utilities", () => {
     ).toBe(true);
   });
 
-  test("fits viewport to world bounds and filters chunk invalidation by dirty area", () => {
+  test('fits viewport to world bounds and filters chunk invalidation by dirty area', () => {
     const fitted = fitViewportToWorldBounds(infiniteMap, 800, 600, {
       maxX: 640,
       maxZ: 320,
@@ -132,7 +132,7 @@ describe("editor utilities", () => {
     ).toBe(false);
   });
 
-  test("merges authored bounds and exposes chunk bounds in world metres", () => {
+  test('merges authored bounds and exposes chunk bounds in world metres', () => {
     expect(
       mergeWorldBounds(
         {

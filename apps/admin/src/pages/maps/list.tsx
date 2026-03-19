@@ -86,7 +86,7 @@ export function MapsListPage() {
               <TableHead>Kind</TableHead>
               <TableHead>Dimensions</TableHead>
               <TableHead>Generator</TableHead>
-              <TableHead>Seed</TableHead>
+              <TableHead>Seed / Source</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Updated</TableHead>
               <TableHead className="w-[50px]" />
@@ -109,20 +109,33 @@ export function MapsListPage() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline">{map.kind}</Badge>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">{map.kind}</Badge>
+                    {map.export && (
+                      <Badge variant="secondary">
+                        src rev {map.export.sourceRevision}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
-                  {isFiniteMap(map)
-                    ? <>{map.extent.widthTiles}&times;{map.extent.heightTiles}</>
-                    : "Infinite"}
+                  {isFiniteMap(map) ? (
+                    <>
+                      {map.extent.widthTiles}&times;{map.extent.heightTiles}
+                    </>
+                  ) : (
+                    "Infinite"
+                  )}
                 </TableCell>
                 <TableCell>
-                  {map.generator
-                    ? <Badge variant="secondary">{map.generator}</Badge>
-                    : <span className="text-muted-foreground">&mdash;</span>}
+                  {map.generator ? (
+                    <Badge variant="secondary">{map.generator}</Badge>
+                  ) : (
+                    <span className="text-muted-foreground">&mdash;</span>
+                  )}
                 </TableCell>
                 <TableCell className="max-w-[200px] truncate font-mono text-xs">
-                  {map.seed}
+                  {map.export ? map.export.sourceMapId : map.seed}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {new Date(map.createdAt).toLocaleDateString()}

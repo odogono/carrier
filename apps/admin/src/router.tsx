@@ -3,14 +3,14 @@ import {
   createRoute,
   createRouter,
   Outlet,
-} from "@tanstack/react-router";
+} from '@tanstack/react-router';
 
-import { Layout } from "@/components/layout";
-import { CreateMapPage } from "@/pages/maps/create";
-import { MapDetailPage } from "@/pages/maps/detail";
-import { MapEditorPage } from "@/pages/maps/editor";
-import { MapsListPage } from "@/pages/maps/list";
-import { DashboardPage } from "@/pages/dashboard";
+import { Layout } from '@/components/layout';
+import { CreateMapPage } from '@/pages/maps/create';
+import { MapDetailPage } from '@/pages/maps/detail';
+import { MapEditorPage } from '@/pages/maps/editor';
+import { MapsListPage } from '@/pages/maps/list';
+import { DashboardPage } from '@/pages/dashboard';
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -23,31 +23,31 @@ const rootRoute = createRootRoute({
 const dashboardRoute = createRoute({
   component: DashboardPage,
   getParentRoute: () => rootRoute,
-  path: "/",
+  path: '/',
 });
 
 const mapsRoute = createRoute({
   component: MapsListPage,
   getParentRoute: () => rootRoute,
-  path: "/maps",
+  path: '/maps',
 });
 
 const createMapRoute = createRoute({
   component: CreateMapPage,
   getParentRoute: () => rootRoute,
-  path: "/maps/new",
+  path: '/maps/new',
 });
 
 const mapDetailRoute = createRoute({
   component: MapDetailPage,
   getParentRoute: () => rootRoute,
-  path: "/maps/$id",
+  path: '/maps/$id',
 });
 
 const mapEditorRoute = createRoute({
   component: MapEditorPage,
   getParentRoute: () => rootRoute,
-  path: "/maps/$id/editor",
+  path: '/maps/$id/editor',
 });
 
 const routeTree = rootRoute.addChildren([
@@ -60,7 +60,7 @@ const routeTree = rootRoute.addChildren([
 
 export const router = createRouter({ routeTree });
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }

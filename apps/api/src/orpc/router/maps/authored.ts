@@ -25,19 +25,11 @@ import {
   UpdateSourcePolygonRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
 
-import { ORPCError, os } from '@orpc/server';
+import { os } from '@orpc/server';
 
-import { MapRepositoryError, getMapRepository } from '@/maps/repository';
+import { getMapRepository } from '@/maps/repository';
 
-const asOrpcError = (error: unknown): never => {
-  if (error instanceof MapRepositoryError) {
-    throw new ORPCError(error.code, {
-      message: error.message
-    });
-  }
-
-  throw error;
-};
+import { asOrpcError } from './errors';
 
 const listSourcePolygons = os
   .route(ListSourcePolygonsRoute)

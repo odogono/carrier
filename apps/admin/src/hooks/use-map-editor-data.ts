@@ -1,29 +1,31 @@
-import { useCallback } from "react";
+import { useCallback } from 'react';
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   isInfiniteMap,
   type MapMetadata,
   type WorldBounds,
-} from "carrier-contracts/types";
+} from 'carrier-contracts/types';
 
-import { client } from "@/lib/api-client";
-import { chunkIntersectsDirtyBounds } from "@/pages/maps/editor-utils";
+import { client } from '@/lib/api-client';
+import { chunkIntersectsDirtyBounds } from '@/pages/maps/editor/helpers';
 
 export const mapEditorKeys = {
-  controlPoints: (mapId: string) => ["maps", mapId, "editor", "control-points"] as const,
-  derivedIslands: (mapId: string) => ["maps", mapId, "editor", "derived-islands"] as const,
-  map: (mapId: string) => ["maps", mapId] as const,
-  overview: (mapId: string) => ["maps", mapId, "editor", "overview"] as const,
-  polygons: (mapId: string) => ["maps", mapId, "editor", "polygons"] as const,
+  controlPoints: (mapId: string) =>
+    ['maps', mapId, 'editor', 'control-points'] as const,
+  derivedIslands: (mapId: string) =>
+    ['maps', mapId, 'editor', 'derived-islands'] as const,
+  map: (mapId: string) => ['maps', mapId] as const,
+  overview: (mapId: string) => ['maps', mapId, 'editor', 'overview'] as const,
+  polygons: (mapId: string) => ['maps', mapId, 'editor', 'polygons'] as const,
 };
 
 const parseChunkQueryKey = (queryKey: readonly unknown[]) => {
   if (
-    queryKey[0] !== "map-chunk" ||
-    typeof queryKey[1] !== "string" ||
-    typeof queryKey[2] !== "number" ||
-    typeof queryKey[3] !== "number"
+    queryKey[0] !== 'map-chunk' ||
+    typeof queryKey[1] !== 'string' ||
+    typeof queryKey[2] !== 'number' ||
+    typeof queryKey[3] !== 'number'
   ) {
     return null;
   }
@@ -54,7 +56,7 @@ export const useMapEditorData = (mapId: string) => {
 
   const polygonsQuery = useQuery({
     enabled: authoredEnabled,
-    queryFn: () => client.maps.listSourcePolygons({ mapId, status: "active" }),
+    queryFn: () => client.maps.listSourcePolygons({ mapId, status: 'active' }),
     queryKey: mapEditorKeys.polygons(mapId),
   });
 
@@ -73,23 +75,37 @@ export const useMapEditorData = (mapId: string) => {
   const invalidateMapAndAuthoredQueries = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: mapEditorKeys.map(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.overview(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.polygons(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.controlPoints(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.derivedIslands(mapId) }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.overview(mapId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.polygons(mapId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.controlPoints(mapId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.derivedIslands(mapId),
+      }),
     ]);
   }, [mapId, queryClient]);
 
   const invalidateIslandMetadataQueries = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: mapEditorKeys.map(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.overview(mapId) }),
-      queryClient.invalidateQueries({ queryKey: mapEditorKeys.derivedIslands(mapId) }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.overview(mapId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.derivedIslands(mapId),
+      }),
     ]);
   }, [mapId, queryClient]);
 
   const invalidateTerrainMutation = useCallback(
-    async (dirtyBounds: Pick<WorldBounds, "maxX" | "maxZ" | "minX" | "minZ">) => {
+    async (
+      dirtyBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>,
+    ) => {
       await invalidateMapAndAuthoredQueries();
 
       if (!map) {
@@ -104,7 +120,12 @@ export const useMapEditorData = (mapId: string) => {
             return false;
           }
 
-          return chunkIntersectsDirtyBounds(map, key.chunkX, key.chunkZ, dirtyBounds);
+          return chunkIntersectsDirtyBounds(
+            map,
+            key.chunkX,
+            key.chunkZ,
+            dirtyBounds,
+          );
         },
       });
     },
@@ -124,7 +145,8 @@ export const useMapEditorData = (mapId: string) => {
           queryKey: mapEditorKeys.overview(mapId),
         }),
         queryClient.fetchQuery({
-          queryFn: () => client.maps.listSourcePolygons({ mapId, status: "active" }),
+          queryFn: () =>
+            client.maps.listSourcePolygons({ mapId, status: 'active' }),
           queryKey: mapEditorKeys.polygons(mapId),
         }),
         queryClient.fetchQuery({
