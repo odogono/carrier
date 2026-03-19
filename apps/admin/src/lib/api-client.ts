@@ -11,8 +11,11 @@ type ClientContext = {
 
 declare const __API_URL__: string | undefined;
 
+// Production: `build.ts` defines __API_URL__. Dev: Bun inlines `process.env.PUBLIC_API_URL`
+// when `bunfig.toml` sets `[serve.static] env = "PUBLIC_*"` (used by Playwright).
 const apiUrl =
   (typeof __API_URL__ !== 'undefined' && __API_URL__) ||
+  process.env.PUBLIC_API_URL ||
   'http://localhost:6021/api';
 
 const link = new OpenAPILink<ClientContext>(contract, {

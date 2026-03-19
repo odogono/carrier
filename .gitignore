@@ -34,3 +34,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 /.vscode/settings.json
 *.sqlite
+
+# Playwright (apps/admin)
+apps/admin/playwright-report/
+apps/admin/test-results/
+apps/admin/blob-report/

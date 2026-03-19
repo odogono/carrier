@@ -29,6 +29,8 @@
   },
   "include": [
     "src",
-    "build.ts"
+    "build.ts",
+    "e2e",
+    "playwright.config.ts"
   ]
 }
