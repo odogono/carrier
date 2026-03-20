@@ -1,46 +1,38 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
-export const useElementSize = (ref: RefObject<HTMLElement | null>) => {
+/**
+ * Tracks element width/height via ResizeObserver. Uses a callback ref so the
+ * first measure runs when the node is attached (avoids layout-before-paint 0×0
+ * reads that skip mounting canvas/SVG in some environments).
+ */
+export const useElementSize = () => {
   const [size, setSize] = useState({ height: 0, width: 0 });
+  const observerRef = useRef<ResizeObserver | null>(null);
 
-  const measure = useCallback(() => {
-    const element = ref.current;
+  const ref = useCallback((element: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
 
     if (!element) {
+      setSize({ height: 0, width: 0 });
       return;
     }
 
-    const rect = element.getBoundingClientRect();
-    setSize(previous => {
-      const next = {
-        height: Math.floor(rect.height),
-        width: Math.floor(rect.width)
-      };
-
-      if (previous.height === next.height && previous.width === next.width) {
-        return previous;
-      }
-
-      return next;
-    });
-  }, [ref]);
-
-  useEffect(() => {
-    const element = ref.current;
-
-    if (!element) {
-      return;
-    }
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      setSize({
+        height: Math.round(rect.height),
+        width: Math.round(rect.width)
+      });
+    };
 
     measure();
+    requestAnimationFrame(measure);
 
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    observerRef.current = observer;
+  }, []);
 
-    return () => {
-      observer.disconnect();
-    };
-  }, [measure, ref]);
-
-  return size;
+  return [ref, size] as const;
 };

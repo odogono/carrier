@@ -9,6 +9,7 @@ import type {
   KeyboardEvent,
   MouseEvent,
   PointerEvent,
+  Ref,
   RefObject,
   WheelEvent
 } from 'react';
@@ -33,7 +34,7 @@ import type {
 type EditorCanvasProps = {
   chunks: ReturnType<typeof import('@/hooks/use-map-chunks').useMapChunks>;
   commitDrawPolygon: () => void;
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: Ref<HTMLDivElement>;
   controlPointDraft: ControlPointDraft | null;
   controlPoints: ControlPoint[];
   dragState: CanvasDragState;
@@ -57,11 +58,7 @@ type EditorCanvasProps = {
     x: number;
     z: number;
   };
-  toWorldPoint: (event: {
-    clientX: number;
-    clientY: number;
-    currentTarget: { getBoundingClientRect(): DOMRect };
-  }) => WorldPoint;
+  toWorldPoint: (event: { clientX: number; clientY: number }) => WorldPoint;
   tool: EditorTool;
   viewport: Viewport;
   zoomIn: () => void;
@@ -146,7 +143,8 @@ export function EditorCanvas({
         <div className="flex flex-col gap-2">
           <div
             ref={containerRef}
-            className="relative h-[640px] overflow-hidden rounded-md border bg-[#0a1320]"
+            className="relative h-[640px] w-full min-w-0 overflow-hidden rounded-md border bg-[#0a1320]"
+            data-testid="editor-stage"
           >
             {size.width > 0 && size.height > 0 && (
               <>

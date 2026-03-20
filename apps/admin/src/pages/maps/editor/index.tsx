@@ -84,9 +84,8 @@ export function MapEditorPage() {
   const { id } = useParams({ from: '/maps/$id/editor' });
   const navigate = useNavigate();
   const interactionRef = useRef<SVGSVGElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const initialFitRef = useRef(false);
-  const size = useElementSize(containerRef);
+  const [containerRef, size] = useElementSize();
 
   const [editorRevision, setEditorRevision] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -385,16 +384,17 @@ export function MapEditorPage() {
   );
 
   const toWorldPoint = useCallback(
-    (event: {
-      clientX: number;
-      clientY: number;
-      currentTarget: { getBoundingClientRect(): DOMRect };
-    }) => {
+    (event: { clientX: number; clientY: number }) => {
       if (!map) {
         return { x: 0, z: 0 };
       }
 
-      const rect = event.currentTarget.getBoundingClientRect();
+      const svg = interactionRef.current;
+      if (!svg) {
+        return { x: 0, z: 0 };
+      }
+
+      const rect = svg.getBoundingClientRect();
       const tilePoint = screenToTilePoint(
         viewport,
         size.width,
