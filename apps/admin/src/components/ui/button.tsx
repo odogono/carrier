@@ -28,13 +28,13 @@ const sizeStyles: Record<ButtonSize, string> = {
   sm: 'h-9 rounded-md px-3'
 };
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant;
+export type ButtonProps = {
   size?: ButtonSize;
-}
+  variant?: ButtonVariant;
+} & ButtonHTMLAttributes<HTMLButtonElement>
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'default', size = 'default', ...props }, ref) => (
+  ({ className, size = 'default', variant = 'default', ...props }, ref) => (
     <button
       className={cn(
         'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',

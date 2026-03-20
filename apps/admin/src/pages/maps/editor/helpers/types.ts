@@ -39,7 +39,7 @@ export type DeleteTarget =
   | null;
 
 export type CanvasDragState =
-  | { kind: 'control-point'; pointId?: string; pointerId: number }
+  | { kind: 'control-point'; pointerId: number; pointId?: string; }
   | {
       bounds: WorldBounds;
       currentPoint: WorldPoint;
@@ -49,10 +49,14 @@ export type CanvasDragState =
     }
   | {
       controlPoints: ControlPointDraft[];
+      currentDelta: WorldPoint;
       kind: 'polygon';
-      originalVertices: WorldPoint[];
       pointerId: number;
-      polygonId: string;
+      polygons: Array<{
+        id: string;
+        params: SourcePolygonParams;
+        vertices: WorldPoint[];
+      }>;
       startPoint: WorldPoint;
     }
   | { kind: 'vertex'; pointerId: number; vertexIndex: number }

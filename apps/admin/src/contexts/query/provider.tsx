@@ -39,7 +39,7 @@ const persistOptions = {
       queryKey: readonly unknown[];
       state: { status: string };
     }) => {
-      if (query.queryKey[0] === 'map-chunk') return false;
+      if (query.queryKey[0] === 'map-chunk') {return false;}
       return query.state.status === 'success';
     }
   },

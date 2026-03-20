@@ -1,5 +1,5 @@
-import { createStore } from 'jotai';
 import { describe, expect, test } from 'bun:test';
+import { createStore } from 'jotai';
 
 import { createPolygonDraft } from '../helpers/drafts';
 import {
@@ -22,6 +22,7 @@ describe('editor history state', () => {
     store.set(recordEditorHistoryAtom, {
       after: {
         ...initial,
+        polygonControlPointDrafts: [],
         polygonDraft: {
           ...draft,
           vertices: [
@@ -30,14 +31,15 @@ describe('editor history state', () => {
             { x: 10, z: 10 }
           ]
         },
-        polygonControlPointDrafts: [],
         tool: 'draw-polygon'
       },
       before: initial,
       remoteTransitions: []
     });
 
-    expect(store.get(editorSnapshotAtom).polygonDraft?.vertices).toHaveLength(3);
+    expect(store.get(editorSnapshotAtom).polygonDraft?.vertices).toHaveLength(
+      3
+    );
     expect(store.get(canUndoAtom)).toBe(true);
     expect(store.get(canRedoAtom)).toBe(false);
   });
@@ -45,6 +47,7 @@ describe('editor history state', () => {
   test('remaps recreated polygon ids in selection and drafts', () => {
     const snapshot = {
       ...createEmptyEditorSnapshot(),
+      polygonControlPointDrafts: [],
       polygonDraft: {
         ...createPolygonDraft({
           id: 'polygon-1',
@@ -61,7 +64,6 @@ describe('editor history state', () => {
         }),
         id: 'polygon-1'
       },
-      polygonControlPointDrafts: [],
       selectedPolygonIds: ['polygon-1']
     };
 

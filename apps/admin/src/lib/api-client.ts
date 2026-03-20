@@ -16,7 +16,7 @@ declare const __API_URL__: string | undefined;
 // `[serve.static] env = "PUBLIC_*"`. Avoid `bun ./index.html` without `--env-file=...` or you
 // get `ReferenceError: process is not defined` in the browser.
 const apiUrl =
-  (typeof __API_URL__ !== 'undefined' && __API_URL__) ||
+  (__API_URL__ !== undefined && __API_URL__) ||
   process.env.PUBLIC_API_URL ||
   'http://localhost:6021/api';
 

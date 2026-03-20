@@ -18,13 +18,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 import { DEFAULT_SOURCE_POLYGON_PARAMS, canSavePolygonDraft } from '../helpers';
 import {
   createControlPointDraft,
   createIslandDraft,
   createPolygonDraft,
-  getBoundsCenter,
   parseNumber
 } from '../helpers/drafts';
 import type {
@@ -46,6 +46,16 @@ type EditorSidebarProps = {
   derivedIslands: DerivedIsland[];
   islandDraft: IslandDraft | null;
   islandInspectorDraft: IslandDraft | null;
+  onRecenter: (point: Pick<WorldPoint, 'x' | 'z'>) => void;
+  onResetControlPointDraft: () => void;
+  onResetPolygonDraft: () => void;
+  onSaveControlPointDraft: () => void;
+  onSaveIslandDraft: () => void;
+  onSavePolygonDraft: () => void;
+  onSelectIsland: (
+    islandId: string,
+    options?: { additive?: boolean; recenter?: boolean }
+  ) => void;
   overviewBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
   overviewClusters: ReadonlyArray<{
     bbox: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>;
@@ -57,7 +67,8 @@ type EditorSidebarProps = {
   polygonDraft: PolygonDraft | null;
   selectedControlPoint: ControlPoint | null;
   selectedIsland: DerivedIsland | null;
-  selectedIslandId: string | null;
+  selectedIslandCount: number;
+  selectedIslandIds: string[];
   selectedPolygon: SourcePolygon | null;
   setControlPointDraft: (
     value:
@@ -80,12 +91,6 @@ type EditorSidebarProps = {
       | ((current: IslandDraft | null) => IslandDraft | null),
     record?: boolean
   ) => void;
-  setSelectedControlPointId: (value: string | null, record?: boolean) => void;
-  setSelectedIslandId: (value: string | null, record?: boolean) => void;
-  setSelectedPolygonIds: (
-    value: string[] | ((current: string[]) => string[]),
-    record?: boolean
-  ) => void;
   setPolygonDraft: (
     value:
       | PolygonDraft
@@ -93,12 +98,6 @@ type EditorSidebarProps = {
       | ((current: PolygonDraft | null) => PolygonDraft | null),
     record?: boolean
   ) => void;
-  onRecenter: (point: Pick<WorldPoint, 'x' | 'z'>) => void;
-  onResetControlPointDraft: () => void;
-  onResetPolygonDraft: () => void;
-  onSaveControlPointDraft: () => void;
-  onSaveIslandDraft: () => void;
-  onSavePolygonDraft: () => void;
   viewportBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
 };
 
@@ -110,27 +109,26 @@ export function EditorSidebar({
   derivedIslands,
   islandDraft,
   islandInspectorDraft,
-  overviewBounds,
-  overviewClusters,
-  polygonDirty,
-  polygonDraft,
-  selectedControlPoint,
-  selectedIsland,
-  selectedIslandId,
-  selectedPolygon,
-  setControlPointDraft,
-  setDeleteTarget,
-  setIslandDraft,
-  setSelectedControlPointId,
-  setSelectedIslandId,
-  setSelectedPolygonIds,
-  setPolygonDraft,
   onRecenter,
   onResetControlPointDraft,
   onResetPolygonDraft,
   onSaveControlPointDraft,
   onSaveIslandDraft,
   onSavePolygonDraft,
+  onSelectIsland,
+  overviewBounds,
+  overviewClusters,
+  polygonDirty,
+  polygonDraft,
+  selectedControlPoint,
+  selectedIsland,
+  selectedIslandCount,
+  selectedIslandIds,
+  selectedPolygon,
+  setControlPointDraft,
+  setDeleteTarget,
+  setIslandDraft,
+  setPolygonDraft,
   viewportBounds
 }: EditorSidebarProps) {
   return (
@@ -170,54 +168,63 @@ export function EditorSidebar({
               <PolygonParamInput
                 id="polygon-noise-scale"
                 label="Noise Scale"
-                value={currentPolygonForInspector.params.noiseScaleMeters}
                 onChange={noiseScaleMeters => {
-                  setPolygonDraft(draft => ({
-                    ...(draft ??
-                      createPolygonDraft(selectedPolygon ?? undefined)),
-                    params: {
-                      ...(draft?.params ??
-                        selectedPolygon?.params ??
-                        DEFAULT_SOURCE_POLYGON_PARAMS),
-                      noiseScaleMeters
-                    }
-                  }), true);
+                  setPolygonDraft(
+                    draft => ({
+                      ...(draft ??
+                        createPolygonDraft(selectedPolygon ?? undefined)),
+                      params: {
+                        ...(draft?.params ??
+                          selectedPolygon?.params ??
+                          DEFAULT_SOURCE_POLYGON_PARAMS),
+                        noiseScaleMeters
+                      }
+                    }),
+                    true
+                  );
                 }}
+                value={currentPolygonForInspector.params.noiseScaleMeters}
               />
               <PolygonParamInput
                 id="polygon-displacement"
                 label="Max Displacement"
-                value={currentPolygonForInspector.params.maxDisplacementMeters}
                 onChange={maxDisplacementMeters => {
-                  setPolygonDraft(draft => ({
-                    ...(draft ??
-                      createPolygonDraft(selectedPolygon ?? undefined)),
-                    params: {
-                      ...(draft?.params ??
-                        selectedPolygon?.params ??
-                        DEFAULT_SOURCE_POLYGON_PARAMS),
-                      maxDisplacementMeters
-                    }
-                  }), true);
+                  setPolygonDraft(
+                    draft => ({
+                      ...(draft ??
+                        createPolygonDraft(selectedPolygon ?? undefined)),
+                      params: {
+                        ...(draft?.params ??
+                          selectedPolygon?.params ??
+                          DEFAULT_SOURCE_POLYGON_PARAMS),
+                        maxDisplacementMeters
+                      }
+                    }),
+                    true
+                  );
                 }}
+                value={currentPolygonForInspector.params.maxDisplacementMeters}
               />
               <PolygonParamInput
                 id="polygon-roughness"
                 label="Roughness"
+                onChange={roughness => {
+                  setPolygonDraft(
+                    draft => ({
+                      ...(draft ??
+                        createPolygonDraft(selectedPolygon ?? undefined)),
+                      params: {
+                        ...(draft?.params ??
+                          selectedPolygon?.params ??
+                          DEFAULT_SOURCE_POLYGON_PARAMS),
+                        roughness
+                      }
+                    }),
+                    true
+                  );
+                }}
                 step="0.05"
                 value={currentPolygonForInspector.params.roughness}
-                onChange={roughness => {
-                  setPolygonDraft(draft => ({
-                    ...(draft ??
-                      createPolygonDraft(selectedPolygon ?? undefined)),
-                    params: {
-                      ...(draft?.params ??
-                        selectedPolygon?.params ??
-                        DEFAULT_SOURCE_POLYGON_PARAMS),
-                      roughness
-                    }
-                  }), true);
-                }}
               />
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -280,16 +287,19 @@ export function EditorSidebar({
                   <Label htmlFor="control-type">Type</Label>
                   <Select
                     id="control-type"
-                    value={currentControlPointForInspector.type}
                     onChange={event =>
-                      setControlPointDraft(draft => ({
-                        ...(draft ??
-                          createControlPointDraft(
-                        selectedControlPoint ?? undefined
-                      )),
-                      type: event.target.value as ControlPoint['type']
-                      }), true)
+                      setControlPointDraft(
+                        draft => ({
+                          ...(draft ??
+                            createControlPointDraft(
+                              selectedControlPoint ?? undefined
+                            )),
+                          type: event.target.value as ControlPoint['type']
+                        }),
+                        true
+                      )
                     }
+                    value={currentControlPointForInspector.type}
                   >
                     <option value="plain">Plain</option>
                     <option value="peak">Peak</option>
@@ -299,77 +309,92 @@ export function EditorSidebar({
                 <NumberInput
                   id="control-strength"
                   label="Strength"
+                  onChange={strength =>
+                    setControlPointDraft(
+                      draft => ({
+                        ...(draft ??
+                          createControlPointDraft(
+                            selectedControlPoint ?? undefined
+                          )),
+                        strength
+                      }),
+                      true
+                    )
+                  }
                   step="0.1"
                   value={currentControlPointForInspector.strength}
-                  onChange={strength =>
-                    setControlPointDraft(draft => ({
-                      ...(draft ??
-                        createControlPointDraft(
-                          selectedControlPoint ?? undefined
-                        )),
-                      strength
-                    }), true)
-                  }
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <NumberInput
                   id="control-elevation"
                   label="Elevation"
-                  value={currentControlPointForInspector.elevationMeters}
                   onChange={elevationMeters =>
-                    setControlPointDraft(draft => ({
-                      ...(draft ??
-                        createControlPointDraft(
-                          selectedControlPoint ?? undefined
-                        )),
-                      elevationMeters
-                    }), true)
+                    setControlPointDraft(
+                      draft => ({
+                        ...(draft ??
+                          createControlPointDraft(
+                            selectedControlPoint ?? undefined
+                          )),
+                        elevationMeters
+                      }),
+                      true
+                    )
                   }
+                  value={currentControlPointForInspector.elevationMeters}
                 />
                 <NumberInput
                   id="control-influence"
                   label="Influence Radius"
-                  value={currentControlPointForInspector.influenceMeters}
                   onChange={influenceMeters =>
-                    setControlPointDraft(draft => ({
-                      ...(draft ??
-                        createControlPointDraft(
-                          selectedControlPoint ?? undefined
-                        )),
-                      influenceMeters
-                    }), true)
+                    setControlPointDraft(
+                      draft => ({
+                        ...(draft ??
+                          createControlPointDraft(
+                            selectedControlPoint ?? undefined
+                          )),
+                        influenceMeters
+                      }),
+                      true
+                    )
                   }
+                  value={currentControlPointForInspector.influenceMeters}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <NumberInput
                   id="control-x"
                   label="X"
-                  value={currentControlPointForInspector.x}
                   onChange={x =>
-                    setControlPointDraft(draft => ({
-                      ...(draft ??
-                        createControlPointDraft(
-                          selectedControlPoint ?? undefined
-                        )),
-                      x
-                    }), true)
+                    setControlPointDraft(
+                      draft => ({
+                        ...(draft ??
+                          createControlPointDraft(
+                            selectedControlPoint ?? undefined
+                          )),
+                        x
+                      }),
+                      true
+                    )
                   }
+                  value={currentControlPointForInspector.x}
                 />
                 <NumberInput
                   id="control-z"
                   label="Z"
-                  value={currentControlPointForInspector.z}
                   onChange={z =>
-                    setControlPointDraft(draft => ({
-                      ...(draft ??
-                        createControlPointDraft(
-                          selectedControlPoint ?? undefined
-                        )),
-                      z
-                    }), true)
+                    setControlPointDraft(
+                      draft => ({
+                        ...(draft ??
+                          createControlPointDraft(
+                            selectedControlPoint ?? undefined
+                          )),
+                        z
+                      }),
+                      true
+                    )
                   }
+                  value={currentControlPointForInspector.z}
                 />
               </div>
               <div className="flex flex-wrap gap-2">
@@ -415,66 +440,89 @@ export function EditorSidebar({
         <CardHeader>
           <CardTitle>Derived Islands</CardTitle>
           <CardDescription>
-            Selecting an island recenters the view and highlights its source
-            polygons.
+            Layer-style island selection. Click to select, Shift-click to build
+            a multi-selection.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="max-h-56 space-y-2 overflow-auto">
+          <div className="max-h-72 space-y-2 overflow-auto rounded-md border bg-muted/20 p-2">
             {derivedIslands.length === 0 && (
               <div className="text-sm text-muted-foreground">
                 No derived islands yet.
               </div>
             )}
             {derivedIslands.map(island => (
-              <Button
-                className="w-full justify-between"
+              <button
+                className={cn(
+                  'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left transition-colors',
+                  selectedIslandIds.includes(island.id)
+                    ? 'border-pink-400/70 bg-pink-500/12 text-foreground'
+                    : 'border-border bg-background hover:border-pink-300/50 hover:bg-accent/40'
+                )}
+                data-testid={`derived-island-row-${island.id}`}
                 key={island.id}
-                onClick={() => {
-                  setSelectedIslandId(island.id);
-                  setIslandDraft(createIslandDraft(island));
-                  setSelectedControlPointId(null);
-                  setSelectedPolygonIds([]);
-                  onRecenter(getBoundsCenter(island.bbox));
+                onClick={event => {
+                  onSelectIsland(island.id, {
+                    additive: event.shiftKey,
+                    recenter: !event.shiftKey
+                  });
                 }}
-                variant={selectedIslandId === island.id ? 'default' : 'outline'}
+                type="button"
               >
-                <span className="truncate">{island.name ?? island.id}</span>
-                <span className="text-xs">
-                  {Math.round(island.areaMeters2)}m²
-                </span>
-              </Button>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">
+                    {island.name ?? island.id}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {island.sourcePolygonIds.length} polygons
+                  </div>
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <div>{Math.round(island.areaMeters2)}m²</div>
+                  <div>
+                    {selectedIslandIds.includes(island.id)
+                      ? 'Selected'
+                      : 'Idle'}
+                  </div>
+                </div>
+              </button>
             ))}
           </div>
-          {islandInspectorDraft && (
+          {selectedIslandCount > 1 && (
+            <div className="rounded-md border border-pink-300/40 bg-pink-500/8 px-3 py-2 text-sm text-muted-foreground">
+              {selectedIslandCount} islands selected. Drag any selected polygon
+              to move the group together.
+            </div>
+          )}
+          {islandInspectorDraft && selectedIslandCount === 1 && (
             <div className="space-y-4">
               <TextInput
                 id="island-name"
                 label="Name"
-                value={islandInspectorDraft.name}
                 onChange={name =>
                   setIslandDraft(draft => (draft ? { ...draft, name } : draft))
                 }
+                value={islandInspectorDraft.name}
               />
               <TextInput
                 id="island-owner"
                 label="Default Owner"
-                value={islandInspectorDraft.defaultOwner}
                 onChange={defaultOwner =>
                   setIslandDraft(draft =>
                     draft ? { ...draft, defaultOwner } : draft
                   )
                 }
+                value={islandInspectorDraft.defaultOwner}
               />
               <TextInput
                 id="island-faction"
                 label="Default Faction"
-                value={islandInspectorDraft.defaultFaction}
                 onChange={defaultFaction =>
                   setIslandDraft(draft =>
                     draft ? { ...draft, defaultFaction } : draft
                   )
                 }
+                value={islandInspectorDraft.defaultFaction}
               />
               <div className="flex gap-2">
                 <Button disabled={!islandDraft} onClick={onSaveIslandDraft}>
@@ -515,10 +563,10 @@ function NumberInput({ id, label, onChange, step, value }: NumberInputProps) {
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
+        onChange={event => onChange(parseNumber(event.target.value, value))}
         step={step}
         type="number"
         value={value}
-        onChange={event => onChange(parseNumber(event.target.value, value))}
       />
     </div>
   );
@@ -537,8 +585,8 @@ function TextInput({ id, label, onChange, value }: TextInputProps) {
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
-        value={value}
         onChange={event => onChange(event.target.value)}
+        value={value}
       />
     </div>
   );

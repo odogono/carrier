@@ -14,9 +14,9 @@ const variantStyles: Record<BadgeVariant, string> = {
     'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
 };
 
-export interface BadgeProps extends HTMLAttributes<HTMLDivElement> {
+export type BadgeProps = {
   variant?: BadgeVariant;
-}
+} & HTMLAttributes<HTMLDivElement>
 
 export function Badge({
   className,

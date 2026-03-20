@@ -10,10 +10,7 @@ import { toast } from 'sonner';
 
 import { client } from '@/lib/api-client';
 
-import {
-  canSavePolygonDraft,
-  mergeWorldBounds
-} from '../helpers';
+import { canSavePolygonDraft, mergeWorldBounds } from '../helpers';
 import { boundsFromPolygons, createIslandDraft } from '../helpers/drafts';
 import { getErrorCode, toMessage } from '../helpers/errors';
 import type {
@@ -33,7 +30,10 @@ import {
   type RemoteTransition
 } from '../state/history';
 
-type SnapshotUpdater<T> = (value: T | ((current: T) => T), record?: boolean) => void;
+type SnapshotUpdater<T> = (
+  value: T | ((current: T) => T),
+  record?: boolean
+) => void;
 
 type UseMapEditorActionsOptions = {
   controlPointDraft: ControlPointDraft | null;
@@ -52,8 +52,8 @@ type UseMapEditorActionsOptions = {
   ) => Promise<unknown>;
   islandDraft: IslandDraft | null;
   map: MapMetadata | null | undefined;
-  polygonDraft: PolygonDraft | null;
   polygonControlPointDrafts: ControlPointDraft[];
+  polygonDraft: PolygonDraft | null;
   polygons: SourcePolygon[];
   recordHistory: (entry: HistoryEntry) => void;
   reloadAll: () => Promise<MapMetadata | null>;
@@ -61,21 +61,25 @@ type UseMapEditorActionsOptions = {
   selectedPolygon: SourcePolygon | null;
   selectedPolygonIds: string[];
   setDeleteTarget: (value: DeleteTarget) => void;
-  setEditorRevision: (value: number | null | ((current: number | null) => number | null)) => void;
+  setEditorRevision: (
+    value: number | null | ((current: number | null) => number | null)
+  ) => void;
   setHistoryState: (state: EditorHistoryState) => void;
   setIslandDraft: SnapshotUpdater<IslandDraft | null>;
   setSnapshot: (snapshot: EditorSnapshot) => void;
 };
 
+type SaveDraggedSelectionInput = {
+  afterControlPoints: ControlPointDraft[];
+  afterPolygons: Array<Pick<SourcePolygon, 'id' | 'params' | 'vertices'>>;
+  beforeControlPoints: ControlPoint[];
+  beforePolygons: SourcePolygon[];
+};
+
 const toControlPointCreateInput = (
   point: Pick<
     ControlPoint,
-    | 'elevationMeters'
-    | 'influenceMeters'
-    | 'strength'
-    | 'type'
-    | 'x'
-    | 'z'
+    'elevationMeters' | 'influenceMeters' | 'strength' | 'type' | 'x' | 'z'
   >,
   expectedRevision: number,
   mapId: string
@@ -130,8 +134,8 @@ export const useMapEditorActions = ({
   invalidateTerrainMutation,
   islandDraft,
   map,
-  polygonDraft,
   polygonControlPointDrafts,
+  polygonDraft,
   polygons,
   recordHistory,
   reloadAll,
@@ -197,8 +201,10 @@ export const useMapEditorActions = ({
       startingRevision: number
     ) => {
       let revision = startingRevision;
-      let dirtyBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null =
-        null;
+      let dirtyBounds: Pick<
+        WorldBounds,
+        'maxX' | 'maxZ' | 'minX' | 'minZ'
+      > | null = null;
 
       if (transition.kind === 'polygon') {
         const activeIds =
@@ -431,9 +437,7 @@ export const useMapEditorActions = ({
                 ? [...future, nextEntry]
                 : future.slice(0, -1),
             past:
-              direction === 'undo'
-                ? past.slice(0, -1)
-                : [...past, nextEntry],
+              direction === 'undo' ? past.slice(0, -1) : [...past, nextEntry],
             snapshot: nextSnapshot
           });
         } catch (error) {
@@ -506,7 +510,11 @@ export const useMapEditorActions = ({
             polygonDraft.kind === 'create'
               ? toPolygonTransition('create', [], [polygonResult.polygon])
               : selectedPolygon
-                ? toPolygonTransition('save', [selectedPolygon], [polygonResult.polygon])
+                ? toPolygonTransition(
+                    'save',
+                    [selectedPolygon],
+                    [polygonResult.polygon]
+                  )
                 : null;
 
           if (polygonTransition) {
@@ -519,9 +527,8 @@ export const useMapEditorActions = ({
             }
 
             const beforeControlPoint =
-              controlPoints.find(
-                point => point.id === controlPointDraft.id
-              ) ?? null;
+              controlPoints.find(point => point.id === controlPointDraft.id) ??
+              null;
 
             const result = await client.maps.updateControlPoint({
               ...toControlPointCreateInput(controlPointDraft, nextRevision, id),
@@ -549,8 +556,8 @@ export const useMapEditorActions = ({
 
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
-            polygonDraft: null,
             polygonControlPointDrafts: [],
+            polygonDraft: null,
             selectedControlPointId: null,
             selectedIslandId: null,
             selectedPolygonIds: [polygonResult.polygon.id],
@@ -596,6 +603,136 @@ export const useMapEditorActions = ({
     setEditorRevision,
     setSnapshot
   ]);
+
+  const saveDraggedSelection = useCallback(
+    async ({
+      afterControlPoints,
+      afterPolygons,
+      beforeControlPoints,
+      beforePolygons
+    }: SaveDraggedSelectionInput) => {
+      if (
+        editorRevision === null ||
+        beforePolygons.length === 0 ||
+        beforePolygons.length !== afterPolygons.length
+      ) {
+        return;
+      }
+
+      await runAction('drag-polygons', async () => {
+        try {
+          let nextRevision = editorRevision;
+          let dirtyBounds: Pick<
+            WorldBounds,
+            'maxX' | 'maxZ' | 'minX' | 'minZ'
+          > | null = null;
+          const remoteTransitions: RemoteTransition[] = [];
+          const savedPolygons: SourcePolygon[] = [];
+
+          for (const [index, polygon] of afterPolygons.entries()) {
+            const beforePolygon = beforePolygons[index];
+            if (!beforePolygon) {
+              continue;
+            }
+
+            const result = await client.maps.updateSourcePolygon({
+              expectedRevision: nextRevision,
+              id: polygon.id,
+              mapId: id,
+              params: polygon.params,
+              vertices: polygon.vertices
+            });
+
+            nextRevision = result.mapRevision;
+            dirtyBounds = mergeWorldBounds(dirtyBounds, result.dirtyBounds);
+            savedPolygons.push(result.polygon);
+            remoteTransitions.push(
+              toPolygonTransition('save', [beforePolygon], [result.polygon])
+            );
+          }
+
+          for (const [
+            index,
+            controlPointDraft
+          ] of afterControlPoints.entries()) {
+            const beforeControlPoint = beforeControlPoints[index];
+            if (!beforeControlPoint || !controlPointDraft.id) {
+              continue;
+            }
+
+            const result = await client.maps.updateControlPoint({
+              ...toControlPointCreateInput(controlPointDraft, nextRevision, id),
+              id: controlPointDraft.id
+            });
+
+            nextRevision = result.mapRevision;
+            dirtyBounds = mergeWorldBounds(dirtyBounds, result.dirtyBounds);
+            remoteTransitions.push(
+              toControlPointTransition(
+                'save',
+                [beforeControlPoint],
+                [result.controlPoint]
+              )
+            );
+          }
+
+          setEditorRevision(nextRevision);
+          if (dirtyBounds) {
+            await invalidateTerrainMutation(dirtyBounds);
+          }
+
+          const nextSnapshot: EditorSnapshot = {
+            ...historySnapshot,
+            polygonControlPointDrafts: [],
+            polygonDraft:
+              savedPolygons.length === 1
+                ? {
+                    id: savedPolygons[0]!.id,
+                    kind: 'edit',
+                    params: savedPolygons[0]!.params,
+                    selectedVertexIndex: null,
+                    vertices: savedPolygons[0]!.vertices.map(vertex => ({
+                      ...vertex
+                    }))
+                  }
+                : null,
+            selectedControlPointId: null,
+            selectedIslandId: null,
+            selectedPolygonIds: savedPolygons.map(polygon => polygon.id),
+            tool: 'select'
+          };
+
+          if (remoteTransitions.length > 0) {
+            commitHistoryEntry({
+              after: nextSnapshot,
+              before: historySnapshot,
+              remoteTransitions
+            });
+          } else {
+            setSnapshot(nextSnapshot);
+          }
+        } catch (error) {
+          if (getErrorCode(error) === 'CONFLICT') {
+            await handleConflict();
+            return;
+          }
+
+          toast.error(toMessage(error, 'Failed to move polygons'));
+        }
+      });
+    },
+    [
+      commitHistoryEntry,
+      editorRevision,
+      handleConflict,
+      historySnapshot,
+      id,
+      invalidateTerrainMutation,
+      runAction,
+      setEditorRevision,
+      setSnapshot
+    ]
+  );
 
   const saveControlPointDraft = useCallback(async () => {
     if (!controlPointDraft || editorRevision === null) {
@@ -726,19 +863,19 @@ export const useMapEditorActions = ({
 
   const applyBooleanOperation = useCallback(
     async (operation: BooleanOperation) => {
-      if (
-        editorRevision === null ||
-        selectedPolygonIds.length === 0 ||
-        !map
-      ) {
+      if (editorRevision === null || selectedPolygonIds.length === 0 || !map) {
         return;
       }
 
       await runAction(`boolean-${operation}`, async () => {
         try {
           const operands = selectedPolygonIds
-            .map(polygonId => polygons.find(polygon => polygon.id === polygonId))
-            .filter((polygon): polygon is SourcePolygon => polygon !== undefined);
+            .map(polygonId =>
+              polygons.find(polygon => polygon.id === polygonId)
+            )
+            .filter(
+              (polygon): polygon is SourcePolygon => polygon !== undefined
+            );
 
           if (operands.length !== selectedPolygonIds.length) {
             return;
@@ -756,11 +893,13 @@ export const useMapEditorActions = ({
 
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
-            polygonDraft: null,
             polygonControlPointDrafts: [],
+            polygonDraft: null,
             selectedControlPointId: null,
             selectedIslandId: null,
-            selectedPolygonIds: result.createdPolygons.map(polygon => polygon.id),
+            selectedPolygonIds: result.createdPolygons.map(
+              polygon => polygon.id
+            ),
             tool: 'select'
           };
 
@@ -835,8 +974,8 @@ export const useMapEditorActions = ({
           commitHistoryEntry({
             after: {
               ...historySnapshot,
-              polygonDraft: null,
               polygonControlPointDrafts: [],
+              polygonDraft: null,
               selectedPolygonIds: [],
               tool: 'select'
             },
@@ -868,7 +1007,9 @@ export const useMapEditorActions = ({
               tool: 'select'
             },
             before: historySnapshot,
-            remoteTransitions: [toControlPointTransition('delete', [target], [])]
+            remoteTransitions: [
+              toControlPointTransition('delete', [target], [])
+            ]
           });
           toast.success('Control point deleted');
         }
@@ -904,6 +1045,7 @@ export const useMapEditorActions = ({
     pendingAction,
     redo: () => moveHistoryPointer('redo'),
     saveControlPointDraft,
+    saveDraggedSelection,
     saveIslandDraft,
     savePolygonDraft,
     undo: () => moveHistoryPointer('undo')

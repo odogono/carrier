@@ -99,24 +99,24 @@ export function MapDetailPage() {
         id,
         name: name.trim() || null
       }),
+    onError: () => {
+      toast.error('Failed to update map');
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map updated');
-    },
-    onError: () => {
-      toast.error('Failed to update map');
     }
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => client.maps.delete({ id }),
+    onError: () => {
+      toast.error('Failed to delete map');
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map deleted');
       void navigate({ to: '/maps' });
-    },
-    onError: () => {
-      toast.error('Failed to delete map');
     }
   });
 
@@ -136,6 +136,11 @@ export function MapDetailPage() {
         metersPerTile: Number(metersPerTile),
         name: exportName.trim() || undefined
       }),
+    onError: error => {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to create export'
+      );
+    },
     onSuccess: () => {
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['maps'] }),
@@ -144,11 +149,6 @@ export function MapDetailPage() {
       toast.success('Export created');
       setShowExport(false);
       setExportName('');
-    },
-    onError: error => {
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to create export'
-      );
     }
   });
 
@@ -215,11 +215,11 @@ export function MapDetailPage() {
           4;
         const materialBytes = widthTiles * heightTiles;
         return {
-          widthTiles,
-          heightTiles,
+          binaryBytes: heightBytes + materialBytes,
           chunkCount,
           heightBytes,
-          binaryBytes: heightBytes + materialBytes
+          heightTiles,
+          widthTiles
         };
       })()
     : null;
@@ -232,7 +232,7 @@ export function MapDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <Link to="/maps">
-          <Button variant="ghost" size="icon">
+          <Button size="icon" variant="ghost">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
@@ -243,9 +243,9 @@ export function MapDetailPage() {
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
         <Button
-          variant="destructive"
-          size="sm"
           onClick={() => setShowDelete(true)}
+          size="sm"
+          variant="destructive"
         >
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
@@ -253,13 +253,13 @@ export function MapDetailPage() {
         {map.kind === 'infinite-vector' && (
           <>
             <Button
+              onClick={() => setShowExport(true)}
               size="sm"
               variant="outline"
-              onClick={() => setShowExport(true)}
             >
               Export Slice
             </Button>
-            <Link to="/maps/$id/editor" params={{ id }}>
+            <Link params={{ id }} to="/maps/$id/editor">
               <Button size="sm" variant="outline">
                 Open Editor
               </Button>
@@ -274,7 +274,7 @@ export function MapDetailPage() {
           <CardDescription>Drag to pan, scroll to zoom</CardDescription>
         </CardHeader>
         <CardContent>
-          <MapViewer mapId={id} map={map} />
+          <MapViewer map={map} mapId={id} />
         </CardContent>
       </Card>
 
@@ -285,20 +285,20 @@ export function MapDetailPage() {
             <CardDescription>Update editable map properties</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSave} className="space-y-4">
+            <form className="space-y-4" onSubmit={handleSave}>
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
                 <Input
                   id="name"
-                  value={name}
+                  maxLength={120}
                   onChange={e => setName(e.target.value)}
                   placeholder="Map name"
-                  maxLength={120}
+                  value={name}
                 />
               </div>
               <Button
-                type="submit"
                 disabled={updateMutation.isPending || !hasChanges}
+                type="submit"
               >
                 <Save className="mr-2 h-4 w-4" />
                 {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
@@ -436,14 +436,14 @@ export function MapDetailPage() {
               <div className="space-y-3">
                 {exportsQuery.data?.map(exportedMap => (
                   <div
-                    key={exportedMap.id}
                     className="flex items-center justify-between rounded-md border p-3"
+                    key={exportedMap.id}
                   >
                     <div>
                       <Link
-                        to="/maps/$id"
-                        params={{ id: exportedMap.id }}
                         className="font-medium hover:underline"
+                        params={{ id: exportedMap.id }}
+                        to="/maps/$id"
                       >
                         {exportedMap.name ?? 'Unnamed Export'}
                       </Link>
@@ -467,7 +467,7 @@ export function MapDetailPage() {
         </Card>
       )}
 
-      <Dialog open={showDelete} onOpenChange={setShowDelete}>
+      <Dialog onOpenChange={setShowDelete} open={showDelete}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Map</DialogTitle>
@@ -478,13 +478,13 @@ export function MapDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDelete(false)}>
+            <Button onClick={() => setShowDelete(false)} variant="outline">
               Cancel
             </Button>
             <Button
-              variant="destructive"
               disabled={deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
+              variant="destructive"
             >
               {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
@@ -492,7 +492,7 @@ export function MapDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showExport} onOpenChange={setShowExport}>
+      <Dialog onOpenChange={setShowExport} open={showExport}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Export Slice</DialogTitle>
@@ -506,18 +506,18 @@ export function MapDetailPage() {
               <Label htmlFor="export-name">Name (optional)</Label>
               <Input
                 id="export-name"
-                value={exportName}
+                maxLength={120}
                 onChange={e => setExportName(e.target.value)}
                 placeholder="North sector slice"
-                maxLength={120}
+                value={exportName}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="export-kind">Output Kind</Label>
               <Select
                 id="export-kind"
-                value={exportKind}
                 onChange={e => setExportKind(e.target.value as MapExportKind)}
+                value={exportKind}
               >
                 <option value="finite-vector-slice">Finite Vector Slice</option>
                 <option value="wrapped-classic-slice">
@@ -530,32 +530,32 @@ export function MapDetailPage() {
                 <Label htmlFor="min-x">Min X</Label>
                 <Input
                   id="min-x"
-                  value={minX}
                   onChange={e => setMinX(e.target.value)}
+                  value={minX}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="max-x">Max X</Label>
                 <Input
                   id="max-x"
-                  value={maxX}
                   onChange={e => setMaxX(e.target.value)}
+                  value={maxX}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="min-z">Min Z</Label>
                 <Input
                   id="min-z"
-                  value={minZ}
                   onChange={e => setMinZ(e.target.value)}
+                  value={minZ}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="max-z">Max Z</Label>
                 <Input
                   id="max-z"
-                  value={maxZ}
                   onChange={e => setMaxZ(e.target.value)}
+                  value={maxZ}
                 />
               </div>
             </div>
@@ -564,16 +564,16 @@ export function MapDetailPage() {
                 <Label htmlFor="meters-per-tile">Meters / Tile</Label>
                 <Input
                   id="meters-per-tile"
-                  value={metersPerTile}
                   onChange={e => setMetersPerTile(e.target.value)}
+                  value={metersPerTile}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="chunk-size-tiles">Chunk Size Tiles</Label>
                 <Input
                   id="chunk-size-tiles"
-                  value={chunkSizeTiles}
                   onChange={e => setChunkSizeTiles(e.target.value)}
+                  value={chunkSizeTiles}
                 />
               </div>
             </div>
@@ -605,7 +605,7 @@ export function MapDetailPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowExport(false)}>
+            <Button onClick={() => setShowExport(false)} variant="outline">
               Cancel
             </Button>
             <Button

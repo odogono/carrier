@@ -13,7 +13,10 @@ import {
   canSavePolygonDraft,
   chunkIntersectsDirtyBounds,
   getChunkWorldBounds,
+  getExactSelectedIslands,
+  getIslandsBySelectedPolygons,
   mergeWorldBounds,
+  nextIslandPolygonSelection,
   nextOrderedSelection,
   pointInPolygon,
   polygonIntersectsBounds
@@ -53,6 +56,41 @@ describe('editor utilities', () => {
     expect(nextOrderedSelection([], 'a', false)).toEqual(['a']);
     expect(nextOrderedSelection(['a'], 'b', true)).toEqual(['a', 'b']);
     expect(nextOrderedSelection(['a', 'b'], 'a', true)).toEqual(['b']);
+  });
+
+  test('selects and toggles island polygon groups with shift semantics', () => {
+    expect(nextIslandPolygonSelection([], ['a', 'b'], false)).toEqual([
+      'a',
+      'b'
+    ]);
+    expect(nextIslandPolygonSelection(['a', 'b'], ['c', 'd'], true)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd'
+    ]);
+    expect(
+      nextIslandPolygonSelection(['a', 'b', 'c'], ['a', 'b'], true)
+    ).toEqual(['c']);
+  });
+
+  test('derives fully and exactly selected islands from polygon selection', () => {
+    const islands = [
+      { id: 'one', sourcePolygonIds: ['a', 'b'] },
+      { id: 'two', sourcePolygonIds: ['c'] }
+    ];
+
+    expect(
+      getIslandsBySelectedPolygons(islands, ['a', 'b', 'c']).map(
+        island => island.id
+      )
+    ).toEqual(['one', 'two']);
+    expect(
+      getExactSelectedIslands(islands, ['a', 'b', 'c']).map(island => island.id)
+    ).toEqual(['one', 'two']);
+    expect(
+      getExactSelectedIslands(islands, ['a', 'b', 'x']).map(island => island.id)
+    ).toEqual([]);
   });
 
   test('validates polygon draft lifecycle with seeded default params', () => {

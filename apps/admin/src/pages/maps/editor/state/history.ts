@@ -5,18 +5,18 @@ import type {
 } from 'carrier-contracts/types';
 import { atom } from 'jotai';
 
+import type { EditorTool } from '../helpers';
 import type {
   ControlPointDraft,
   IslandDraft,
   PolygonDraft
 } from '../helpers/types';
-import type { EditorTool } from '../helpers';
 
 export type EditorSnapshot = {
   controlPointDraft: ControlPointDraft | null;
   islandDraft: IslandDraft | null;
-  polygonDraft: PolygonDraft | null;
   polygonControlPointDrafts: ControlPointDraft[];
+  polygonDraft: PolygonDraft | null;
   selectedControlPointId: string | null;
   selectedIslandId: string | null;
   selectedPolygonIds: string[];
@@ -29,11 +29,7 @@ export type PolygonTransition = {
   before: SourcePolygon[];
   beforeCurrentIds: string[];
   kind: 'polygon';
-  label:
-    | 'boolean'
-    | 'create'
-    | 'delete'
-    | 'save';
+  label: 'boolean' | 'create' | 'delete' | 'save';
   operation?: BooleanOperation;
   side: 'after' | 'before';
 };
@@ -44,10 +40,7 @@ export type ControlPointTransition = {
   before: ControlPoint[];
   beforeCurrentIds: string[];
   kind: 'control-point';
-  label:
-    | 'create'
-    | 'delete'
-    | 'save';
+  label: 'create' | 'delete' | 'save';
   side: 'after' | 'before';
 };
 
@@ -68,8 +61,8 @@ export type EditorHistoryState = {
 export const createEmptyEditorSnapshot = (): EditorSnapshot => ({
   controlPointDraft: null,
   islandDraft: null,
-  polygonDraft: null,
   polygonControlPointDrafts: [],
+  polygonDraft: null,
   selectedControlPointId: null,
   selectedIslandId: null,
   selectedPolygonIds: [],
@@ -94,7 +87,9 @@ export const editorSnapshotAtom = atom(
   }
 );
 
-export const canUndoAtom = atom(get => get(editorHistoryStateAtom).past.length > 0);
+export const canUndoAtom = atom(
+  get => get(editorHistoryStateAtom).past.length > 0
+);
 export const canRedoAtom = atom(
   get => get(editorHistoryStateAtom).future.length > 0
 );
@@ -128,10 +123,7 @@ export const recordEditorHistoryAtom = atom(
   }
 );
 
-export const snapshotsEqual = (
-  left: EditorSnapshot,
-  right: EditorSnapshot
-) =>
+export const snapshotsEqual = (left: EditorSnapshot, right: EditorSnapshot) =>
   left.tool === right.tool &&
   left.selectedControlPointId === right.selectedControlPointId &&
   left.selectedIslandId === right.selectedIslandId &&
@@ -167,14 +159,13 @@ export const remapSnapshotForTransition = (
 
     return {
       ...snapshot,
-      polygonDraft:
-        snapshot.polygonDraft?.id
-          ? {
-              ...snapshot.polygonDraft,
-              id: remapId(snapshot.polygonDraft.id, originals, replacements)
-            }
-          : snapshot.polygonDraft,
       polygonControlPointDrafts: snapshot.polygonControlPointDrafts,
+      polygonDraft: snapshot.polygonDraft?.id
+        ? {
+            ...snapshot.polygonDraft,
+            id: remapId(snapshot.polygonDraft.id, originals, replacements)
+          }
+        : snapshot.polygonDraft,
       selectedPolygonIds: snapshot.selectedPolygonIds.map(id =>
         remapId(id, originals, replacements)
       )
@@ -192,17 +183,12 @@ export const remapSnapshotForTransition = (
 
   return {
     ...snapshot,
-    controlPointDraft:
-      snapshot.controlPointDraft?.id
-        ? {
-            ...snapshot.controlPointDraft,
-            id: remapId(
-              snapshot.controlPointDraft.id,
-              originals,
-              replacements
-            )
-          }
-        : snapshot.controlPointDraft,
+    controlPointDraft: snapshot.controlPointDraft?.id
+      ? {
+          ...snapshot.controlPointDraft,
+          id: remapId(snapshot.controlPointDraft.id, originals, replacements)
+        }
+      : snapshot.controlPointDraft,
     polygonControlPointDrafts: snapshot.polygonControlPointDrafts.map(draft =>
       draft.id
         ? {

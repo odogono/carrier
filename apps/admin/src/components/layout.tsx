@@ -28,11 +28,11 @@ function NavLink({
 
   return (
     <Link
-      to={href}
       className={cn(
         'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
         isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
       )}
+      to={href}
     >
       <Icon className="h-4 w-4" />
       {label}
@@ -44,10 +44,10 @@ function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   return (
     <Button
-      variant="ghost"
-      size="sm"
       className="w-full justify-start"
       onClick={toggleTheme}
+      size="sm"
+      variant="ghost"
     >
       {theme === 'light' ? (
         <Moon className="mr-2 h-4 w-4" />

@@ -36,13 +36,13 @@ export function MapsListPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => client.maps.delete({ id }),
+    onError: () => {
+      toast.error('Failed to delete map');
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map deleted');
       setDeleteId(null);
-    },
-    onError: () => {
-      toast.error('Failed to delete map');
     }
   });
 
@@ -69,7 +69,7 @@ export function MapsListPage() {
       ) : maps.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12">
           <p className="text-muted-foreground">No maps yet</p>
-          <Link to="/maps/new" className="mt-4">
+          <Link className="mt-4" to="/maps/new">
             <Button variant="outline">
               <Plus className="mr-2 h-4 w-4" />
               Create your first map
@@ -95,9 +95,9 @@ export function MapsListPage() {
               <TableRow key={map.id}>
                 <TableCell>
                   <Link
-                    to="/maps/$id"
-                    params={{ id: map.id }}
                     className="font-medium hover:underline"
+                    params={{ id: map.id }}
+                    to="/maps/$id"
                   >
                     {map.name ?? (
                       <span className="text-muted-foreground italic">
@@ -143,16 +143,16 @@ export function MapsListPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <Link to="/maps/$id" params={{ id: map.id }}>
-                      <Button variant="ghost" size="icon" title="View details">
+                    <Link params={{ id: map.id }} to="/maps/$id">
+                      <Button size="icon" title="View details" variant="ghost">
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </Link>
                     <Button
-                      variant="ghost"
+                      onClick={() => setDeleteId(map.id)}
                       size="icon"
                       title="Delete"
-                      onClick={() => setDeleteId(map.id)}
+                      variant="ghost"
                     >
                       <Trash2 className="h-4 w-4 text-destructive-foreground" />
                     </Button>
@@ -165,8 +165,8 @@ export function MapsListPage() {
       )}
 
       <Dialog
-        open={!!deleteId}
         onOpenChange={open => !open && setDeleteId(null)}
+        open={!!deleteId}
       >
         <DialogContent>
           <DialogHeader>
@@ -179,13 +179,13 @@ export function MapsListPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteId(null)}>
+            <Button onClick={() => setDeleteId(null)} variant="outline">
               Cancel
             </Button>
             <Button
-              variant="destructive"
               disabled={deleteMutation.isPending}
               onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              variant="destructive"
             >
               {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>

@@ -1,7 +1,4 @@
-import type {
-  ControlPoint
-} from 'carrier-contracts/types';
-import { isInfiniteMap } from 'carrier-contracts/types';
+import { isInfiniteMap, type ControlPoint } from 'carrier-contracts/types';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { ArrowLeft } from 'lucide-react';
 import {
@@ -46,7 +43,10 @@ import { EditorToolbar } from './components/toolbar';
 import {
   canDeleteVertex,
   canSavePolygonDraft,
+  getExactSelectedIslands,
+  getIslandsBySelectedPolygons,
   mergeWorldBounds,
+  nextIslandPolygonSelection,
   nextOrderedSelection,
   pointInPolygon,
   polygonIntersectsBounds,
@@ -57,15 +57,16 @@ import {
   createIslandDraft,
   createPolygonDraft,
   expandBounds,
+  getBoundsCenter,
   isDraftDirty,
   translateControlPointDraft,
-  translatePolygonDraft
+  translateWorldPoint
 } from './helpers/drafts';
 import type {
   CanvasDragState,
-  DeleteTarget
+  DeleteTarget,
+  SourcePolygonLike
 } from './helpers/types';
-import type { SourcePolygonLike } from './helpers/types';
 import { useElementSize } from './hooks/use-element-size';
 import { useMapEditorActions } from './hooks/use-map-editor-actions';
 import {
@@ -109,10 +110,9 @@ export function MapEditorPage() {
   const {
     controlPointDraft,
     islandDraft,
-    polygonDraft,
     polygonControlPointDrafts,
+    polygonDraft,
     selectedControlPointId,
-    selectedIslandId,
     selectedPolygonIds,
     tool
   } = snapshot;
@@ -129,7 +129,10 @@ export function MapEditorPage() {
     reloadAll
   } = useMapEditorData(id);
 
-  const polygons = useMemo(() => polygonsQuery.data ?? [], [polygonsQuery.data]);
+  const polygons = useMemo(
+    () => polygonsQuery.data ?? [],
+    [polygonsQuery.data]
+  );
   const controlPoints = useMemo(
     () => controlPointsQuery.data ?? [],
     [controlPointsQuery.data]
@@ -138,6 +141,15 @@ export function MapEditorPage() {
     () => derivedIslandsQuery.data ?? [],
     [derivedIslandsQuery.data]
   );
+  const islandsByPolygonId = useMemo(() => {
+    const next = new Map<string, (typeof derivedIslands)[number]>();
+    for (const island of derivedIslands) {
+      for (const polygonId of island.sourcePolygonIds) {
+        next.set(polygonId, island);
+      }
+    }
+    return next;
+  }, [derivedIslands]);
 
   const selectedPolygon =
     selectedPolygonIds.length === 1
@@ -146,14 +158,42 @@ export function MapEditorPage() {
   const selectedControlPoint = selectedControlPointId
     ? (controlPoints.find(point => point.id === selectedControlPointId) ?? null)
     : null;
-  const selectedIsland = selectedIslandId
-    ? (derivedIslands.find(island => island.id === selectedIslandId) ?? null)
-    : null;
+  const selectedIslands = useMemo(
+    () => getIslandsBySelectedPolygons(derivedIslands, selectedPolygonIds),
+    [derivedIslands, selectedPolygonIds]
+  );
+  const exactSelectedIslands = useMemo(
+    () => getExactSelectedIslands(derivedIslands, selectedPolygonIds),
+    [derivedIslands, selectedPolygonIds]
+  );
+  const selectedIsland =
+    exactSelectedIslands.length === 1 ? exactSelectedIslands[0]! : null;
+  const selectedIslandIds = useMemo(
+    () => selectedIslands.map(island => island.id),
+    [selectedIslands]
+  );
 
   const highlightedIslandPolygonIds = useMemo(
-    () => new Set(selectedIsland?.sourcePolygonIds ?? []),
-    [selectedIsland]
+    () =>
+      new Set(exactSelectedIslands.flatMap(island => island.sourcePolygonIds)),
+    [exactSelectedIslands]
   );
+  const renderedControlPoints = useMemo(() => {
+    if (polygonControlPointDrafts.length === 0) {
+      return controlPoints;
+    }
+
+    const draftsById = new Map(
+      polygonControlPointDrafts
+        .filter(draft => draft.id)
+        .map(draft => [draft.id as string, draft])
+    );
+
+    return controlPoints.map(point => {
+      const draft = draftsById.get(point.id);
+      return draft ? { ...point, ...draft } : point;
+    });
+  }, [controlPoints, polygonControlPointDrafts]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -161,6 +201,9 @@ export function MapEditorPage() {
 
   useEffect(() => {
     if (dragState && dragSnapshotRef.current === null) {
+      if (dragState.kind === 'polygon') {
+        return;
+      }
       dragSnapshotRef.current = snapshotRef.current;
       return;
     }
@@ -178,16 +221,11 @@ export function MapEditorPage() {
 
   const updateSnapshot = useCallback(
     (
-      updater:
-        | EditorSnapshot
-        | ((current: EditorSnapshot) => EditorSnapshot),
+      updater: EditorSnapshot | ((current: EditorSnapshot) => EditorSnapshot),
       record = false
     ) => {
       const before = snapshotRef.current;
-      const after =
-        typeof updater === 'function'
-          ? updater(before)
-          : updater;
+      const after = typeof updater === 'function' ? updater(before) : updater;
 
       if (snapshotsEqual(before, after)) {
         return before;
@@ -222,10 +260,11 @@ export function MapEditorPage() {
       updateSnapshot(
         current => ({
           ...current,
+          islandDraft: null,
+          polygonControlPointDrafts: [],
           selectedControlPointId: null,
           selectedIslandId: null,
-          selectedPolygonIds: [],
-          polygonControlPointDrafts: []
+          selectedPolygonIds: []
         }),
         record
       );
@@ -233,14 +272,23 @@ export function MapEditorPage() {
     [updateSnapshot]
   );
 
-  const snapshotFieldSetter = <K extends keyof EditorSnapshot>(field: K) =>
-    (value: EditorSnapshot[K] | ((current: EditorSnapshot[K]) => EditorSnapshot[K]), record = false) => {
+  const snapshotFieldSetter =
+    <K extends keyof EditorSnapshot>(field: K) =>
+    (
+      value:
+        | EditorSnapshot[K]
+        | ((current: EditorSnapshot[K]) => EditorSnapshot[K]),
+      record = false
+    ) => {
       updateSnapshot(
         current => ({
           ...current,
-          [field]: typeof value === 'function'
-            ? (value as (current: EditorSnapshot[K]) => EditorSnapshot[K])(current[field])
-            : value
+          [field]:
+            typeof value === 'function'
+              ? (value as (current: EditorSnapshot[K]) => EditorSnapshot[K])(
+                  current[field]
+                )
+              : value
         }),
         record
       );
@@ -249,11 +297,32 @@ export function MapEditorPage() {
   const setPolygonDraft = snapshotFieldSetter('polygonDraft');
   const setControlPointDraft = snapshotFieldSetter('controlPointDraft');
   const setIslandDraft = snapshotFieldSetter('islandDraft');
-  const setSelectedPolygonIds = snapshotFieldSetter('selectedPolygonIds');
-  const setSelectedControlPointId = snapshotFieldSetter('selectedControlPointId');
-  const setSelectedIslandId = snapshotFieldSetter('selectedIslandId');
   const setPolygonControlPointDrafts = snapshotFieldSetter(
     'polygonControlPointDrafts'
+  );
+
+  const selectPolygonIds = useCallback(
+    (polygonIds: string[], record = true) => {
+      const nextPolygon =
+        polygonIds.length === 1
+          ? (polygons.find(polygon => polygon.id === polygonIds[0]) ?? null)
+          : null;
+
+      updateSnapshot(
+        current => ({
+          ...current,
+          controlPointDraft: null,
+          islandDraft: null,
+          polygonControlPointDrafts: [],
+          polygonDraft: nextPolygon ? createPolygonDraft(nextPolygon) : null,
+          selectedControlPointId: null,
+          selectedIslandId: null,
+          selectedPolygonIds: polygonIds
+        }),
+        record
+      );
+    },
+    [polygons, updateSnapshot]
   );
 
   useEffect(() => {
@@ -268,7 +337,7 @@ export function MapEditorPage() {
     }
 
     toast.error('Only infinite-vector maps can open the editor');
-    void navigate({ to: '/maps/$id', params: { id } });
+    void navigate({ params: { id }, to: '/maps/$id' });
   }, [id, map, navigate]);
 
   const {
@@ -328,6 +397,41 @@ export function MapEditorPage() {
     size.height,
     size.width
   ]);
+
+  const selectIsland = useCallback(
+    (
+      islandId: string,
+      options?: {
+        additive?: boolean;
+        recenter?: boolean;
+      }
+    ) => {
+      const island = derivedIslands.find(
+        candidate => candidate.id === islandId
+      );
+      if (!island) {
+        return;
+      }
+
+      const nextSelection = nextIslandPolygonSelection(
+        snapshotRef.current.selectedPolygonIds,
+        island.sourcePolygonIds,
+        options?.additive ?? false
+      );
+      selectPolygonIds(nextSelection);
+      setIslandDraft(
+        nextSelection.length === island.sourcePolygonIds.length &&
+          island.sourcePolygonIds.every(id => nextSelection.includes(id))
+          ? createIslandDraft(island)
+          : null
+      );
+
+      if (options?.recenter) {
+        recenterOnWorldPoint(getBoundsCenter(island.bbox));
+      }
+    },
+    [derivedIslands, recenterOnWorldPoint, selectPolygonIds, setIslandDraft]
+  );
 
   const chunkRange = map
     ? getVisibleChunkRange(viewport, size.width, size.height, map)
@@ -411,8 +515,8 @@ export function MapEditorPage() {
   const resetPolygonDraft = useCallback(() => {
     updateSnapshot(current => ({
       ...current,
-      polygonDraft: null,
       polygonControlPointDrafts: [],
+      polygonDraft: null,
       tool: 'select'
     }));
   }, [updateSnapshot]);
@@ -431,13 +535,17 @@ export function MapEditorPage() {
       return;
     }
 
-    updateSnapshot(current => ({
-      ...current,
-      controlPointDraft: null,
-      polygonDraft: createPolygonDraft(selectedPolygon),
-      polygonControlPointDrafts: [],
-      tool: 'edit-vertices'
-    }), true);
+    updateSnapshot(
+      current => ({
+        ...current,
+        controlPointDraft: null,
+        islandDraft: null,
+        polygonControlPointDrafts: [],
+        polygonDraft: createPolygonDraft(selectedPolygon),
+        tool: 'edit-vertices'
+      }),
+      true
+    );
   }, [selectedPolygon, updateSnapshot]);
 
   const {
@@ -446,6 +554,7 @@ export function MapEditorPage() {
     pendingAction,
     redo,
     saveControlPointDraft,
+    saveDraggedSelection,
     saveIslandDraft,
     savePolygonDraft,
     undo
@@ -462,9 +571,9 @@ export function MapEditorPage() {
     invalidateTerrainMutation,
     islandDraft,
     map,
-    polygons,
-    polygonDraft,
     polygonControlPointDrafts,
+    polygonDraft,
+    polygons,
     recordHistory,
     reloadAll,
     selectedControlPoint,
@@ -476,6 +585,37 @@ export function MapEditorPage() {
     setIslandDraft,
     setSnapshot
   });
+  const overlayPolygons = useMemo(
+    () =>
+      polygons.filter(
+        polygon =>
+          polygonDraft?.kind !== 'edit' || polygon.id !== polygonDraft.id
+      ),
+    [polygons, polygonDraft]
+  );
+
+  const renderedPolygons = useMemo(() => {
+    if (dragState?.kind !== 'polygon') {
+      return overlayPolygons;
+    }
+
+    const previewById = new Map(
+      dragState.polygons.map(polygon => [
+        polygon.id,
+        {
+          id: polygon.id,
+          params: polygon.params,
+          vertices: polygon.vertices.map(vertex =>
+            translateWorldPoint(vertex, dragState.currentDelta)
+          )
+        }
+      ])
+    );
+
+    return overlayPolygons.map(
+      polygon => previewById.get(polygon.id) ?? polygon
+    );
+  }, [dragState, overlayPolygons]);
 
   const handleWheelCapture = useCallback(
     (event: WheelEvent<HTMLDivElement>) => {
@@ -568,20 +708,14 @@ export function MapEditorPage() {
         };
 
         suppressCanvasClickRef.current = true;
-        suppressPolygonClickRef.current = dragState.polygonId;
-        setPolygonDraft(draft =>
-          draft
+        suppressPolygonClickRef.current = dragState.polygons[0]?.id ?? null;
+        setDragState(current =>
+          current?.kind === 'polygon'
             ? {
-                ...translatePolygonDraft(
-                  {
-                    ...draft,
-                    vertices: dragState.originalVertices
-                  },
-                  delta
-                ),
-                selectedVertexIndex: draft.selectedVertexIndex
+                ...current,
+                currentDelta: delta
               }
-            : draft
+            : current
         );
         setPolygonControlPointDrafts(
           dragState.controlPoints.map(controlPoint =>
@@ -619,10 +753,9 @@ export function MapEditorPage() {
     [
       dragState,
       onViewportPointerMove,
-      polygonDraft,
       setControlPointDraft,
+      setDragState,
       setPolygonControlPointDrafts,
-      setPolygonDraft,
       selectedControlPoint,
       toWorldPoint
     ]
@@ -632,13 +765,13 @@ export function MapEditorPage() {
     const before = dragSnapshotRef.current;
     const after = snapshotRef.current;
 
-      if (before && !snapshotsEqual(before, after)) {
-        recordHistory({
-          after,
-          before,
-          remoteTransitions: []
-        });
-      }
+    if (before && !snapshotsEqual(before, after)) {
+      recordHistory({
+        after,
+        before,
+        remoteTransitions: []
+      });
+    }
 
     dragSnapshotRef.current = null;
     setDragState(null);
@@ -672,6 +805,7 @@ export function MapEditorPage() {
               current => ({
                 ...current,
                 controlPointDraft: null,
+                islandDraft: null,
                 polygonControlPointDrafts: [],
                 polygonDraft: polygon ? createPolygonDraft(polygon) : null,
                 selectedControlPointId: null,
@@ -686,6 +820,7 @@ export function MapEditorPage() {
               current => ({
                 ...current,
                 controlPointDraft: null,
+                islandDraft: null,
                 polygonControlPointDrafts: [],
                 polygonDraft: null,
                 selectedControlPointId: null,
@@ -700,6 +835,53 @@ export function MapEditorPage() {
         }
       }
 
+      if (dragState?.kind === 'polygon') {
+        const moved =
+          Math.abs(dragState.currentDelta.x) >= 0.001 ||
+          Math.abs(dragState.currentDelta.z) >= 0.001;
+
+        if (moved) {
+          const dragSelection = {
+            afterControlPoints: dragState.controlPoints.map(controlPoint =>
+              translateControlPointDraft(controlPoint, dragState.currentDelta)
+            ),
+            afterPolygons: dragState.polygons.map(polygon => ({
+              ...polygon,
+              vertices: polygon.vertices.map(vertex =>
+                translateWorldPoint(vertex, dragState.currentDelta)
+              )
+            })),
+            beforeControlPoints: dragState.controlPoints
+              .map(
+                controlPoint =>
+                  controlPoints.find(point => point.id === controlPoint.id) ??
+                  null
+              )
+              .filter((point): point is ControlPoint => point !== null),
+            beforePolygons: dragState.polygons
+              .map(
+                polygon =>
+                  polygons.find(candidate => candidate.id === polygon.id) ??
+                  null
+              )
+              .filter(
+                (polygon): polygon is (typeof polygons)[number] =>
+                  polygon !== null
+              )
+          };
+
+          void saveDraggedSelection(dragSelection).finally(() => {
+            setPolygonControlPointDrafts([]);
+            setDragState(null);
+          });
+        } else {
+          setPolygonControlPointDrafts([]);
+          setDragState(null);
+        }
+        onViewportPointerUp(event);
+        return;
+      }
+
       releaseCanvasDrag();
       onViewportPointerUp(event);
     },
@@ -709,6 +891,9 @@ export function MapEditorPage() {
       onViewportPointerUp,
       polygons,
       releaseCanvasDrag,
+      saveDraggedSelection,
+      setDragState,
+      setPolygonControlPointDrafts,
       setPolygonDraft,
       updateSnapshot
     ]
@@ -755,6 +940,7 @@ export function MapEditorPage() {
               x: world.x,
               z: world.z
             },
+            islandDraft: null,
             polygonControlPointDrafts: [],
             selectedControlPointId: null,
             selectedIslandId: null,
@@ -789,31 +975,37 @@ export function MapEditorPage() {
         return;
       }
 
-      updateSnapshot(
-        current => {
-          const nextSelection = nextOrderedSelection(
-            current.selectedPolygonIds,
-            polygon.id,
-            event.shiftKey
-          );
+      const island = islandsByPolygonId.get(polygon.id);
+      if (island) {
+        selectIsland(island.id, {
+          additive: event.shiftKey
+        });
+        return;
+      }
 
-          return {
-            ...current,
-            controlPointDraft: null,
-            polygonControlPointDrafts: [],
-            polygonDraft:
-              event.shiftKey || nextSelection.length !== 1
-                ? null
-                : createPolygonDraft(polygon),
-            selectedControlPointId: null,
-            selectedIslandId: null,
-            selectedPolygonIds: nextSelection
-          };
-        },
-        true
-      );
+      updateSnapshot(current => {
+        const nextSelection = nextOrderedSelection(
+          current.selectedPolygonIds,
+          polygon.id,
+          event.shiftKey
+        );
+
+        return {
+          ...current,
+          controlPointDraft: null,
+          islandDraft: null,
+          polygonControlPointDrafts: [],
+          polygonDraft:
+            event.shiftKey || nextSelection.length !== 1
+              ? null
+              : createPolygonDraft(polygon),
+          selectedControlPointId: null,
+          selectedIslandId: null,
+          selectedPolygonIds: nextSelection
+        };
+      }, true);
     },
-    [tool, updateSnapshot]
+    [islandsByPolygonId, selectIsland, tool, updateSnapshot]
   );
 
   const handlePolygonPointerDown = useCallback(
@@ -827,31 +1019,50 @@ export function MapEditorPage() {
       if (
         tool !== 'select' ||
         event.shiftKey ||
-        selectedPolygon?.id !== polygon.id
+        !selectedPolygonIds.includes(polygon.id)
       ) {
         return;
       }
 
-      const editablePolygon =
-        polygonDraft?.kind === 'edit' && polygonDraft.id === polygon.id
-          ? polygonDraft
-          : createPolygonDraft(polygon);
+      const selectedPolygons = selectedPolygonIds
+        .map(id => polygons.find(candidate => candidate.id === id))
+        .filter(
+          (candidate): candidate is (typeof polygons)[number] =>
+            candidate !== undefined
+        );
+      const selectedPolygonControlPoints = controlPoints.filter(point =>
+        selectedPolygons.some(selectedCandidate =>
+          pointInPolygon(point, selectedCandidate.vertices)
+        )
+      );
 
       interactionRef.current?.setPointerCapture(event.pointerId);
       setDragState({
-        controlPoints: controlPoints
-          .filter(point => pointInPolygon(point, editablePolygon.vertices))
-          .map(point => createControlPointDraft(point)),
+        controlPoints: selectedPolygonControlPoints.map(point =>
+          createControlPointDraft(point)
+        ),
+        currentDelta: { x: 0, z: 0 },
         kind: 'polygon',
-        originalVertices: editablePolygon.vertices.map(vertex => ({ ...vertex })),
         pointerId: event.pointerId,
-        polygonId: polygon.id,
+        polygons: selectedPolygons.map(selectedCandidate => ({
+          id: selectedCandidate.id,
+          params: selectedCandidate.params,
+          vertices: selectedCandidate.vertices.map(vertex => ({ ...vertex }))
+        })),
         startPoint: toWorldPoint(event)
       });
       suppressCanvasClickRef.current = false;
       suppressPolygonClickRef.current = null;
     },
-    [controlPoints, interactionRef, polygonDraft, selectedPolygon, setDragState, toWorldPoint, tool]
+    [
+      controlPoints,
+      interactionRef,
+      polygons,
+      selectedPolygonIds,
+      setDragState,
+      toWorldPoint,
+      tool
+    ]
   );
 
   const handleControlPointClick = useCallback(
@@ -864,6 +1075,7 @@ export function MapEditorPage() {
         current => ({
           ...current,
           controlPointDraft: null,
+          islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft: null,
           selectedControlPointId: point.id,
@@ -893,6 +1105,7 @@ export function MapEditorPage() {
         current => ({
           ...current,
           controlPointDraft: null,
+          islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft: null,
           selectedControlPointId: point.id,
@@ -903,8 +1116,8 @@ export function MapEditorPage() {
       );
       setDragState({
         kind: 'control-point',
-        pointId: point.id,
-        pointerId: event.pointerId
+        pointerId: event.pointerId,
+        pointId: point.id
       });
     },
     [interactionRef, setDragState, tool, updateSnapshot]
@@ -1049,9 +1262,6 @@ export function MapEditorPage() {
 
   const canApplyUnionLike = selectedPolygonIds.length >= 2 && !polygonDraft;
   const canApplyDifference = selectedPolygonIds.length === 2 && !polygonDraft;
-  const overlayPolygons = polygons.filter(
-    polygon => polygonDraft?.kind !== 'edit' || polygon.id !== polygonDraft.id
-  );
 
   if (mapQuery.isLoading) {
     return <div className="text-muted-foreground">Loading editor...</div>;
@@ -1064,8 +1274,8 @@ export function MapEditorPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/maps/$id" params={{ id }}>
-          <Button variant="ghost" size="icon">
+        <Link params={{ id }} to="/maps/$id">
+          <Button size="icon" variant="ghost">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
@@ -1091,8 +1301,9 @@ export function MapEditorPage() {
             current => ({
               ...current,
               controlPointDraft: null,
-              polygonDraft: null,
+              islandDraft: null,
               polygonControlPointDrafts: [],
+              polygonDraft: null,
               selectedControlPointId: null,
               selectedIslandId: null,
               selectedPolygonIds: [],
@@ -1106,8 +1317,9 @@ export function MapEditorPage() {
             current => ({
               ...current,
               controlPointDraft: null,
-              polygonDraft: createPolygonDraft(),
+              islandDraft: null,
               polygonControlPointDrafts: [],
+              polygonDraft: createPolygonDraft(),
               selectedControlPointId: null,
               selectedIslandId: null,
               selectedPolygonIds: [],
@@ -1131,14 +1343,12 @@ export function MapEditorPage() {
           commitDrawPolygon={commitDrawPolygon}
           containerRef={containerRef}
           controlPointDraft={controlPointDraft}
-          controlPoints={controlPoints}
+          controlPoints={renderedControlPoints}
           dragState={dragState}
           fitToView={fitToView}
           highlightedIslandPolygonIds={highlightedIslandPolygonIds}
           interactionRef={interactionRef}
           map={map}
-          onControlPointClick={handleControlPointClick}
-          onControlPointPointerDown={handleControlPointPointerDown}
           onCanvasClick={handleCanvasClick}
           onCanvasKeyDown={handleKeyDown}
           onCanvasPointerCancel={handleCanvasPointerCancel}
@@ -1146,20 +1356,22 @@ export function MapEditorPage() {
           onCanvasPointerLeave={handleCanvasPointerLeave}
           onCanvasPointerMove={handleCanvasPointerMove}
           onCanvasPointerUp={handleCanvasPointerUp}
+          onControlPointClick={handleControlPointClick}
+          onControlPointPointerDown={handleControlPointPointerDown}
           onPolygonClick={handlePolygonClick}
           onPolygonPointerDown={handlePolygonPointerDown}
           onWheel={onWheel}
           onWheelCapture={handleWheelCapture}
-          overlayPolygons={overlayPolygons}
+          overlayPolygons={renderedPolygons}
           polygonDraft={polygonDraft}
           selectedControlPointId={selectedControlPointId}
           selectedPolygonIds={selectedPolygonIds}
           setDragState={setDragState}
           setPolygonDraft={setPolygonDraft}
           size={size}
+          tool={tool}
           toScreenPoint={toScreenPoint}
           toWorldPoint={toWorldPoint}
-          tool={tool}
           viewport={viewport}
           zoomIn={zoomIn}
           zoomOut={zoomOut}
@@ -1177,34 +1389,33 @@ export function MapEditorPage() {
           derivedIslands={derivedIslands}
           islandDraft={islandDraft}
           islandInspectorDraft={islandInspectorDraft}
-          overviewBounds={overviewBounds}
-          overviewClusters={overviewQuery.data?.clusters ?? []}
-          polygonDirty={polygonDirty}
-          polygonDraft={polygonDraft}
-          selectedControlPoint={selectedControlPoint}
-          selectedIsland={selectedIsland}
-          selectedIslandId={selectedIslandId}
-          selectedPolygon={selectedPolygon}
-          setControlPointDraft={setControlPointDraft}
-          setDeleteTarget={setDeleteTarget}
-          setIslandDraft={setIslandDraft}
-          setPolygonDraft={setPolygonDraft}
-          setSelectedControlPointId={setSelectedControlPointId}
-          setSelectedIslandId={setSelectedIslandId}
-          setSelectedPolygonIds={setSelectedPolygonIds}
           onRecenter={recenterOnWorldPoint}
           onResetControlPointDraft={resetControlPointDraft}
           onResetPolygonDraft={resetPolygonDraft}
           onSaveControlPointDraft={() => void saveControlPointDraft()}
           onSaveIslandDraft={() => void saveIslandDraft()}
           onSavePolygonDraft={() => void savePolygonDraft()}
+          onSelectIsland={selectIsland}
+          overviewBounds={overviewBounds}
+          overviewClusters={overviewQuery.data?.clusters ?? []}
+          polygonDirty={polygonDirty}
+          polygonDraft={polygonDraft}
+          selectedControlPoint={selectedControlPoint}
+          selectedIsland={selectedIsland}
+          selectedIslandCount={exactSelectedIslands.length}
+          selectedIslandIds={selectedIslandIds}
+          selectedPolygon={selectedPolygon}
+          setControlPointDraft={setControlPointDraft}
+          setDeleteTarget={setDeleteTarget}
+          setIslandDraft={setIslandDraft}
+          setPolygonDraft={setPolygonDraft}
           viewportBounds={viewportWorldBounds}
         />
       </div>
 
       <Dialog
-        open={deleteTarget !== null}
         onOpenChange={() => setDeleteTarget(null)}
+        open={deleteTarget !== null}
       >
         <DialogContent>
           <DialogHeader>

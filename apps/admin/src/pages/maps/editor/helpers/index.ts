@@ -1,5 +1,6 @@
 import type {
   ControlPoint,
+  DerivedIsland,
   MapMetadata,
   SourcePolygonParams,
   WorldBounds,
@@ -72,6 +73,62 @@ export const nextOrderedSelection = (
   return [...selection, id];
 };
 
+export const nextIslandPolygonSelection = (
+  selection: readonly string[],
+  islandPolygonIds: readonly string[],
+  additive: boolean
+) => {
+  if (!additive) {
+    return [...islandPolygonIds];
+  }
+
+  const selectionSet = new Set(selection);
+  const islandSet = new Set(islandPolygonIds);
+  const allSelected = islandPolygonIds.every(id => selectionSet.has(id));
+
+  if (allSelected) {
+    return selection.filter(id => !islandSet.has(id));
+  }
+
+  return [
+    ...selection,
+    ...islandPolygonIds.filter(id => !selectionSet.has(id))
+  ];
+};
+
+export const getIslandsBySelectedPolygons = <
+  T extends Pick<DerivedIsland, 'id' | 'sourcePolygonIds'>
+>(
+  islands: readonly T[],
+  selectedPolygonIds: readonly string[]
+) => {
+  const selectionSet = new Set(selectedPolygonIds);
+  return islands.filter(
+    island =>
+      island.sourcePolygonIds.length > 0 &&
+      island.sourcePolygonIds.every(id => selectionSet.has(id))
+  );
+};
+
+export const getExactSelectedIslands = <
+  T extends Pick<DerivedIsland, 'id' | 'sourcePolygonIds'>
+>(
+  islands: readonly T[],
+  selectedPolygonIds: readonly string[]
+) => {
+  const selectedIslands = getIslandsBySelectedPolygons(
+    islands,
+    selectedPolygonIds
+  );
+  const selectedIslandsPolygonCount = new Set(
+    selectedIslands.flatMap(island => island.sourcePolygonIds)
+  ).size;
+
+  return selectedIslandsPolygonCount === selectedPolygonIds.length
+    ? selectedIslands
+    : [];
+};
+
 export const mergeWorldBounds = (
   left: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null,
   right: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null
@@ -130,14 +187,18 @@ export const pointInPolygon = (
 ) => {
   let inside = false;
 
-  for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index++) {
+  for (
+    let index = 0, previous = vertices.length - 1;
+    index < vertices.length;
+    previous = index++
+  ) {
     const current = vertices[index]!;
     const prior = vertices[previous]!;
     const intersects =
       current.z > point.z !== prior.z > point.z &&
       point.x <
         ((prior.x - current.x) * (point.z - current.z)) /
-          ((prior.z - current.z) || Number.EPSILON) +
+          (prior.z - current.z || Number.EPSILON) +
           current.x;
 
     if (intersects) {
@@ -193,7 +254,7 @@ export const segmentsIntersect = (
     return true;
   }
 
-  return (first > 0) !== (second > 0) && (third > 0) !== (fourth > 0);
+  return first > 0 !== second > 0 && third > 0 !== fourth > 0;
 };
 
 export const polygonIntersectsBounds = (
@@ -220,16 +281,19 @@ export const polygonIntersectsBounds = (
     return true;
   }
 
-  const edges = corners.map((corner, index) => [
-    corner,
-    corners[(index + 1) % corners.length]!
-  ] as const);
+  const edges = corners.map(
+    (corner, index) => [corner, corners[(index + 1) % corners.length]!] as const
+  );
 
   for (let index = 0; index < vertices.length; index += 1) {
     const start = vertices[index]!;
     const end = vertices[(index + 1) % vertices.length]!;
 
-    if (edges.some(([edgeStart, edgeEnd]) => segmentsIntersect(start, end, edgeStart, edgeEnd))) {
+    if (
+      edges.some(([edgeStart, edgeEnd]) =>
+        segmentsIntersect(start, end, edgeStart, edgeEnd)
+      )
+    ) {
       return true;
     }
   }
