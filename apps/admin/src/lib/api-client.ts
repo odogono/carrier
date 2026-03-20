@@ -11,8 +11,10 @@ type ClientContext = {
 
 declare const __API_URL__: string | undefined;
 
-// Production: `build.ts` defines __API_URL__. Dev: Bun inlines `process.env.PUBLIC_API_URL`
-// when `bunfig.toml` sets `[serve.static] env = "PUBLIC_*"` (used by Playwright).
+// Production: `build.ts` defines __API_URL__. Dev: `bun run dev` loads `dev.defaults.env`
+// so `PUBLIC_API_URL` is always set (possibly empty); Bun inlines it when `bunfig.toml` has
+// `[serve.static] env = "PUBLIC_*"`. Avoid `bun ./index.html` without `--env-file=...` or you
+// get `ReferenceError: process is not defined` in the browser.
 const apiUrl =
   (typeof __API_URL__ !== 'undefined' && __API_URL__) ||
   process.env.PUBLIC_API_URL ||

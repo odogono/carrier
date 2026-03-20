@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "type": "module",
   "scripts": {
-    "dev": "bun ./index.html",
+    "dev": "bun --env-file=dev.defaults.env ./index.html",
     "build": "bun run build.ts",
     "format": "prettier --write src",
     "format:check": "prettier --check src",

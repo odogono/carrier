@@ -7,7 +7,7 @@
 
 ## Commands
 
-- `bun run dev` — admin dev server (default port **5179**, see `bunfig.toml`).
+- `bun run dev` — admin dev server (default port **5179**, see `bunfig.toml`; uses `dev.defaults.env` so `PUBLIC_API_URL` is always defined for Bun’s client bundle inliner).
 - `bun run build` — production build to `dist/`.
 - `bun run test` — unit tests (Bun test runner).
 - `bun run test:e2e` — Playwright E2E (starts API + admin on **e2e ports** unless `CI` is set and servers are reused).
@@ -23,7 +23,7 @@ E2E specs live under `e2e/` as `*.e2e.ts` so Bun’s test runner does not pick t
 | Normal `dev`   | 5179  | 6021 (client default in `src/lib/api-client.ts`) |
 | Playwright E2E | 5279  | 16021 |
 
-Override E2E ports with `E2E_ADMIN_PORT` / `E2E_API_PORT`. Playwright sets `PUBLIC_API_URL` and `BUN_CONFIG=./bunfig.e2e.toml` on the admin process so the app calls the e2e API; the API process gets `API_PORT` and `TRUSTED_ORIGINS=http://localhost:<E2E_ADMIN_PORT>` for CORS.
+Override E2E ports with `E2E_ADMIN_PORT` / `E2E_API_PORT`. Playwright sets `PUBLIC_API_URL` on the admin process (overriding `dev.defaults.env`) so the app calls the e2e API; the API process gets `API_PORT` and `TRUSTED_ORIGINS=http://localhost:<E2E_ADMIN_PORT>` for CORS.
 
 Point tests at an existing admin URL with `PLAYWRIGHT_BASE_URL` (and start servers yourself; set `CI=1` to skip `reuseExistingServer` behavior if you need strict isolation).
 

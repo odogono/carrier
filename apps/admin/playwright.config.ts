@@ -42,7 +42,7 @@ export default defineConfig({
       url: apiHealthUrl
     },
     {
-      command: `bun ./index.html --port=${E2E_ADMIN_PORT}`,
+      command: `bun --env-file=dev.defaults.env ./index.html --port=${E2E_ADMIN_PORT}`,
       cwd: adminDir,
       env: {
         ...process.env,
