@@ -1,4 +1,9 @@
-import { isInfiniteMap, type ControlPoint } from 'carrier-contracts/types';
+import {
+  isInfiniteMap,
+  type ControlPoint,
+  type DerivedIsland,
+  type SourcePolygon
+} from 'carrier-contracts/types';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { ArrowLeft } from 'lucide-react';
 import {
@@ -81,8 +86,14 @@ import {
   type EditorSnapshot
 } from './state/history';
 
-export function MapEditorPage() {
+const EMPTY_CLUSTERS: readonly never[] = [];
+
+export const MapEditorPage = () => {
   const { id } = useParams({ from: '/maps/$id/editor' });
+  return <MapEditorPageContent id={id} key={id} />;
+};
+
+const MapEditorPageContent = ({ id }: { id: string }) => {
   const navigate = useNavigate();
   const interactionRef = useRef<SVGSVGElement>(null);
   const initialFitRef = useRef(false);
@@ -215,9 +226,7 @@ export function MapEditorPage() {
 
   useEffect(() => {
     resetHistory(createEmptyEditorSnapshot());
-    setDeleteTarget(null);
-    setDragState(null);
-  }, [id, resetHistory]);
+  }, [resetHistory]);
 
   const updateSnapshot = useCallback(
     (
@@ -324,12 +333,6 @@ export function MapEditorPage() {
     },
     [polygons, updateSnapshot]
   );
-
-  useEffect(() => {
-    if (map && editorRevision === null) {
-      setEditorRevision(map.revision);
-    }
-  }, [editorRevision, map]);
 
   useEffect(() => {
     if (!map || isInfiniteMap(map)) {
@@ -548,6 +551,42 @@ export function MapEditorPage() {
     );
   }, [selectedPolygon, updateSnapshot]);
 
+  const beginControlPoint = useCallback(() => {
+    updateSnapshot(
+      current => ({
+        ...current,
+        controlPointDraft: null,
+        islandDraft: null,
+        polygonControlPointDrafts: [],
+        polygonDraft: null,
+        selectedControlPointId: null,
+        selectedIslandId: null,
+        selectedPolygonIds: [],
+        tool: 'place-control-point'
+      }),
+      true
+    );
+  }, [updateSnapshot]);
+
+  const beginDrawPolygon = useCallback(() => {
+    updateSnapshot(
+      current => ({
+        ...current,
+        controlPointDraft: null,
+        islandDraft: null,
+        polygonControlPointDrafts: [],
+        polygonDraft: createPolygonDraft(),
+        selectedControlPointId: null,
+        selectedIslandId: null,
+        selectedPolygonIds: [],
+        tool: 'draw-polygon'
+      }),
+      true
+    );
+  }, [updateSnapshot]);
+
+  const activeEditorRevision = editorRevision ?? map?.revision ?? null;
+
   const {
     applyBooleanOperation,
     confirmDelete,
@@ -562,7 +601,7 @@ export function MapEditorPage() {
     controlPointDraft,
     controlPoints,
     deleteTarget,
-    editorRevision,
+    editorRevision: activeEditorRevision,
     fitToWorldBounds,
     getHistoryState,
     historySnapshot: snapshot,
@@ -753,9 +792,11 @@ export function MapEditorPage() {
     [
       dragState,
       onViewportPointerMove,
+      polygonDraft,
       setControlPointDraft,
       setDragState,
       setPolygonControlPointDrafts,
+      setPolygonDraft,
       selectedControlPoint,
       toWorldPoint
     ]
@@ -887,6 +928,7 @@ export function MapEditorPage() {
     },
     [
       clearSelections,
+      controlPoints,
       dragState,
       onViewportPointerUp,
       polygons,
@@ -1262,6 +1304,26 @@ export function MapEditorPage() {
 
   const canApplyUnionLike = selectedPolygonIds.length >= 2 && !polygonDraft;
   const canApplyDifference = selectedPolygonIds.length === 2 && !polygonDraft;
+  const hasUnsavedChanges =
+    polygonDirty || controlPointDraft !== null || islandDraft !== null;
+  const toolLabel = getToolLabel(tool);
+  const selectionSummary = getSelectionSummary({
+    polygonDraft,
+    selectedControlPoint,
+    selectedIsland,
+    selectedIslandCount: exactSelectedIslands.length,
+    selectedPolygon,
+    selectedPolygonCount: selectedPolygonIds.length,
+    tool
+  });
+  const nextActionHint = getNextActionHint({
+    polygonDraft,
+    selectedControlPoint: Boolean(selectedControlPoint),
+    selectedIslandCount: exactSelectedIslands.length,
+    selectedPolygon: Boolean(selectedPolygon),
+    selectedPolygonCount: selectedPolygonIds.length,
+    tool
+  });
 
   if (mapQuery.isLoading) {
     return <div className="text-muted-foreground">Loading editor...</div>;
@@ -1286,48 +1348,57 @@ export function MapEditorPage() {
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
         <Badge variant="secondary">
-          Revision {editorRevision ?? map.revision}
+          Revision {activeEditorRevision}
+        </Badge>
+        <Badge
+          className={
+            pendingAction
+              ? 'border-amber-400/40 bg-amber-500/10 text-amber-200'
+              : hasUnsavedChanges
+                ? 'border-sky-400/40 bg-sky-500/10 text-sky-100'
+                : undefined
+          }
+          variant={pendingAction || hasUnsavedChanges ? 'outline' : 'secondary'}
+        >
+          {pendingAction
+            ? 'Saving changes…'
+            : hasUnsavedChanges
+              ? 'Unsaved changes'
+              : 'All changes saved'}
         </Badge>
       </div>
 
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+        <StatusPanel
+          detail="Switch tools without losing your current viewport."
+          label="Mode"
+          value={toolLabel}
+        />
+        <StatusPanel
+          detail="Selection state drives the inspector and boolean tools."
+          label="Selection"
+          value={selectionSummary}
+        />
+        <StatusPanel
+          detail={
+            pendingAction ? 'Mutation in progress.' : 'Immediate next step'
+          }
+          label="Next Action"
+          value={
+            pendingAction ? 'Please wait for the current save.' : nextActionHint
+          }
+        />
+      </div>
+
       <EditorToolbar
+        booleanActionsVisible={canApplyUnionLike}
         canApplyDifference={canApplyDifference}
         canApplyUnionLike={canApplyUnionLike}
         canRedo={canRedo}
         canUndo={canUndo}
         onApplyBoolean={operation => void applyBooleanOperation(operation)}
-        onBeginControlPoint={() => {
-          updateSnapshot(
-            current => ({
-              ...current,
-              controlPointDraft: null,
-              islandDraft: null,
-              polygonControlPointDrafts: [],
-              polygonDraft: null,
-              selectedControlPointId: null,
-              selectedIslandId: null,
-              selectedPolygonIds: [],
-              tool: 'place-control-point'
-            }),
-            true
-          );
-        }}
-        onBeginDrawPolygon={() => {
-          updateSnapshot(
-            current => ({
-              ...current,
-              controlPointDraft: null,
-              islandDraft: null,
-              polygonControlPointDrafts: [],
-              polygonDraft: createPolygonDraft(),
-              selectedControlPointId: null,
-              selectedIslandId: null,
-              selectedPolygonIds: [],
-              tool: 'draw-polygon'
-            }),
-            true
-          );
-        }}
+        onBeginControlPoint={beginControlPoint}
+        onBeginDrawPolygon={beginDrawPolygon}
         onBeginVertexEdit={beginVertexEdit}
         onRedo={() => void redo()}
         onSelectTool={nextTool => setTool(nextTool, true)}
@@ -1349,6 +1420,7 @@ export function MapEditorPage() {
           highlightedIslandPolygonIds={highlightedIslandPolygonIds}
           interactionRef={interactionRef}
           map={map}
+          nextActionHint={nextActionHint}
           onCanvasClick={handleCanvasClick}
           onCanvasKeyDown={handleKeyDown}
           onCanvasPointerCancel={handleCanvasPointerCancel}
@@ -1366,10 +1438,12 @@ export function MapEditorPage() {
           polygonDraft={polygonDraft}
           selectedControlPointId={selectedControlPointId}
           selectedPolygonIds={selectedPolygonIds}
+          selectionSummary={selectionSummary}
           setDragState={setDragState}
           setPolygonDraft={setPolygonDraft}
           size={size}
           tool={tool}
+          toolLabel={toolLabel}
           toScreenPoint={toScreenPoint}
           toWorldPoint={toWorldPoint}
           viewport={viewport}
@@ -1378,6 +1452,8 @@ export function MapEditorPage() {
         />
 
         <EditorSidebar
+          activeTool={tool}
+          activeToolLabel={toolLabel}
           controlPointDraft={controlPointDraft}
           counts={{
             controlPoints: overviewQuery.data?.counts.controlPoints ?? 0,
@@ -1389,6 +1465,9 @@ export function MapEditorPage() {
           derivedIslands={derivedIslands}
           islandDraft={islandDraft}
           islandInspectorDraft={islandInspectorDraft}
+          nextActionHint={nextActionHint}
+          onBeginControlPoint={beginControlPoint}
+          onBeginDrawPolygon={beginDrawPolygon}
           onRecenter={recenterOnWorldPoint}
           onResetControlPointDraft={resetControlPointDraft}
           onResetPolygonDraft={resetPolygonDraft}
@@ -1396,8 +1475,10 @@ export function MapEditorPage() {
           onSaveIslandDraft={() => void saveIslandDraft()}
           onSavePolygonDraft={() => void savePolygonDraft()}
           onSelectIsland={selectIsland}
+          onSelectTool={nextTool => setTool(nextTool, true)}
           overviewBounds={overviewBounds}
-          overviewClusters={overviewQuery.data?.clusters ?? []}
+          overviewClusters={overviewQuery.data?.clusters ?? EMPTY_CLUSTERS}
+          pendingAction={pendingAction !== null}
           polygonDirty={polygonDirty}
           polygonDraft={polygonDraft}
           selectedControlPoint={selectedControlPoint}
@@ -1405,6 +1486,8 @@ export function MapEditorPage() {
           selectedIslandCount={exactSelectedIslands.length}
           selectedIslandIds={selectedIslandIds}
           selectedPolygon={selectedPolygon}
+          selectedPolygonCount={selectedPolygonIds.length}
+          selectionSummary={selectionSummary}
           setControlPointDraft={setControlPointDraft}
           setDeleteTarget={setDeleteTarget}
           setIslandDraft={setIslandDraft}
@@ -1444,4 +1527,138 @@ export function MapEditorPage() {
       </Dialog>
     </div>
   );
-}
+};
+
+const StatusPanel = ({
+  detail,
+  label,
+  value
+}: {
+  detail: string;
+  label: string;
+  value: string;
+}) => (
+  <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
+    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      {label}
+    </div>
+    <div className="mt-2 text-lg font-semibold tracking-tight">{value}</div>
+    <div className="mt-1 text-sm text-muted-foreground">{detail}</div>
+  </div>
+);
+
+const getToolLabel = (tool: EditorTool) => {
+  switch (tool) {
+    case 'pan':
+      return 'Pan View';
+    case 'draw-polygon':
+      return 'Draw Polygon';
+    case 'edit-vertices':
+      return 'Edit Vertices';
+    case 'place-control-point':
+      return 'Add Control Point';
+    case 'select':
+    default:
+      return 'Select';
+  }
+};
+
+const getSelectionSummary = ({
+  polygonDraft,
+  selectedControlPoint,
+  selectedIsland,
+  selectedIslandCount,
+  selectedPolygon,
+  selectedPolygonCount,
+  tool
+}: {
+  polygonDraft: EditorSnapshot['polygonDraft'];
+  selectedControlPoint: ControlPoint | null;
+  selectedIsland: DerivedIsland | null;
+  selectedIslandCount: number;
+  selectedPolygon: SourcePolygon | null;
+  selectedPolygonCount: number;
+  tool: EditorTool;
+}) => {
+  if (selectedControlPoint) {
+    return '1 control point selected';
+  }
+
+  if (selectedPolygonCount > 1) {
+    return `${selectedPolygonCount} polygons selected`;
+  }
+
+  if (selectedPolygon) {
+    return '1 polygon selected';
+  }
+
+  if (selectedIslandCount > 1) {
+    return `${selectedIslandCount} islands selected`;
+  }
+
+  if (selectedIsland) {
+    return selectedIsland.name?.trim()
+      ? `Island: ${selectedIsland.name}`
+      : '1 island selected';
+  }
+
+  if (tool === 'draw-polygon' && polygonDraft) {
+    return polygonDraft.vertices.length > 0
+      ? `${polygonDraft.vertices.length} vertices in draft`
+      : 'Polygon draft started';
+  }
+
+  if (tool === 'place-control-point') {
+    return 'Ready to place a control point';
+  }
+
+  return 'Nothing selected';
+};
+
+const getNextActionHint = ({
+  polygonDraft,
+  selectedControlPoint,
+  selectedIslandCount,
+  selectedPolygon,
+  selectedPolygonCount,
+  tool
+}: {
+  polygonDraft: EditorSnapshot['polygonDraft'];
+  selectedControlPoint: boolean;
+  selectedIslandCount: number;
+  selectedPolygon: boolean;
+  selectedPolygonCount: number;
+  tool: EditorTool;
+}) => {
+  if (tool === 'draw-polygon') {
+    return polygonDraft && polygonDraft.vertices.length > 0
+      ? 'Click to place more vertices, then press Enter or click the first vertex to save.'
+      : 'Click on the canvas to place the first polygon vertex.';
+  }
+
+  if (tool === 'edit-vertices') {
+    return 'Drag a vertex to reshape the polygon or click an edge to insert a new one.';
+  }
+
+  if (tool === 'place-control-point') {
+    return 'Click on the canvas to place a new terrain control point.';
+  }
+
+  if (tool === 'pan') {
+    return 'Drag the canvas to move around the map and scroll to zoom.';
+  }
+
+  if (selectedControlPoint) {
+    return 'Adjust values in the inspector or drag the control point on the canvas.';
+  }
+
+  if (selectedPolygon) {
+    return 'Edit terrain parameters in the inspector or drag the selected polygon to move it.';
+  }
+
+  if (selectedIslandCount > 1 || selectedPolygonCount > 1) {
+    return 'Use boolean actions from the toolbar or drag the selected geometry together on the canvas.';
+  }
+
+  return 'Select geometry to inspect it, or start a new polygon or control point.';
+};

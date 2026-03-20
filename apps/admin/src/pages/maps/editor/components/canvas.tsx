@@ -14,8 +14,10 @@ import type {
 } from 'react';
 
 import { MapStage } from '@/components/map-viewer/map-stage';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Viewport } from '@/hooks/use-map-viewport';
+import { cn } from '@/lib/utils';
 
 import {
   canSavePolygonDraft,
@@ -41,6 +43,7 @@ type EditorCanvasProps = {
   highlightedIslandPolygonIds: Set<string>;
   interactionRef: RefObject<SVGSVGElement | null>;
   map: MapMetadata;
+  nextActionHint: string;
   onCanvasClick: (event: PointerEvent<SVGSVGElement>) => void;
   onCanvasKeyDown: (event: KeyboardEvent<SVGSVGElement>) => void;
   onCanvasPointerCancel: (event: PointerEvent<SVGSVGElement>) => void;
@@ -70,6 +73,7 @@ type EditorCanvasProps = {
   polygonDraft: PolygonDraft | null;
   selectedControlPointId: string | null;
   selectedPolygonIds: string[];
+  selectionSummary: string;
   setDragState: React.Dispatch<React.SetStateAction<CanvasDragState>>;
   setPolygonDraft: (
     value:
@@ -80,6 +84,7 @@ type EditorCanvasProps = {
   ) => void;
   size: { height: number; width: number };
   tool: EditorTool;
+  toolLabel: string;
   toScreenPoint: (point: Pick<WorldPoint, 'x' | 'z'>) => {
     x: number;
     z: number;
@@ -90,7 +95,7 @@ type EditorCanvasProps = {
   zoomOut: () => void;
 };
 
-export function EditorCanvas({
+export const EditorCanvas = ({
   chunks,
   commitDrawPolygon,
   containerRef,
@@ -101,6 +106,7 @@ export function EditorCanvas({
   highlightedIslandPolygonIds,
   interactionRef,
   map,
+  nextActionHint,
   onCanvasClick,
   onCanvasKeyDown,
   onCanvasPointerCancel,
@@ -118,16 +124,18 @@ export function EditorCanvas({
   polygonDraft,
   selectedControlPointId,
   selectedPolygonIds,
+  selectionSummary,
   setDragState,
   setPolygonDraft,
   size,
   tool,
+  toolLabel,
   toScreenPoint,
   toWorldPoint,
   viewport,
   zoomIn,
   zoomOut
-}: EditorCanvasProps) {
+}: EditorCanvasProps) => {
   const selectedPolygonSet = new Set(selectedPolygonIds);
   const zoomPercent = Math.round(viewport.zoom * 100);
   const showEditVertices =
@@ -143,13 +151,48 @@ export function EditorCanvas({
         )
       : (polygonDraft?.vertices ?? []);
   const marqueeBounds = dragState?.kind === 'marquee' ? dragState.bounds : null;
+  const multiSelectActive = selectedPolygonIds.length > 1;
+  const draftVertexCount = polygonDraft?.vertices.length ?? 0;
 
   return (
-    <div className="space-y-4">
-      <CardShell>
+    <div className="rounded-2xl border bg-card shadow-sm">
+      <div className="flex flex-col gap-4 p-4 md:p-5">
+        <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Active Workspace
+            </div>
+            <div className="text-2xl font-semibold tracking-tight">
+              {toolLabel}
+            </div>
+            <p className="text-sm text-muted-foreground">{nextActionHint}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              className="rounded-md px-3 py-1 text-[11px]"
+              variant="outline"
+            >
+              {selectionSummary}
+            </Badge>
+            <Badge
+              className={cn(
+                'rounded-md px-3 py-1 text-[11px]',
+                tool === 'draw-polygon' && draftVertexCount > 0
+                  ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
+                  : undefined
+              )}
+              variant="secondary"
+            >
+              {tool === 'draw-polygon'
+                ? `${draftVertexCount} draft vertices`
+                : `Zoom ${zoomPercent}%`}
+            </Badge>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-2">
           <div
-            className="relative h-[640px] w-full min-w-0 overflow-hidden rounded-md border bg-[#0a1320]"
+            className="relative h-[680px] w-full min-w-0 overflow-hidden rounded-xl border border-slate-800 bg-[#071220]"
             data-testid="editor-stage"
             ref={containerRef}
           >
@@ -166,6 +209,31 @@ export function EditorCanvas({
                   className="absolute inset-0"
                   onWheelCapture={onWheelCapture}
                 >
+                  <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(60%,420px)] flex-col gap-2">
+                    <div className="rounded-xl border border-slate-700/80 bg-slate-950/88 px-3 py-2 text-left shadow-lg backdrop-blur">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          className="rounded-md bg-sky-500/15 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-500/15"
+                          variant="secondary"
+                        >
+                          {toolLabel}
+                        </Badge>
+                        <span className="text-sm font-medium text-slate-50">
+                          {selectionSummary}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-slate-300">
+                        {nextActionHint}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800/90 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg backdrop-blur">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        <span>Scroll to zoom</span>
+                        <span>Drag to pan in pan mode</span>
+                        <span>Esc clears drafts or selection</span>
+                      </div>
+                    </div>
+                  </div>
                   <svg
                     className="absolute inset-0 outline-none"
                     height={size.height}
@@ -210,9 +278,11 @@ export function EditorCanvas({
                           data-polygon-id={polygon.id}
                           fill={
                             selected
-                              ? 'rgba(244, 114, 182, 0.24)'
+                              ? multiSelectActive
+                                ? 'rgba(168, 85, 247, 0.24)'
+                                : 'rgba(244, 114, 182, 0.26)'
                               : highlighted
-                                ? 'rgba(14, 165, 233, 0.22)'
+                                ? 'rgba(34, 211, 238, 0.18)'
                                 : 'rgba(255,255,255,0.08)'
                           }
                           key={polygon.id}
@@ -226,12 +296,17 @@ export function EditorCanvas({
                           points={points}
                           stroke={
                             selected
-                              ? '#f472b6'
+                              ? multiSelectActive
+                                ? '#a855f7'
+                                : '#f472b6'
                               : highlighted
-                                ? '#38bdf8'
+                                ? '#22d3ee'
                                 : 'rgba(255,255,255,0.4)'
                           }
-                          strokeWidth={selected ? 3 : 2}
+                          strokeDasharray={
+                            selected && multiSelectActive ? '10 6' : undefined
+                          }
+                          strokeWidth={selected ? 3.5 : highlighted ? 2.5 : 2}
                         />
                       );
                     })}
@@ -251,8 +326,8 @@ export function EditorCanvas({
                             <polygon
                               fill={
                                 polygonDraft.kind === 'create'
-                                  ? 'rgba(34,197,94,0.18)'
-                                  : 'rgba(250,204,21,0.18)'
+                                  ? 'rgba(34,197,94,0.22)'
+                                  : 'rgba(250,204,21,0.22)'
                               }
                               onClick={event => {
                                 if (!draftAsSource) {
@@ -280,7 +355,7 @@ export function EditorCanvas({
                                   ? '#22c55e'
                                   : '#facc15'
                               }
-                              strokeWidth={2}
+                              strokeWidth={3}
                             />
                             {previewDraftVertices.map((vertex, index) => {
                               const screen = toScreenPoint(vertex);
@@ -297,7 +372,7 @@ export function EditorCanvas({
                                       ? '#ffffff'
                                       : isFirst && tool === 'draw-polygon'
                                         ? '#86efac'
-                                        : '#0f172a'
+                                        : '#082f49'
                                   }
                                   key={`${vertex.x}:${vertex.z}:${index}`}
                                   onClick={event => {
@@ -348,9 +423,15 @@ export function EditorCanvas({
                                         : draft
                                     );
                                   }}
-                                  r={isFirst && tool === 'draw-polygon' ? 8 : 6}
+                                  r={
+                                    selected
+                                      ? 7
+                                      : isFirst && tool === 'draw-polygon'
+                                        ? 8
+                                        : 6
+                                  }
                                   stroke={selected ? '#22c55e' : '#ffffff'}
-                                  strokeWidth={2}
+                                  strokeWidth={selected ? 3 : 2}
                                 />
                               );
                             })}
@@ -406,8 +487,8 @@ export function EditorCanvas({
                                       );
                                     }}
                                     onPointerDown={STOP_PROPAGATION}
-                                    stroke="transparent"
-                                    strokeWidth={14}
+                                    stroke="rgba(250, 204, 21, 0.01)"
+                                    strokeWidth={18}
                                     x1={from.x}
                                     x2={to.x}
                                     y1={from.z}
@@ -427,7 +508,7 @@ export function EditorCanvas({
                           <circle
                             cx={screen.x}
                             cy={screen.z}
-                            fill={selected ? '#f97316' : '#e2e8f0'}
+                            fill={selected ? '#fb923c' : '#e2e8f0'}
                             onClick={event => {
                               STOP_PROPAGATION(event);
                               onControlPointClick(event, point);
@@ -435,9 +516,9 @@ export function EditorCanvas({
                             onPointerDown={event =>
                               onControlPointPointerDown(event, point)
                             }
-                            r={7}
-                            stroke="#0f172a"
-                            strokeWidth={2}
+                            r={selected ? 8 : 7}
+                            stroke={selected ? '#fff7ed' : '#0f172a'}
+                            strokeWidth={selected ? 3 : 2}
                           />
                           {(selected || controlPointDraft?.id === point.id) && (
                             <circle
@@ -452,9 +533,9 @@ export function EditorCanvas({
                                   map.resolution.metersPerTile) *
                                 viewport.zoom
                               }
-                              stroke="rgba(249,115,22,0.45)"
-                              strokeDasharray="8 6"
-                              strokeWidth={2}
+                              stroke="rgba(251,146,60,0.6)"
+                              strokeDasharray="10 6"
+                              strokeWidth={2.5}
                             />
                           )}
                         </g>
@@ -477,17 +558,17 @@ export function EditorCanvas({
                                 viewport.zoom
                               }
                               stroke="rgba(251,146,60,0.4)"
-                              strokeDasharray="8 6"
-                              strokeWidth={2}
+                              strokeDasharray="10 6"
+                              strokeWidth={2.5}
                             />
                             <circle
                               cx={screenDraft.x}
                               cy={screenDraft.z}
                               fill="#fb923c"
                               pointerEvents="none"
-                              r={8}
+                              r={9}
                               stroke="#fff7ed"
-                              strokeWidth={2}
+                              strokeWidth={3}
                             />
                           </>
                         );
@@ -519,9 +600,9 @@ export function EditorCanvas({
                       })()}
                   </svg>
                 </div>
-                <div className="absolute right-3 bottom-3 flex gap-1">
+                <div className="absolute right-3 bottom-3 z-10 flex gap-1 rounded-xl border border-slate-800/80 bg-slate-950/80 p-1 shadow-lg backdrop-blur">
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={zoomIn}
                     size="icon"
                     title="Zoom in"
@@ -530,7 +611,7 @@ export function EditorCanvas({
                     <Plus className="h-4 w-4" />
                   </Button>
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={zoomOut}
                     size="icon"
                     title="Zoom out"
@@ -539,7 +620,7 @@ export function EditorCanvas({
                     <Minus className="h-4 w-4" />
                   </Button>
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={fitToView}
                     size="icon"
                     title="Reset view"
@@ -551,35 +632,18 @@ export function EditorCanvas({
               </>
             )}
           </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Infinite · Zoom {zoomPercent}%</span>
-            <span>
-              {tool === 'draw-polygon'
-                ? 'Click to place vertices · Enter or first vertex to save · Esc to cancel'
-                : tool === 'pan'
-                  ? 'Drag to pan · Scroll to zoom · Delete removes selected items'
-                  : 'Click to select · Drag selected polygon to move · Drag empty space for marquee'}
-            </span>
+          <div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Infinite map</span>
+              <span>Zoom {zoomPercent}%</span>
+              {tool === 'draw-polygon' ? (
+                <span>{draftVertexCount} vertices in current draft</span>
+              ) : null}
+            </div>
+            <span>{nextActionHint}</span>
           </div>
         </div>
-      </CardShell>
-    </div>
-  );
-}
-
-function CardShell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-      <div className="flex flex-col space-y-1.5 p-6">
-        <h3 className="text-2xl font-semibold leading-none tracking-tight">
-          Terrain Editor
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Use pan for viewport movement, select for editing, and shift-click for
-          ordered boolean selection.
-        </p>
       </div>
-      <div className="p-6 pt-0">{children}</div>
     </div>
   );
-}
+};

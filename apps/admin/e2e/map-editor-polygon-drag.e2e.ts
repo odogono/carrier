@@ -7,11 +7,11 @@ type SeedRequest = {
   get: (
     url: string,
     options?: { headers?: Record<string, string> }
-  ) => Promise<{ ok: () => boolean; json: () => Promise<unknown> }>;
+  ) => Promise<{ json: () => Promise<unknown>; ok: () => boolean }>;
   post: (
     url: string,
     options?: { data?: unknown; headers?: Record<string, string> }
-  ) => Promise<{ ok: () => boolean; json: () => Promise<unknown> }>;
+  ) => Promise<{ json: () => Promise<unknown>; ok: () => boolean }>;
 };
 
 const fetchIslandIds = async (
@@ -62,6 +62,32 @@ const seedMapWithSquarePolygon = async (
   return { islandIds: await fetchIslandIds(request, map.id), mapId: map.id };
 };
 
+const seedMapWithPolygonAndControl = async (
+  request: SeedRequest
+): Promise<{ islandIds: string[]; mapId: string }> => {
+  const seeded = await seedMapWithSquarePolygon(request);
+
+  const controlRes = await request.post(
+    `${apiBase}/maps/${seeded.mapId}/controls`,
+    {
+      data: {
+        elevationMeters: 90,
+        expectedRevision: 1,
+        influenceMeters: 120,
+        mapId: seeded.mapId,
+        strength: 1,
+        type: 'peak',
+        x: 100,
+        z: 100
+      },
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
+  expect(controlRes.ok()).toBeTruthy();
+
+  return seeded;
+};
+
 const seedMapWithTwoIslands = async (
   request: SeedRequest
 ): Promise<{ islandIds: string[]; mapId: string }> => {
@@ -109,7 +135,7 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   request
 }): Promise<void> => {
   test.setTimeout(90_000);
-  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.setViewportSize({ height: 900, width: 1600 });
   const { mapId } = await seedMapWithSquarePolygon(request);
 
   const polygonsLoaded = page.waitForResponse(
@@ -123,8 +149,9 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   await polygonsLoaded;
 
   await expect(
-    page.getByRole('heading', { name: 'Terrain Editor' })
+    page.getByRole('heading', { name: 'Contextual Controls' })
   ).toBeVisible();
+  await expect(page.getByText('Selection')).toBeVisible();
 
   const stage = page.getByTestId('editor-stage');
   await expect
@@ -144,6 +171,12 @@ test('selected polygon drag tracks pointer without initial jump', async ({
     .first();
   await expect(overlayPolygon).toBeVisible({ timeout: 30_000 });
   await overlayPolygon.click({ force: true });
+
+  await expect(page.getByRole('heading', { name: 'Polygon' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Terrain Parameters' })
+  ).toBeVisible();
+  await expect(page.getByText('1 polygon selected')).toBeVisible();
 
   const yellowDraft = stage.locator('svg polygon[stroke="#facc15"]');
   await expect(yellowDraft).toBeVisible({ timeout: 15_000 });
@@ -173,15 +206,16 @@ test('derived island rows match map selection and multi-island drag moves both i
   request
 }): Promise<void> => {
   test.setTimeout(90_000);
-  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.setViewportSize({ height: 900, width: 1600 });
   const { islandIds, mapId } = await seedMapWithTwoIslands(request);
 
   await page.goto(`/maps/${mapId}/editor`);
   await expect(
-    page.getByRole('heading', { name: 'Terrain Editor' })
+    page.getByRole('heading', { name: 'Contextual Controls' })
   ).toBeVisible();
 
   const stage = page.getByTestId('editor-stage');
+  await page.getByRole('button', { name: 'Islands' }).click();
   const islandRows = page.locator('[data-testid^="derived-island-row-"]');
   await expect(islandRows).toHaveCount(2);
 
@@ -192,15 +226,16 @@ test('derived island rows match map selection and multi-island drag moves both i
     .getByTestId(`derived-island-row-${islandIds[1]}`)
     .click({ modifiers: ['Shift'] });
 
+  await expect(page.getByRole('button', { name: 'Selection' })).toBeVisible();
   await expect(
     page.getByText(
-      '2 islands selected. Drag any selected polygon to move the group together.'
+      '2 islands selected. Use the canvas to drag them together or use the boolean tools above when the selection order matters.'
     )
   ).toBeVisible();
   await expect(stage.locator('svg polygon[stroke="#facc15"]')).toHaveCount(0);
 
   const selectedPolygons = stage.locator(
-    'svg [data-polygon-id][stroke="#f472b6"]'
+    'svg [data-polygon-id][stroke="#a855f7"]'
   );
   await expect(selectedPolygons).toHaveCount(2);
 
@@ -241,4 +276,31 @@ test('derived island rows match map selection and multi-island drag moves both i
       first: expect.closeTo(deltaPx, 4),
       second: expect.closeTo(deltaPx, 4)
     });
+});
+
+test('selecting a control point switches the inspector context', async ({
+  page,
+  request
+}): Promise<void> => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ height: 900, width: 1600 });
+  const { mapId } = await seedMapWithPolygonAndControl(request);
+
+  await page.goto(`/maps/${mapId}/editor`);
+  await expect(
+    page.getByRole('heading', { name: 'Contextual Controls' })
+  ).toBeVisible();
+
+  const controlPoint = page
+    .locator('[data-testid="editor-stage"] svg circle[fill="#e2e8f0"]')
+    .first();
+  await expect(controlPoint).toBeVisible({ timeout: 30_000 });
+  await controlPoint.click({ force: true });
+
+  await expect(
+    page.getByRole('heading', { name: 'Control Point' })
+  ).toBeVisible();
+  await expect(page.getByLabel('Type')).toBeVisible();
+  await expect(page.getByLabel('Strength')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Polygon' })).toHaveCount(0);
 });
