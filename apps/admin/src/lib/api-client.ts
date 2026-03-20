@@ -9,15 +9,28 @@ type ClientContext = {
   apiToken?: string;
 };
 
-declare const __API_URL__: string | undefined;
+declare global {
+  interface Window {
+    __API_URL__?: string;
+  }
+}
+
+type RuntimeGlobals = typeof globalThis & {
+  __API_URL__?: string;
+  process?: {
+    env?: Record<string, string | undefined>;
+  };
+};
+
+const runtimeGlobals = globalThis as RuntimeGlobals;
 
 // Production: `build.ts` defines __API_URL__. Dev: `bun run dev` loads `dev.defaults.env`
 // so `PUBLIC_API_URL` is always set (possibly empty); Bun inlines it when `bunfig.toml` has
-// `[serve.static] env = "PUBLIC_*"`. Avoid `bun ./index.html` without `--env-file=...` or you
-// get `ReferenceError: process is not defined` in the browser.
+// `[serve.static] env = "PUBLIC_*"`. Read both through `globalThis` so missing Bun defines
+// degrade to the localhost fallback instead of throwing a browser `ReferenceError`.
 const apiUrl =
-  (__API_URL__ !== undefined && __API_URL__) ||
-  process.env.PUBLIC_API_URL ||
+  runtimeGlobals.__API_URL__ ||
+  runtimeGlobals.process?.env?.PUBLIC_API_URL ||
   'http://localhost:6021/api';
 
 const link = new OpenAPILink<ClientContext>(contract, {
