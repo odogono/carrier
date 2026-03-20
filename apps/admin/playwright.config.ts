@@ -35,7 +35,9 @@ export default defineConfig({
       env: {
         ...process.env,
         API_PORT: E2E_API_PORT,
-        TRUSTED_ORIGINS: adminOrigin
+        TRUSTED_ORIGINS: adminOrigin,
+        // Do not use apps/api/.data/carrier.sqlite — isolate from dev data.
+        API_DB_PATH: ':memory:'
       },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

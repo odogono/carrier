@@ -23,11 +23,13 @@ E2E specs live under `e2e/` as `*.e2e.ts` so Bun’s test runner does not pick t
 | Normal `dev`   | 5179  | 6021 (client default in `src/lib/api-client.ts`) |
 | Playwright E2E | 5279  | 16021 |
 
-Override E2E ports with `E2E_ADMIN_PORT` / `E2E_API_PORT`. Playwright sets `PUBLIC_API_URL` on the admin process (overriding `dev.defaults.env`) so the app calls the e2e API; the API process gets `API_PORT` and `TRUSTED_ORIGINS=http://localhost:<E2E_ADMIN_PORT>` for CORS.
+Override E2E ports with `E2E_ADMIN_PORT` / `E2E_API_PORT`. Playwright sets `PUBLIC_API_URL` on the admin process (overriding `dev.defaults.env`) so the app calls the e2e API; the API process gets `API_PORT`, `TRUSTED_ORIGINS=http://localhost:<E2E_ADMIN_PORT>`, and **`API_DB_PATH=:memory:`** so E2E never writes to `apps/api/.data/carrier.sqlite`.
 
 Point tests at an existing admin URL with `PLAYWRIGHT_BASE_URL` (and start servers yourself; set `CI=1` to skip `reuseExistingServer` behavior if you need strict isolation).
 
+**Reusing a manually started API** (local, when `CI` is unset and Playwright’s `reuseExistingServer` attaches to an existing process on the e2e port): that server uses **whatever `API_DB_PATH` it was started with**. For the same isolation as automated E2E, start it with `API_DB_PATH=:memory:` (or another dedicated path), plus matching `API_PORT` and `TRUSTED_ORIGINS`.
+
 ## E2E config
 
-- `playwright.config.ts` — `webServer` starts `../api` (e2e `API_PORT`) and admin via `bun ./index.html --port=<E2E_ADMIN_PORT>` with `PUBLIC_API_URL` set.
+- `playwright.config.ts` — `webServer` starts `../api` (e2e `API_PORT`, in-memory DB) and admin with `dev.defaults.env` and `--port=<E2E_ADMIN_PORT>` plus `PUBLIC_API_URL`.
 - `bunfig.toml` — `[serve.static] env = "PUBLIC_*"` so `PUBLIC_API_URL` is inlined in the dev bundle.
