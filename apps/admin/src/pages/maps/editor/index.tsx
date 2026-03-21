@@ -931,6 +931,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         return;
       }
 
+      if (dragState?.kind === 'control-point') {
+        // Pointer capture is on the SVG, so the following click retargets to the
+        // SVG and would look like a backdrop tap (see handleCanvasClick).
+        suppressCanvasClickRef.current = true;
+      }
+
       releaseCanvasDrag();
       onViewportPointerUp(event);
     },
@@ -1004,6 +1010,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       if (tool === 'select') {
         if (suppressCanvasClickRef.current) {
           suppressCanvasClickRef.current = false;
+          return;
+        }
+
+        // Only clear when the click hits the SVG backdrop. Child geometry stops
+        // propagation, but some environments still deliver a bubbled click here.
+        if (event.target !== event.currentTarget) {
           return;
         }
 

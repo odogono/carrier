@@ -198,15 +198,17 @@ export const EditorCanvas = ({
           >
             {size.width > 0 && size.height > 0 && (
               <>
-                <MapStage
-                  canvasHeight={size.height}
-                  canvasWidth={size.width}
-                  chunks={chunks}
-                  map={map}
-                  viewport={viewport}
-                />
+                <div className="pointer-events-none absolute inset-0 z-0 [&_canvas]:pointer-events-none">
+                  <MapStage
+                    canvasHeight={size.height}
+                    canvasWidth={size.width}
+                    chunks={chunks}
+                    map={map}
+                    viewport={viewport}
+                  />
+                </div>
                 <div
-                  className="absolute inset-0"
+                  className="absolute inset-0 z-10"
                   onWheelCapture={onWheelCapture}
                 >
                   <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(60%,420px)] flex-col gap-2">
@@ -503,12 +505,14 @@ export const EditorCanvas = ({
                     {controlPoints.map(point => {
                       const screen = toScreenPoint(point);
                       const selected = point.id === selectedControlPointId;
+                      const visualRadius = selected ? 8 : 7;
                       return (
                         <g key={point.id}>
                           <circle
                             cx={screen.x}
                             cy={screen.z}
-                            fill={selected ? '#fb923c' : '#e2e8f0'}
+                            data-testid="editor-control-point-handle"
+                            fill="rgba(0,0,0,0.001)"
                             onClick={event => {
                               STOP_PROPAGATION(event);
                               onControlPointClick(event, point);
@@ -516,7 +520,15 @@ export const EditorCanvas = ({
                             onPointerDown={event =>
                               onControlPointPointerDown(event, point)
                             }
-                            r={selected ? 8 : 7}
+                            pointerEvents="all"
+                            r={Math.max(18, visualRadius + 10)}
+                          />
+                          <circle
+                            cx={screen.x}
+                            cy={screen.z}
+                            fill={selected ? '#fb923c' : '#e2e8f0'}
+                            pointerEvents="none"
+                            r={visualRadius}
                             stroke={selected ? '#fff7ed' : '#0f172a'}
                             strokeWidth={selected ? 3 : 2}
                           />

@@ -17,20 +17,17 @@ declare global {
 
 type RuntimeGlobals = typeof globalThis & {
   __API_URL__?: string;
-  process?: {
-    env?: Record<string, string | undefined>;
-  };
 };
 
 const runtimeGlobals = globalThis as RuntimeGlobals;
 
-// Production: `build.ts` defines __API_URL__. Dev: `bun run dev` loads `dev.defaults.env`
-// so `PUBLIC_API_URL` is always set (possibly empty); Bun inlines it when `bunfig.toml` has
-// `[serve.static] env = "PUBLIC_*"`. Read both through `globalThis` so missing Bun defines
-// degrade to the localhost fallback instead of throwing a browser `ReferenceError`.
+// Production: `build.ts` defines `__API_URL__` on the bundle. Dev: Playwright / `bun run dev`
+// set `PUBLIC_API_URL` (see `dev.defaults.env`). Bun only inlines `process.env.PUBLIC_*` when
+// referenced directly (`bunfig.toml` `[serve.static] env = "PUBLIC_*"`); reading through
+// `globalThis.process` skips substitution and the client fell back to port 6021 during E2E.
 const apiUrl =
   runtimeGlobals.__API_URL__ ||
-  runtimeGlobals.process?.env?.PUBLIC_API_URL ||
+  process.env.PUBLIC_API_URL ||
   'http://localhost:6021/api';
 
 const link = new OpenAPILink<ClientContext>(contract, {

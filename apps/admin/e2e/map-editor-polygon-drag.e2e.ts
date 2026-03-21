@@ -151,7 +151,9 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   await expect(
     page.getByRole('heading', { name: 'Contextual Controls' })
   ).toBeVisible();
-  await expect(page.getByText('Selection')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Selection', exact: true })
+  ).toBeVisible();
 
   const stage = page.getByTestId('editor-stage');
   await expect
@@ -172,11 +174,13 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   await expect(overlayPolygon).toBeVisible({ timeout: 30_000 });
   await overlayPolygon.click({ force: true });
 
-  await expect(page.getByRole('heading', { name: 'Polygon' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Polygon', exact: true })
+  ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Terrain Parameters' })
   ).toBeVisible();
-  await expect(page.getByText('1 polygon selected')).toBeVisible();
+  await expect(page.getByText('1 polygon selected').first()).toBeVisible();
 
   const yellowDraft = stage.locator('svg polygon[stroke="#facc15"]');
   await expect(yellowDraft).toBeVisible({ timeout: 15_000 });
@@ -226,7 +230,7 @@ test('derived island rows match map selection and multi-island drag moves both i
     .getByTestId(`derived-island-row-${islandIds[1]}`)
     .click({ modifiers: ['Shift'] });
 
-  await page.getByRole('button', { name: 'Selection' }).click();
+  await page.getByRole('button', { name: 'Selection', exact: true }).click();
   await expect(
     page.getByText(
       '2 islands selected. Use the canvas to drag them together or use the boolean tools above when the selection order matters.'
@@ -244,14 +248,15 @@ test('derived island rows match map selection and multi-island drag moves both i
   expect(firstBefore).not.toBeNull();
   expect(secondBefore).not.toBeNull();
 
-  const startX = firstBefore!.x + firstBefore!.width / 2;
-  const startY = firstBefore!.y + firstBefore!.height / 2;
   const deltaPx = 18;
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX + deltaPx, startY, { steps: 5 });
-  await page.mouse.up();
+  await selectedPolygons.nth(0).dragTo(selectedPolygons.nth(0), {
+    force: true,
+    targetPosition: {
+      x: firstBefore!.width / 2 + deltaPx,
+      y: firstBefore!.height / 2
+    }
+  });
 
   await expect
     .poll(async () => {
@@ -291,16 +296,16 @@ test('selecting a control point switches the inspector context', async ({
     page.getByRole('heading', { name: 'Contextual Controls' })
   ).toBeVisible();
 
-  const controlPoint = page
-    .locator('[data-testid="editor-stage"] svg circle[fill="#e2e8f0"]')
-    .first();
+  const controlPoint = page.getByTestId('editor-control-point-handle').first();
   await expect(controlPoint).toBeVisible({ timeout: 30_000 });
   await controlPoint.click({ force: true });
 
   await expect(
-    page.getByRole('heading', { name: 'Control Point' })
+    page.getByRole('heading', { name: 'Control Point', exact: true })
   ).toBeVisible();
   await expect(page.getByLabel('Type')).toBeVisible();
   await expect(page.getByLabel('Strength')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Polygon' })).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Polygon', exact: true })
+  ).toHaveCount(0);
 });
