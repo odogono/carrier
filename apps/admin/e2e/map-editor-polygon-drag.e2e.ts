@@ -226,7 +226,7 @@ test('derived island rows match map selection and multi-island drag moves both i
     .getByTestId(`derived-island-row-${islandIds[1]}`)
     .click({ modifiers: ['Shift'] });
 
-  await expect(page.getByRole('button', { name: 'Selection' })).toBeVisible();
+  await page.getByRole('button', { name: 'Selection' }).click();
   await expect(
     page.getByText(
       '2 islands selected. Use the canvas to drag them together or use the boolean tools above when the selection order matters.'

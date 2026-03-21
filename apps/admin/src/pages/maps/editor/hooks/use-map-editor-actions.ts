@@ -52,11 +52,18 @@ type UseMapEditorActionsOptions = {
   ) => Promise<unknown>;
   islandDraft: IslandDraft | null;
   map: MapMetadata | null | undefined;
+  patchControlPoints: (updates: ControlPoint[]) => void;
   polygonControlPointDrafts: ControlPointDraft[];
   polygonDraft: PolygonDraft | null;
   polygons: SourcePolygon[];
   recordHistory: (entry: HistoryEntry) => void;
   reloadAll: () => Promise<MapMetadata | null>;
+  replaceSourcePolygons: (
+    replacements: Array<{
+      next: SourcePolygon;
+      previousId?: string;
+    }>
+  ) => void;
   selectedControlPoint: ControlPoint | null;
   selectedPolygon: SourcePolygon | null;
   selectedPolygonIds: string[];
@@ -134,11 +141,13 @@ export const useMapEditorActions = ({
   invalidateTerrainMutation,
   islandDraft,
   map,
+  patchControlPoints,
   polygonControlPointDrafts,
   polygonDraft,
   polygons,
   recordHistory,
   reloadAll,
+  replaceSourcePolygons,
   selectedControlPoint,
   selectedPolygon,
   selectedPolygonIds,
@@ -550,6 +559,12 @@ export const useMapEditorActions = ({
           }
 
           setEditorRevision(nextRevision);
+          replaceSourcePolygons([
+            {
+              next: polygonResult.polygon,
+              previousId: selectedPolygon?.id ?? polygonDraft.id
+            }
+          ]);
           if (dirtyBounds) {
             await invalidateTerrainMutation(dirtyBounds);
           }
@@ -598,6 +613,7 @@ export const useMapEditorActions = ({
     map,
     polygonDraft,
     polygonControlPointDrafts,
+    replaceSourcePolygons,
     runAction,
     selectedPolygon,
     setEditorRevision,
@@ -627,6 +643,7 @@ export const useMapEditorActions = ({
             'maxX' | 'maxZ' | 'minX' | 'minZ'
           > | null = null;
           const remoteTransitions: RemoteTransition[] = [];
+          const savedControlPoints: ControlPoint[] = [];
           const savedPolygons: SourcePolygon[] = [];
 
           for (const [index, polygon] of afterPolygons.entries()) {
@@ -667,6 +684,7 @@ export const useMapEditorActions = ({
 
             nextRevision = result.mapRevision;
             dirtyBounds = mergeWorldBounds(dirtyBounds, result.dirtyBounds);
+            savedControlPoints.push(result.controlPoint);
             remoteTransitions.push(
               toControlPointTransition(
                 'save',
@@ -677,25 +695,22 @@ export const useMapEditorActions = ({
           }
 
           setEditorRevision(nextRevision);
+          replaceSourcePolygons(
+            savedPolygons.map((polygon, index) => ({
+              next: polygon,
+              previousId: beforePolygons[index]?.id
+            }))
+          );
+          patchControlPoints(savedControlPoints);
           if (dirtyBounds) {
             await invalidateTerrainMutation(dirtyBounds);
           }
+          await reloadAll();
 
           const nextSnapshot: EditorSnapshot = {
             ...historySnapshot,
             polygonControlPointDrafts: [],
-            polygonDraft:
-              savedPolygons.length === 1
-                ? {
-                    id: savedPolygons[0]!.id,
-                    kind: 'edit',
-                    params: savedPolygons[0]!.params,
-                    selectedVertexIndex: null,
-                    vertices: savedPolygons[0]!.vertices.map(vertex => ({
-                      ...vertex
-                    }))
-                  }
-                : null,
+            polygonDraft: null,
             selectedControlPointId: null,
             selectedIslandId: null,
             selectedPolygonIds: savedPolygons.map(polygon => polygon.id),
@@ -728,6 +743,9 @@ export const useMapEditorActions = ({
       historySnapshot,
       id,
       invalidateTerrainMutation,
+      patchControlPoints,
+      replaceSourcePolygons,
+      reloadAll,
       runAction,
       setEditorRevision,
       setSnapshot
@@ -759,6 +777,7 @@ export const useMapEditorActions = ({
                 });
 
           setEditorRevision(result.mapRevision);
+          patchControlPoints([result.controlPoint]);
           await invalidateTerrainMutation(result.dirtyBounds);
 
           const nextSnapshot: EditorSnapshot = {
@@ -815,6 +834,7 @@ export const useMapEditorActions = ({
     historySnapshot,
     id,
     invalidateTerrainMutation,
+    patchControlPoints,
     runAction,
     selectedControlPoint,
     setEditorRevision,

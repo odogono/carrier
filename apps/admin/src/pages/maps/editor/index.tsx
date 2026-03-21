@@ -113,6 +113,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     () => store.get(editorHistoryStateAtom),
     [store]
   );
+  const getCurrentSnapshot = useCallback(
+    () => store.get(editorSnapshotAtom),
+    [store]
+  );
   const snapshotRef = useRef(snapshot);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
   const suppressCanvasClickRef = useRef(false);
@@ -136,8 +140,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     map,
     mapQuery,
     overviewQuery,
+    patchControlPoints,
     polygonsQuery,
-    reloadAll
+    reloadAll,
+    replaceSourcePolygons
   } = useMapEditorData(id);
 
   const polygons = useMemo(
@@ -233,7 +239,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       updater: EditorSnapshot | ((current: EditorSnapshot) => EditorSnapshot),
       record = false
     ) => {
-      const before = snapshotRef.current;
+      const before = getCurrentSnapshot();
       const after = typeof updater === 'function' ? updater(before) : updater;
 
       if (snapshotsEqual(before, after)) {
@@ -254,7 +260,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
       return after;
     },
-    [recordHistory, setSnapshot]
+    [getCurrentSnapshot, recordHistory, setSnapshot]
   );
 
   const setTool = useCallback(
@@ -610,11 +616,13 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     invalidateTerrainMutation,
     islandDraft,
     map,
+    patchControlPoints,
     polygonControlPointDrafts,
     polygonDraft,
     polygons,
     recordHistory,
     reloadAll,
+    replaceSourcePolygons,
     selectedControlPoint,
     selectedPolygon,
     selectedPolygonIds,
@@ -1347,9 +1355,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           </h2>
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
-        <Badge variant="secondary">
-          Revision {activeEditorRevision}
-        </Badge>
+        <Badge variant="secondary">Revision {activeEditorRevision}</Badge>
         <Badge
           className={
             pendingAction
@@ -1366,28 +1372,6 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               ? 'Unsaved changes'
               : 'All changes saved'}
         </Badge>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
-        <StatusPanel
-          detail="Switch tools without losing your current viewport."
-          label="Mode"
-          value={toolLabel}
-        />
-        <StatusPanel
-          detail="Selection state drives the inspector and boolean tools."
-          label="Selection"
-          value={selectionSummary}
-        />
-        <StatusPanel
-          detail={
-            pendingAction ? 'Mutation in progress.' : 'Immediate next step'
-          }
-          label="Next Action"
-          value={
-            pendingAction ? 'Please wait for the current save.' : nextActionHint
-          }
-        />
       </div>
 
       <EditorToolbar

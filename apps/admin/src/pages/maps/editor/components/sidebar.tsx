@@ -152,16 +152,6 @@ export const EditorSidebar = ({
 }: EditorSidebarProps) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('selection');
 
-  const hasSelectionContext =
-    currentControlPointForInspector !== null ||
-    currentPolygonForInspector !== null ||
-    (selectedIslandCount === 1 && islandInspectorDraft !== null) ||
-    selectedPolygonCount > 1 ||
-    selectedIslandCount > 1 ||
-    activeTool !== 'select';
-
-  const visibleTab = hasSelectionContext ? 'selection' : activeTab;
-
   const multiSelectionMessage = useMemo(() => {
     if (selectedIslandCount > 1) {
       return `${selectedIslandCount} islands selected. Use the canvas to drag them together or use the boolean tools above when the selection order matters.`;
@@ -201,19 +191,19 @@ export const EditorSidebar = ({
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl border border-border/70 bg-background/60 p-1">
           <TabButton
-            active={visibleTab === 'selection'}
+            active={activeTab === 'selection'}
             icon={Focus}
             label="Selection"
             onClick={() => setActiveTab('selection')}
           />
           <TabButton
-            active={visibleTab === 'islands'}
+            active={activeTab === 'islands'}
             icon={Layers3}
             label="Islands"
             onClick={() => setActiveTab('islands')}
           />
           <TabButton
-            active={visibleTab === 'overview'}
+            active={activeTab === 'overview'}
             icon={Compass}
             label="Overview"
             onClick={() => setActiveTab('overview')}
@@ -222,7 +212,7 @@ export const EditorSidebar = ({
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {visibleTab === 'selection' ? (
+        {activeTab === 'selection' ? (
           <div className="flex h-full flex-col">
             <div className="flex-1 space-y-4 overflow-y-auto p-4">
               <InspectorCallout
@@ -653,7 +643,7 @@ export const EditorSidebar = ({
           </div>
         ) : null}
 
-        {visibleTab === 'islands' ? (
+        {activeTab === 'islands' ? (
           <div className="h-full overflow-y-auto p-4">
             <SectionShell
               description="Select an island to sync the canvas selection. Shift-click adds to the current set."
@@ -720,7 +710,7 @@ export const EditorSidebar = ({
           </div>
         ) : null}
 
-        {visibleTab === 'overview' ? (
+        {activeTab === 'overview' ? (
           <div className="h-full overflow-y-auto p-4">
             <SectionShell
               description="Use the minimap to recenter the main view and understand the current spread of geometry."
@@ -870,4 +860,3 @@ type TextInputProps = {
   onChange: (value: string) => void;
   value: string;
 };
-
