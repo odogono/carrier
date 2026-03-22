@@ -31,19 +31,19 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
 
   const measureContainer = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el) {return;}
     const rect = el.getBoundingClientRect();
     setSize(prev => {
       const w = Math.floor(rect.width);
       const h = Math.floor(rect.height);
-      if (prev.width === w && prev.height === h) return prev;
+      if (prev.width === w && prev.height === h) {return prev;}
       return { height: h, width: w };
     });
   }, []);
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el) {return;}
 
     measureContainer();
 
@@ -101,22 +101,21 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
   return (
     <div className="flex flex-col gap-2">
       <div
-        ref={containerRef}
         className="relative h-[500px] overflow-hidden rounded-md border bg-[#0a1320]"
+        ref={containerRef}
       >
         {size.width > 0 && size.height > 0 && (
           <div
-            ref={interactionRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={onPointerMove}
-            onPointerCancel={onPointerCancel}
-            onPointerLeave={onPointerLeave}
-            onPointerUp={onPointerUp}
-            onWheelCapture={handleWheelCapture}
-            onWheel={onWheel}
-            onKeyDown={onKeyDown}
-            tabIndex={0}
             className="outline-none"
+            onKeyDown={onKeyDown}
+            onPointerCancel={onPointerCancel}
+            onPointerDown={handlePointerDown}
+            onPointerLeave={onPointerLeave}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onWheel={onWheel}
+            onWheelCapture={handleWheelCapture}
+            ref={interactionRef}
             style={{
               cursor: isDragging ? 'grabbing' : 'crosshair',
               display: 'block',
@@ -125,10 +124,11 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
               touchAction: 'none',
               width: size.width
             }}
+            tabIndex={0}
           >
             <MapStage
-              canvasWidth={size.width}
               canvasHeight={size.height}
+              canvasWidth={size.width}
               chunks={chunks}
               map={map}
               viewport={viewport}
@@ -137,29 +137,29 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
         )}
         <div className="absolute right-3 bottom-3 flex gap-1">
           <Button
-            variant="secondary"
-            size="icon"
             className="h-8 w-8"
             onClick={zoomIn}
+            size="icon"
             title="Zoom in"
+            variant="secondary"
           >
             <Plus className="h-4 w-4" />
           </Button>
           <Button
-            variant="secondary"
-            size="icon"
             className="h-8 w-8"
             onClick={zoomOut}
+            size="icon"
             title="Zoom out"
+            variant="secondary"
           >
             <Minus className="h-4 w-4" />
           </Button>
           <Button
-            variant="secondary"
-            size="icon"
             className="h-8 w-8"
             onClick={fitToView}
+            size="icon"
             title="Reset view"
+            variant="secondary"
           >
             <Home className="h-4 w-4" />
           </Button>

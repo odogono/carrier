@@ -1,6 +1,8 @@
 import {
   isInfiniteMap,
+  type ControlPoint,
   type MapMetadata,
+  type SourcePolygon,
   type WorldBounds
 } from 'carrier-contracts/types';
 import { useCallback } from 'react';
@@ -38,6 +40,69 @@ const parseChunkQueryKey = (queryKey: readonly unknown[]) => {
 
 export const useMapEditorData = (mapId: string) => {
   const queryClient = useQueryClient();
+
+  const replaceSourcePolygons = useCallback(
+    (
+      replacements: Array<{
+        next: SourcePolygon;
+        previousId?: string;
+      }>
+    ) => {
+      if (replacements.length === 0) {
+        return;
+      }
+
+      queryClient.setQueryData<SourcePolygon[] | undefined>(
+        mapEditorKeys.polygons(mapId),
+        current => {
+          if (!current) {
+            return current;
+          }
+
+          const previousIds = new Set(
+            replacements
+              .map(replacement => replacement.previousId)
+              .filter(Boolean) as string[]
+          );
+          const nextById = new Map(
+            replacements.map(replacement => [
+              replacement.next.id,
+              replacement.next
+            ])
+          );
+
+          return current
+            .filter(
+              polygon =>
+                !previousIds.has(polygon.id) && !nextById.has(polygon.id)
+            )
+            .concat(replacements.map(replacement => replacement.next));
+        }
+      );
+    },
+    [mapId, queryClient]
+  );
+
+  const patchControlPoints = useCallback(
+    (updates: ControlPoint[]) => {
+      if (updates.length === 0) {
+        return;
+      }
+
+      queryClient.setQueryData<ControlPoint[] | undefined>(
+        mapEditorKeys.controlPoints(mapId),
+        current => {
+          if (!current) {
+            return current;
+          }
+
+          const updatesById = new Map(updates.map(point => [point.id, point]));
+          return current.map(point => updatesById.get(point.id) ?? point);
+        }
+      );
+    },
+    [mapId, queryClient]
+  );
 
   const mapQuery = useQuery({
     queryFn: () => client.maps.find({ id: mapId }),
@@ -171,7 +236,9 @@ export const useMapEditorData = (mapId: string) => {
     map,
     mapQuery,
     overviewQuery,
+    patchControlPoints,
     polygonsQuery,
-    reloadAll
+    reloadAll,
+    replaceSourcePolygons
   };
 };

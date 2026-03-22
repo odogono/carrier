@@ -36,70 +36,66 @@ export function MapStage({
 
   useEffect(() => {
     const layer = terrainLayerRef.current;
-    if (!layer) return;
+    if (!layer) {return;}
     const ctx = layer.getCanvas().getContext();
     ctx.imageSmoothingEnabled = false;
   }, []);
 
-  useEffect(() => {
-    return () => {
+  useEffect(() => () => {
       clearBitmapCache(map.id);
-    };
-  }, [map.id]);
+    }, [map.id]);
 
-  const chunkImages = useMemo(() => {
-    return Array.from(chunks.values()).map(chunk => ({
+  const chunkImages = useMemo(() => Array.from(chunks.values()).map(chunk => ({
       height: chunk.tileHeight,
       image: getChunkBitmap(chunk),
       key: `${chunk.chunkX}:${chunk.chunkZ}`,
       width: chunk.tileWidth,
       x: chunk.originTileX,
       y: chunk.originTileZ
-    }));
-  }, [chunks]);
+    })), [chunks]);
 
   return (
     <Stage
-      width={canvasWidth}
       height={canvasHeight}
+      listening={false}
       scaleX={viewport.zoom}
       scaleY={viewport.zoom}
+      style={{ background: BACKGROUND_COLOR }}
+      width={canvasWidth}
       x={stageX}
       y={stageY}
-      listening={false}
-      style={{ background: BACKGROUND_COLOR }}
     >
       <Layer ref={terrainLayerRef}>
         {chunkImages.map(ci => (
           <Image
-            key={ci.key}
+            height={ci.height}
             image={ci.image}
+            key={ci.key}
+            listening={false}
+            width={ci.width}
             x={ci.x}
             y={ci.y}
-            width={ci.width}
-            height={ci.height}
-            listening={false}
           />
         ))}
       </Layer>
       <Layer>
         <GridLines
-          viewport={viewport}
-          canvasWidth={canvasWidth}
           canvasHeight={canvasHeight}
+          canvasWidth={canvasWidth}
           map={map}
+          viewport={viewport}
         />
       </Layer>
       <Layer>
         {isFiniteMap(map) && (
           <Rect
-            x={0}
-            y={0}
-            width={map.extent.widthTiles}
             height={map.extent.heightTiles}
+            listening={false}
             stroke="rgba(255, 255, 255, 0.15)"
             strokeWidth={1 / viewport.zoom}
-            listening={false}
+            width={map.extent.widthTiles}
+            x={0}
+            y={0}
           />
         )}
       </Layer>

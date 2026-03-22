@@ -13,8 +13,13 @@ import {
   canSavePolygonDraft,
   chunkIntersectsDirtyBounds,
   getChunkWorldBounds,
+  getExactSelectedIslands,
+  getIslandsBySelectedPolygons,
   mergeWorldBounds,
-  nextOrderedSelection
+  nextIslandPolygonSelection,
+  nextOrderedSelection,
+  pointInPolygon,
+  polygonIntersectsBounds
 } from '../index';
 
 const infiniteMap: MapMetadata = {
@@ -51,6 +56,41 @@ describe('editor utilities', () => {
     expect(nextOrderedSelection([], 'a', false)).toEqual(['a']);
     expect(nextOrderedSelection(['a'], 'b', true)).toEqual(['a', 'b']);
     expect(nextOrderedSelection(['a', 'b'], 'a', true)).toEqual(['b']);
+  });
+
+  test('selects and toggles island polygon groups with shift semantics', () => {
+    expect(nextIslandPolygonSelection([], ['a', 'b'], false)).toEqual([
+      'a',
+      'b'
+    ]);
+    expect(nextIslandPolygonSelection(['a', 'b'], ['c', 'd'], true)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd'
+    ]);
+    expect(
+      nextIslandPolygonSelection(['a', 'b', 'c'], ['a', 'b'], true)
+    ).toEqual(['c']);
+  });
+
+  test('derives fully and exactly selected islands from polygon selection', () => {
+    const islands = [
+      { id: 'one', sourcePolygonIds: ['a', 'b'] },
+      { id: 'two', sourcePolygonIds: ['c'] }
+    ];
+
+    expect(
+      getIslandsBySelectedPolygons(islands, ['a', 'b', 'c']).map(
+        island => island.id
+      )
+    ).toEqual(['one', 'two']);
+    expect(
+      getExactSelectedIslands(islands, ['a', 'b', 'c']).map(island => island.id)
+    ).toEqual(['one', 'two']);
+    expect(
+      getExactSelectedIslands(islands, ['a', 'b', 'x']).map(island => island.id)
+    ).toEqual([]);
   });
 
   test('validates polygon draft lifecycle with seeded default params', () => {
@@ -161,5 +201,35 @@ describe('editor utilities', () => {
       minX: -320,
       minZ: 640
     });
+  });
+
+  test('detects polygon containment and marquee intersection', () => {
+    const polygon = [
+      { x: 0, z: 0 },
+      { x: 20, z: 0 },
+      { x: 20, z: 20 },
+      { x: 0, z: 20 }
+    ];
+
+    expect(pointInPolygon({ x: 10, z: 10 }, polygon)).toBe(true);
+    expect(pointInPolygon({ x: 30, z: 30 }, polygon)).toBe(false);
+
+    expect(
+      polygonIntersectsBounds(polygon, {
+        maxX: 5,
+        maxZ: 5,
+        minX: -5,
+        minZ: -5
+      })
+    ).toBe(true);
+
+    expect(
+      polygonIntersectsBounds(polygon, {
+        maxX: 40,
+        maxZ: 40,
+        minX: 30,
+        minZ: 30
+      })
+    ).toBe(false);
   });
 });

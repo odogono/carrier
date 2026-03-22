@@ -13,8 +13,8 @@ export const Table = forwardRef<
 >(({ className, ...props }, ref) => (
   <div className="relative w-full overflow-auto">
     <table
-      ref={ref}
       className={cn('w-full caption-bottom text-sm', className)}
+      ref={ref}
       {...props}
     />
   </div>
@@ -25,7 +25,7 @@ export const TableHeader = forwardRef<
   HTMLTableSectionElement,
   HTMLAttributes<HTMLTableSectionElement>
 >(({ className, ...props }, ref) => (
-  <thead ref={ref} className={cn('[&_tr]:border-b', className)} {...props} />
+  <thead className={cn('[&_tr]:border-b', className)} ref={ref} {...props} />
 ));
 TableHeader.displayName = 'TableHeader';
 
@@ -34,8 +34,8 @@ export const TableBody = forwardRef<
   HTMLAttributes<HTMLTableSectionElement>
 >(({ className, ...props }, ref) => (
   <tbody
-    ref={ref}
     className={cn('[&_tr:last-child]:border-0', className)}
+    ref={ref}
     {...props}
   />
 ));
@@ -46,11 +46,11 @@ export const TableRow = forwardRef<
   HTMLAttributes<HTMLTableRowElement>
 >(({ className, ...props }, ref) => (
   <tr
-    ref={ref}
     className={cn(
       'border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted',
       className
     )}
+    ref={ref}
     {...props}
   />
 ));
@@ -61,11 +61,11 @@ export const TableHead = forwardRef<
   ThHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
   <th
-    ref={ref}
     className={cn(
       'h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0',
       className
     )}
+    ref={ref}
     {...props}
   />
 ));
@@ -76,8 +76,8 @@ export const TableCell = forwardRef<
   TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
   <td
-    ref={ref}
     className={cn('p-4 align-middle [&:has([role=checkbox])]:pr-0', className)}
+    ref={ref}
     {...props}
   />
 ));

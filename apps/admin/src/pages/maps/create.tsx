@@ -56,21 +56,21 @@ export function CreateMapPage() {
         });
       }
       return client.maps.create({
-        kind: 'wrapped-classic',
         generator,
         heightMeters: Number(heightMeters),
+        kind: 'wrapped-classic',
         name: name.trim() || undefined,
         seed: seed.trim() || undefined,
         widthMeters: Number(widthMeters)
       });
     },
+    onError: () => {
+      toast.error('Failed to create map');
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map created');
       void navigate({ to: '/maps' });
-    },
-    onError: () => {
-      toast.error('Failed to create map');
     }
   });
 
@@ -91,17 +91,17 @@ export function CreateMapPage() {
           <CardTitle>Map Configuration</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <Label htmlFor="kind">Map Kind</Label>
               <Select
                 id="kind"
-                value={kind}
                 onChange={e =>
                   setKind(
                     e.target.value as 'wrapped-classic' | 'infinite-vector'
                   )
                 }
+                value={kind}
               >
                 <option value="wrapped-classic">Wrapped Classic</option>
                 <option value="infinite-vector">Infinite Vector</option>
@@ -112,10 +112,10 @@ export function CreateMapPage() {
               <Label htmlFor="name">Name (optional)</Label>
               <Input
                 id="name"
-                value={name}
+                maxLength={120}
                 onChange={e => setName(e.target.value)}
                 placeholder="My Map"
-                maxLength={120}
+                value={name}
               />
             </div>
 
@@ -126,13 +126,13 @@ export function CreateMapPage() {
                     <Label htmlFor="widthMeters">Width (meters)</Label>
                     <Input
                       id="widthMeters"
+                      max={4096 * MAP_METERS_PER_TILE}
+                      min={MAP_METERS_PER_TILE}
+                      onChange={e => setWidthMeters(e.target.value)}
+                      required
+                      step={MAP_METERS_PER_TILE}
                       type="number"
                       value={widthMeters}
-                      onChange={e => setWidthMeters(e.target.value)}
-                      min={MAP_METERS_PER_TILE}
-                      max={4096 * MAP_METERS_PER_TILE}
-                      step={MAP_METERS_PER_TILE}
-                      required
                     />
                     <p className="text-xs text-muted-foreground">
                       {derivedWidthTiles === null
@@ -144,13 +144,13 @@ export function CreateMapPage() {
                     <Label htmlFor="heightMeters">Height (meters)</Label>
                     <Input
                       id="heightMeters"
+                      max={4096 * MAP_METERS_PER_TILE}
+                      min={MAP_METERS_PER_TILE}
+                      onChange={e => setHeightMeters(e.target.value)}
+                      required
+                      step={MAP_METERS_PER_TILE}
                       type="number"
                       value={heightMeters}
-                      onChange={e => setHeightMeters(e.target.value)}
-                      min={MAP_METERS_PER_TILE}
-                      max={4096 * MAP_METERS_PER_TILE}
-                      step={MAP_METERS_PER_TILE}
-                      required
                     />
                     <p className="text-xs text-muted-foreground">
                       {derivedHeightTiles === null
@@ -164,12 +164,12 @@ export function CreateMapPage() {
                   <Label htmlFor="generator">Generator</Label>
                   <Select
                     id="generator"
-                    value={generator}
                     onChange={e =>
                       setGenerator(
                         e.target.value as 'diamond-square' | 'island-clusters'
                       )
                     }
+                    value={generator}
                   >
                     <option value="diamond-square">Diamond Square</option>
                     <option value="island-clusters">Island Clusters</option>
@@ -182,27 +182,27 @@ export function CreateMapPage() {
               <Label htmlFor="seed">Seed (optional)</Label>
               <Input
                 id="seed"
-                value={seed}
+                maxLength={120}
                 onChange={e => setSeed(e.target.value)}
                 placeholder="Random if left empty"
-                maxLength={120}
+                value={seed}
               />
             </div>
 
             <div className="flex gap-2 pt-4">
               <Button
-                type="submit"
                 disabled={
                   createMutation.isPending ||
                   (kind === 'wrapped-classic' && !wrappedClassicDimensionsValid)
                 }
+                type="submit"
               >
                 {createMutation.isPending ? 'Creating...' : 'Create Map'}
               </Button>
               <Button
+                onClick={() => void navigate({ to: '/maps' })}
                 type="button"
                 variant="outline"
-                onClick={() => void navigate({ to: '/maps' })}
               >
                 Cancel
               </Button>

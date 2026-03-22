@@ -3,6 +3,7 @@ import type {
   DerivedIsland,
   SourcePolygon,
   SourcePolygonParams,
+  WorldBounds,
   WorldPoint
 } from 'carrier-contracts/types';
 
@@ -38,7 +39,26 @@ export type DeleteTarget =
   | null;
 
 export type CanvasDragState =
-  | { kind: 'control-point'; pointId?: string; pointerId: number }
+  | { kind: 'control-point'; pointerId: number; pointId?: string; }
+  | {
+      bounds: WorldBounds;
+      currentPoint: WorldPoint;
+      kind: 'marquee';
+      pointerId: number;
+      startPoint: WorldPoint;
+    }
+  | {
+      controlPoints: ControlPointDraft[];
+      currentDelta: WorldPoint;
+      kind: 'polygon';
+      pointerId: number;
+      polygons: Array<{
+        id: string;
+        params: SourcePolygonParams;
+        vertices: WorldPoint[];
+      }>;
+      startPoint: WorldPoint;
+    }
   | { kind: 'vertex'; pointerId: number; vertexIndex: number }
   | null;
 

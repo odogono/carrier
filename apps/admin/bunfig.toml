@@ -1,5 +1,7 @@
 [serve.static]
 plugins = ["bun-plugin-tailwind"]
+# Inline `process.env.PUBLIC_*` in the dev bundle (e.g. `PUBLIC_API_URL` for Playwright).
+env = "PUBLIC_*"
 
 [serve]
 port = 5179

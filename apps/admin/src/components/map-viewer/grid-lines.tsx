@@ -14,7 +14,7 @@ const GRID_LEVELS: GridLevel[] = [
   { label: '1km', spacingTiles: 100 },
   { label: '5km', spacingTiles: 500 },
   { label: '10km', spacingTiles: 1000 },
-  { label: '100km', spacingTiles: 10000 }
+  { label: '100km', spacingTiles: 10_000 }
 ];
 
 const GRID_STROKE = 'rgba(255, 255, 255, 0.3)';
@@ -23,7 +23,7 @@ const LABEL_FILL = 'rgba(255, 255, 255, 0.3)';
 const chooseGridLevel = (visibleTiles: number): GridLevel => {
   for (const level of GRID_LEVELS) {
     const count = visibleTiles / level.spacingTiles;
-    if (count >= 3 && count <= 12) return level;
+    if (count >= 3 && count <= 12) {return level;}
   }
 
   // Fallback: pick level closest to showing ~5 lines
@@ -36,7 +36,7 @@ const chooseGridLevel = (visibleTiles: number): GridLevel => {
 
 const formatLabel = (tilePos: number, metersPerTile: number): string => {
   const meters = tilePos * metersPerTile;
-  if (Math.abs(meters) >= 1000) return `${meters / 1000}km`;
+  if (Math.abs(meters) >= 1000) {return `${meters / 1000}km`;}
   return `${meters}m`;
 };
 
@@ -135,21 +135,21 @@ export function GridLines({
       {elements.lines.map(line => (
         <Line
           key={line.key}
+          listening={false}
           points={line.points}
           stroke={GRID_STROKE}
           strokeWidth={elements.strokeWidth}
-          listening={false}
         />
       ))}
       {elements.labels.map(label => (
         <Text
+          fill={LABEL_FILL}
+          fontSize={elements.fontSize}
           key={label.key}
+          listening={false}
+          text={label.text}
           x={label.x}
           y={label.y}
-          text={label.text}
-          fontSize={elements.fontSize}
-          fill={LABEL_FILL}
-          listening={false}
         />
       ))}
     </>

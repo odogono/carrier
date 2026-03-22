@@ -85,6 +85,31 @@ export const expandBounds = (
   minZ: bounds.minZ - amount
 });
 
+export const translateWorldPoint = (
+  point: Pick<{ x: number; z: number }, 'x' | 'z'>,
+  delta: Pick<{ x: number; z: number }, 'x' | 'z'>
+) => ({
+  x: point.x + delta.x,
+  z: point.z + delta.z
+});
+
+export const translatePolygonDraft = (
+  draft: PolygonDraft,
+  delta: Pick<{ x: number; z: number }, 'x' | 'z'>
+): PolygonDraft => ({
+  ...draft,
+  vertices: draft.vertices.map(vertex => translateWorldPoint(vertex, delta))
+});
+
+export const translateControlPointDraft = (
+  draft: ControlPointDraft,
+  delta: Pick<{ x: number; z: number }, 'x' | 'z'>
+): ControlPointDraft => ({
+  ...draft,
+  x: draft.x + delta.x,
+  z: draft.z + delta.z
+});
+
 export const parseNumber = (value: string, fallback: number) => {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;

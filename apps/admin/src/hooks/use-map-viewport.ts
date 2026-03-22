@@ -267,10 +267,10 @@ export const useMapViewport = (
   );
 
   const dragRef = useRef<{
-    startX: number;
-    startZ: number;
     pointerX: number;
     pointerZ: number;
+    startX: number;
+    startZ: number;
   } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -309,7 +309,7 @@ export const useMapViewport = (
   const onPointerMove = useCallback(
     (e: React.PointerEvent<Element>) => {
       const drag = dragRef.current;
-      if (!drag) return;
+      if (!drag) {return;}
 
       setViewport(v => {
         const dx = (e.clientX - drag.pointerX) / v.zoom;
@@ -337,7 +337,7 @@ export const useMapViewport = (
 
   const onPointerLeave = useCallback(
     (e: React.PointerEvent<Element>) => {
-      if (!dragRef.current) return;
+      if (!dragRef.current) {return;}
       endDrag(e.currentTarget, e.pointerId);
     },
     [endDrag]
@@ -457,13 +457,13 @@ export const useMapViewport = (
   );
 
   const fitToView = useCallback(() => {
-    if (canvasWidth <= 0 || canvasHeight <= 0) return;
+    if (canvasWidth <= 0 || canvasHeight <= 0) {return;}
     setViewport(getDefaultViewport(map, canvasWidth, canvasHeight));
   }, [map, canvasWidth, canvasHeight]);
 
   const fitToWorldBounds = useCallback(
     (bounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>) => {
-      if (canvasWidth <= 0 || canvasHeight <= 0) return;
+      if (canvasWidth <= 0 || canvasHeight <= 0) {return;}
       setViewport(
         fitViewportToWorldBounds(map, canvasWidth, canvasHeight, bounds)
       );
@@ -504,10 +504,10 @@ export const useMapViewport = (
     fitToWorldBounds,
     isDragging,
     onKeyDown,
-    onPointerDown,
-    onPointerMove,
     onPointerCancel,
+    onPointerDown,
     onPointerLeave,
+    onPointerMove,
     onPointerUp,
     onWheel,
     recenterOnWorldPoint,

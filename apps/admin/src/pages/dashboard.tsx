@@ -77,13 +77,13 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <Link to="/maps/new">
-              <Button variant="outline" className="w-full justify-start">
+              <Button className="w-full justify-start" variant="outline">
                 <Plus className="mr-2 h-4 w-4" />
                 Create Map
               </Button>
             </Link>
             <Link to="/maps">
-              <Button variant="outline" className="w-full justify-start">
+              <Button className="w-full justify-start" variant="outline">
                 <Map className="mr-2 h-4 w-4" />
                 View All Maps
               </Button>
@@ -102,10 +102,10 @@ export function DashboardPage() {
             <div className="space-y-2">
               {maps.slice(0, 5).map(map => (
                 <Link
-                  key={map.id}
-                  to="/maps/$id"
-                  params={{ id: map.id }}
                   className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent"
+                  key={map.id}
+                  params={{ id: map.id }}
+                  to="/maps/$id"
                 >
                   <div>
                     <div className="font-medium">{map.name ?? 'Unnamed'}</div>

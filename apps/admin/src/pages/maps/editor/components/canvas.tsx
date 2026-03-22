@@ -1,43 +1,79 @@
 import type {
   ControlPoint,
   MapMetadata,
-  SourcePolygon,
   WorldPoint
 } from 'carrier-contracts/types';
 import { Home, Minus, Plus } from 'lucide-react';
-import type { KeyboardEvent, PointerEvent, RefObject, WheelEvent } from 'react';
+import type {
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+  Ref,
+  RefObject,
+  WheelEvent
+} from 'react';
 
 import { MapStage } from '@/components/map-viewer/map-stage';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Viewport } from '@/hooks/use-map-viewport';
+import { cn } from '@/lib/utils';
 
 import {
   canSavePolygonDraft,
   getPolygonEdgeInsertPosition,
-  nextOrderedSelection,
   type EditorTool
 } from '../helpers';
-import { STOP_PROPAGATION } from '../helpers/drafts';
+import { STOP_PROPAGATION, translateWorldPoint } from '../helpers/drafts';
 import type {
   CanvasDragState,
   ControlPointDraft,
-  PolygonDraft
+  PolygonDraft,
+  SourcePolygonLike
 } from '../helpers/types';
 
 type EditorCanvasProps = {
   chunks: ReturnType<typeof import('@/hooks/use-map-chunks').useMapChunks>;
   commitDrawPolygon: () => void;
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: Ref<HTMLDivElement>;
   controlPointDraft: ControlPointDraft | null;
   controlPoints: ControlPoint[];
   dragState: CanvasDragState;
+  fitToView: () => void;
   highlightedIslandPolygonIds: Set<string>;
   interactionRef: RefObject<SVGSVGElement | null>;
   map: MapMetadata;
-  overlayPolygons: SourcePolygon[];
+  nextActionHint: string;
+  onCanvasClick: (event: PointerEvent<SVGSVGElement>) => void;
+  onCanvasKeyDown: (event: KeyboardEvent<SVGSVGElement>) => void;
+  onCanvasPointerCancel: (event: PointerEvent<SVGSVGElement>) => void;
+  onCanvasPointerDown: (event: PointerEvent<SVGSVGElement>) => void;
+  onCanvasPointerLeave: (event: PointerEvent<SVGSVGElement>) => void;
+  onCanvasPointerMove: (event: PointerEvent<SVGSVGElement>) => void;
+  onCanvasPointerUp: (event: PointerEvent<SVGSVGElement>) => void;
+  onControlPointClick: (
+    event: MouseEvent<SVGCircleElement>,
+    point: ControlPoint
+  ) => void;
+  onControlPointPointerDown: (
+    event: PointerEvent<SVGCircleElement>,
+    point: ControlPoint
+  ) => void;
+  onPolygonClick: (
+    event: MouseEvent<SVGPolygonElement>,
+    polygon: SourcePolygonLike
+  ) => void;
+  onPolygonPointerDown: (
+    event: PointerEvent<SVGPolygonElement>,
+    polygon: SourcePolygonLike
+  ) => void;
+  onWheel: (event: WheelEvent<SVGSVGElement>) => void;
+  onWheelCapture: (event: WheelEvent<HTMLDivElement>) => void;
+  overlayPolygons: SourcePolygonLike[];
   polygonDraft: PolygonDraft | null;
   selectedControlPointId: string | null;
   selectedPolygonIds: string[];
+  selectionSummary: string;
   setDragState: React.Dispatch<React.SetStateAction<CanvasDragState>>;
   setPolygonDraft: (
     value:
@@ -46,39 +82,20 @@ type EditorCanvasProps = {
       | ((current: PolygonDraft | null) => PolygonDraft | null),
     record?: boolean
   ) => void;
-  setSelectedControlPointId: (value: string | null, record?: boolean) => void;
-  setSelectedIslandId: (value: string | null, record?: boolean) => void;
-  setSelectedPolygonIds: (
-    value: string[] | ((current: string[]) => string[]),
-    record?: boolean
-  ) => void;
   size: { height: number; width: number };
+  tool: EditorTool;
+  toolLabel: string;
   toScreenPoint: (point: Pick<WorldPoint, 'x' | 'z'>) => {
     x: number;
     z: number;
   };
-  toWorldPoint: (event: {
-    clientX: number;
-    clientY: number;
-    currentTarget: { getBoundingClientRect(): DOMRect };
-  }) => WorldPoint;
-  tool: EditorTool;
+  toWorldPoint: (event: { clientX: number; clientY: number }) => WorldPoint;
   viewport: Viewport;
   zoomIn: () => void;
   zoomOut: () => void;
-  fitToView: () => void;
-  onCanvasClick: (event: PointerEvent<SVGSVGElement>) => void;
-  onCanvasKeyDown: (event: KeyboardEvent<SVGSVGElement>) => void;
-  onCanvasPointerCancel: (event: PointerEvent<SVGSVGElement>) => void;
-  onCanvasPointerDown: (event: PointerEvent<SVGSVGElement>) => void;
-  onCanvasPointerLeave: (event: PointerEvent<SVGSVGElement>) => void;
-  onCanvasPointerMove: (event: PointerEvent<SVGSVGElement>) => void;
-  onCanvasPointerUp: (event: PointerEvent<SVGSVGElement>) => void;
-  onWheel: (event: WheelEvent<SVGSVGElement>) => void;
-  onWheelCapture: (event: WheelEvent<HTMLDivElement>) => void;
 };
 
-export function EditorCanvas({
+export const EditorCanvas = ({
   chunks,
   commitDrawPolygon,
   containerRef,
@@ -89,6 +106,7 @@ export function EditorCanvas({
   highlightedIslandPolygonIds,
   interactionRef,
   map,
+  nextActionHint,
   onCanvasClick,
   onCanvasKeyDown,
   onCanvasPointerCancel,
@@ -96,51 +114,129 @@ export function EditorCanvas({
   onCanvasPointerLeave,
   onCanvasPointerMove,
   onCanvasPointerUp,
+  onControlPointClick,
+  onControlPointPointerDown,
+  onPolygonClick,
+  onPolygonPointerDown,
   onWheel,
   onWheelCapture,
   overlayPolygons,
   polygonDraft,
   selectedControlPointId,
   selectedPolygonIds,
+  selectionSummary,
   setDragState,
   setPolygonDraft,
-  setSelectedControlPointId,
-  setSelectedIslandId,
-  setSelectedPolygonIds,
   size,
+  tool,
+  toolLabel,
   toScreenPoint,
   toWorldPoint,
-  tool,
   viewport,
   zoomIn,
   zoomOut
-}: EditorCanvasProps) {
+}: EditorCanvasProps) => {
   const selectedPolygonSet = new Set(selectedPolygonIds);
   const zoomPercent = Math.round(viewport.zoom * 100);
+  const showEditVertices =
+    polygonDraft?.kind === 'edit' &&
+    (tool === 'select' || tool === 'edit-vertices');
+  const previewDraftVertices =
+    dragState?.kind === 'polygon' &&
+    polygonDraft &&
+    dragState.polygons.length === 1 &&
+    dragState.polygons[0]?.id === polygonDraft.id
+      ? polygonDraft.vertices.map(vertex =>
+          translateWorldPoint(vertex, dragState.currentDelta)
+        )
+      : (polygonDraft?.vertices ?? []);
+  const marqueeBounds = dragState?.kind === 'marquee' ? dragState.bounds : null;
+  const multiSelectActive = selectedPolygonIds.length > 1;
+  const draftVertexCount = polygonDraft?.vertices.length ?? 0;
 
   return (
-    <div className="space-y-4">
-      <CardShell>
+    <div className="rounded-2xl border bg-card shadow-sm">
+      <div className="flex flex-col gap-4 p-4 md:p-5">
+        <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Active Workspace
+            </div>
+            <div className="text-2xl font-semibold tracking-tight">
+              {toolLabel}
+            </div>
+            <p className="text-sm text-muted-foreground">{nextActionHint}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              className="rounded-md px-3 py-1 text-[11px]"
+              variant="outline"
+            >
+              {selectionSummary}
+            </Badge>
+            <Badge
+              className={cn(
+                'rounded-md px-3 py-1 text-[11px]',
+                tool === 'draw-polygon' && draftVertexCount > 0
+                  ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
+                  : undefined
+              )}
+              variant="secondary"
+            >
+              {tool === 'draw-polygon'
+                ? `${draftVertexCount} draft vertices`
+                : `Zoom ${zoomPercent}%`}
+            </Badge>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-2">
           <div
+            className="relative h-[680px] w-full min-w-0 overflow-hidden rounded-xl border border-slate-800 bg-[#071220]"
+            data-testid="editor-stage"
             ref={containerRef}
-            className="relative h-[640px] overflow-hidden rounded-md border bg-[#0a1320]"
           >
             {size.width > 0 && size.height > 0 && (
               <>
-                <MapStage
-                  canvasHeight={size.height}
-                  canvasWidth={size.width}
-                  chunks={chunks}
-                  map={map}
-                  viewport={viewport}
-                />
+                <div className="pointer-events-none absolute inset-0 z-0 [&_canvas]:pointer-events-none">
+                  <MapStage
+                    canvasHeight={size.height}
+                    canvasWidth={size.width}
+                    chunks={chunks}
+                    map={map}
+                    viewport={viewport}
+                  />
+                </div>
                 <div
-                  className="absolute inset-0"
+                  className="absolute inset-0 z-10"
                   onWheelCapture={onWheelCapture}
                 >
+                  <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(60%,420px)] flex-col gap-2">
+                    <div className="rounded-xl border border-slate-700/80 bg-slate-950/88 px-3 py-2 text-left shadow-lg backdrop-blur">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          className="rounded-md bg-sky-500/15 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-500/15"
+                          variant="secondary"
+                        >
+                          {toolLabel}
+                        </Badge>
+                        <span className="text-sm font-medium text-slate-50">
+                          {selectionSummary}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-slate-300">
+                        {nextActionHint}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800/90 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg backdrop-blur">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        <span>Scroll to zoom</span>
+                        <span>Drag to pan in pan mode</span>
+                        <span>Esc clears drafts or selection</span>
+                      </div>
+                    </div>
+                  </div>
                   <svg
-                    ref={interactionRef}
                     className="absolute inset-0 outline-none"
                     height={size.height}
                     onClick={onCanvasClick}
@@ -151,9 +247,7 @@ export function EditorCanvas({
                     onPointerMove={onCanvasPointerMove}
                     onPointerUp={onCanvasPointerUp}
                     onWheel={onWheel}
-                    tabIndex={0}
-                    viewBox={`0 0 ${size.width} ${size.height}`}
-                    width={size.width}
+                    ref={interactionRef}
                     style={{
                       cursor: dragState
                         ? 'grabbing'
@@ -165,6 +259,9 @@ export function EditorCanvas({
                               ? 'grab'
                               : 'default'
                     }}
+                    tabIndex={0}
+                    viewBox={`0 0 ${size.width} ${size.height}`}
+                    width={size.width}
                   >
                     {overlayPolygons.map(polygon => {
                       const points = polygon.vertices
@@ -180,220 +277,260 @@ export function EditorCanvas({
 
                       return (
                         <polygon
-                          key={polygon.id}
+                          data-polygon-id={polygon.id}
                           fill={
                             selected
-                              ? 'rgba(244, 114, 182, 0.24)'
+                              ? multiSelectActive
+                                ? 'rgba(168, 85, 247, 0.24)'
+                                : 'rgba(244, 114, 182, 0.26)'
                               : highlighted
-                                ? 'rgba(14, 165, 233, 0.22)'
+                                ? 'rgba(34, 211, 238, 0.18)'
                                 : 'rgba(255,255,255,0.08)'
                           }
+                          key={polygon.id}
                           onClick={event => {
                             STOP_PROPAGATION(event);
-                            setSelectedPolygonIds(selection =>
-                              nextOrderedSelection(
-                                selection,
-                                polygon.id,
-                                event.shiftKey
-                              ),
-                              true
-                            );
-                            setSelectedControlPointId(null);
-                            setSelectedIslandId(null);
-                            if (tool !== 'edit-vertices') {
-                              setPolygonDraft(null);
-                            }
+                            onPolygonClick(event, polygon);
                           }}
-                          onPointerDown={STOP_PROPAGATION}
+                          onPointerDown={event =>
+                            onPolygonPointerDown(event, polygon)
+                          }
                           points={points}
                           stroke={
                             selected
-                              ? '#f472b6'
+                              ? multiSelectActive
+                                ? '#a855f7'
+                                : '#f472b6'
                               : highlighted
-                                ? '#38bdf8'
+                                ? '#22d3ee'
                                 : 'rgba(255,255,255,0.4)'
                           }
-                          strokeWidth={selected ? 3 : 2}
+                          strokeDasharray={
+                            selected && multiSelectActive ? '10 6' : undefined
+                          }
+                          strokeWidth={selected ? 3.5 : highlighted ? 2.5 : 2}
                         />
                       );
                     })}
 
-                    {polygonDraft && (
-                      <>
-                        <polygon
-                          fill={
-                            polygonDraft.kind === 'create'
-                              ? 'rgba(34,197,94,0.18)'
-                              : 'rgba(250,204,21,0.18)'
-                          }
-                          points={polygonDraft.vertices
-                            .map(vertex => {
-                              const screen = toScreenPoint(vertex);
-                              return `${screen.x},${screen.z}`;
-                            })
-                            .join(' ')}
-                          stroke={
-                            polygonDraft.kind === 'create'
-                              ? '#22c55e'
-                              : '#facc15'
-                          }
-                          strokeWidth={2}
-                        />
-                        {polygonDraft.vertices.map((vertex, index) => {
-                          const screen = toScreenPoint(vertex);
-                          const isFirst = index === 0;
-                          const selected =
-                            index === polygonDraft.selectedVertexIndex;
-
-                          return (
-                            <circle
-                              key={`${vertex.x}:${vertex.z}:${index}`}
-                              cx={screen.x}
-                              cy={screen.z}
+                    {polygonDraft &&
+                      (() => {
+                        const draftAsSource: SourcePolygonLike | null =
+                          polygonDraft.kind === 'edit' && polygonDraft.id
+                            ? {
+                                id: polygonDraft.id,
+                                params: polygonDraft.params,
+                                vertices: previewDraftVertices
+                              }
+                            : null;
+                        return (
+                          <>
+                            <polygon
                               fill={
-                                selected
-                                  ? '#ffffff'
-                                  : isFirst && tool === 'draw-polygon'
-                                    ? '#86efac'
-                                    : '#0f172a'
+                                polygonDraft.kind === 'create'
+                                  ? 'rgba(34,197,94,0.22)'
+                                  : 'rgba(250,204,21,0.22)'
                               }
                               onClick={event => {
-                                STOP_PROPAGATION(event);
-                                if (
-                                  tool === 'draw-polygon' &&
-                                  isFirst &&
-                                  canSavePolygonDraft(
-                                    polygonDraft.vertices,
-                                    polygonDraft.params
-                                  )
-                                ) {
-                                  commitDrawPolygon();
+                                if (!draftAsSource) {
                                   return;
                                 }
 
-                                setPolygonDraft(draft =>
-                                  draft
-                                    ? { ...draft, selectedVertexIndex: index }
-                                    : draft,
-                                  true
-                                );
+                                STOP_PROPAGATION(event);
+                                onPolygonClick(event, draftAsSource);
                               }}
                               onPointerDown={event => {
-                                STOP_PROPAGATION(event);
-                                if (tool !== 'edit-vertices') {
+                                if (!draftAsSource) {
                                   return;
                                 }
 
-                                interactionRef.current?.setPointerCapture(
-                                  event.pointerId
-                                );
-                                setDragState({
-                                  kind: 'vertex',
-                                  pointerId: event.pointerId,
-                                  vertexIndex: index
-                                });
-                                setPolygonDraft(draft =>
-                                  draft
-                                    ? { ...draft, selectedVertexIndex: index }
-                                    : draft
-                                );
+                                onPolygonPointerDown(event, draftAsSource);
                               }}
-                              r={isFirst && tool === 'draw-polygon' ? 8 : 6}
-                              stroke={selected ? '#22c55e' : '#ffffff'}
-                              strokeWidth={2}
+                              points={previewDraftVertices
+                                .map(vertex => {
+                                  const screen = toScreenPoint(vertex);
+                                  return `${screen.x},${screen.z}`;
+                                })
+                                .join(' ')}
+                              stroke={
+                                polygonDraft.kind === 'create'
+                                  ? '#22c55e'
+                                  : '#facc15'
+                              }
+                              strokeWidth={3}
                             />
-                          );
-                        })}
-                        {tool === 'edit-vertices' &&
-                          polygonDraft.vertices.map((vertex, index) => {
-                            const next =
-                              polygonDraft.vertices[
-                                (index + 1) % polygonDraft.vertices.length
-                              ];
-                            if (!next) {
-                              return null;
-                            }
+                            {previewDraftVertices.map((vertex, index) => {
+                              const screen = toScreenPoint(vertex);
+                              const isFirst = index === 0;
+                              const selected =
+                                index === polygonDraft.selectedVertexIndex;
 
-                            const from = toScreenPoint(vertex);
-                            const to = toScreenPoint(next);
+                              return (
+                                <circle
+                                  cx={screen.x}
+                                  cy={screen.z}
+                                  fill={
+                                    selected
+                                      ? '#ffffff'
+                                      : isFirst && tool === 'draw-polygon'
+                                        ? '#86efac'
+                                        : '#082f49'
+                                  }
+                                  key={`${vertex.x}:${vertex.z}:${index}`}
+                                  onClick={event => {
+                                    STOP_PROPAGATION(event);
+                                    if (
+                                      tool === 'draw-polygon' &&
+                                      isFirst &&
+                                      canSavePolygonDraft(
+                                        previewDraftVertices,
+                                        polygonDraft.params
+                                      )
+                                    ) {
+                                      commitDrawPolygon();
+                                      return;
+                                    }
 
-                            return (
-                              <line
-                                key={`edge-${index}`}
-                                onClick={event => {
-                                  STOP_PROPAGATION(event);
-                                  const world = toWorldPoint(
-                                    event as unknown as PointerEvent<SVGSVGElement>
-                                  );
-                                  const insertAt = getPolygonEdgeInsertPosition(
-                                    vertex,
-                                    next,
-                                    world
-                                  );
-                                  setPolygonDraft(draft =>
-                                    draft
-                                      ? {
-                                          ...draft,
-                                          selectedVertexIndex: index + 1,
-                                          vertices: [
-                                            ...draft.vertices.slice(
-                                              0,
-                                              index + 1
-                                            ),
-                                            insertAt,
-                                            ...draft.vertices.slice(index + 1)
-                                          ]
-                                        }
-                                      : draft,
-                                    true
-                                  );
-                                }}
-                                onPointerDown={STOP_PROPAGATION}
-                                stroke="transparent"
-                                strokeWidth={14}
-                                x1={from.x}
-                                x2={to.x}
-                                y1={from.z}
-                                y2={to.z}
-                              />
-                            );
-                          })}
-                      </>
-                    )}
+                                    setPolygonDraft(
+                                      draft =>
+                                        draft
+                                          ? {
+                                              ...draft,
+                                              selectedVertexIndex: index
+                                            }
+                                          : draft,
+                                      true
+                                    );
+                                  }}
+                                  onPointerDown={event => {
+                                    STOP_PROPAGATION(event);
+                                    if (!showEditVertices) {
+                                      return;
+                                    }
+
+                                    interactionRef.current?.setPointerCapture(
+                                      event.pointerId
+                                    );
+                                    setDragState({
+                                      kind: 'vertex',
+                                      pointerId: event.pointerId,
+                                      vertexIndex: index
+                                    });
+                                    setPolygonDraft(draft =>
+                                      draft
+                                        ? {
+                                            ...draft,
+                                            selectedVertexIndex: index
+                                          }
+                                        : draft
+                                    );
+                                  }}
+                                  r={
+                                    selected
+                                      ? 7
+                                      : isFirst && tool === 'draw-polygon'
+                                        ? 8
+                                        : 6
+                                  }
+                                  stroke={selected ? '#22c55e' : '#ffffff'}
+                                  strokeWidth={selected ? 3 : 2}
+                                />
+                              );
+                            })}
+                            {showEditVertices &&
+                              previewDraftVertices.map((vertex, index) => {
+                                const next =
+                                  previewDraftVertices[
+                                    (index + 1) % previewDraftVertices.length
+                                  ];
+                                if (!next) {
+                                  return null;
+                                }
+
+                                const from = toScreenPoint(vertex);
+                                const to = toScreenPoint(next);
+
+                                return (
+                                  <line
+                                    key={`edge-${index}`}
+                                    onClick={event => {
+                                      STOP_PROPAGATION(event);
+                                      if (!showEditVertices) {
+                                        return;
+                                      }
+                                      const world = toWorldPoint(
+                                        event as unknown as PointerEvent<SVGSVGElement>
+                                      );
+                                      const insertAt =
+                                        getPolygonEdgeInsertPosition(
+                                          vertex,
+                                          next,
+                                          world
+                                        );
+                                      setPolygonDraft(
+                                        draft =>
+                                          draft
+                                            ? {
+                                                ...draft,
+                                                selectedVertexIndex: index + 1,
+                                                vertices: [
+                                                  ...draft.vertices.slice(
+                                                    0,
+                                                    index + 1
+                                                  ),
+                                                  insertAt,
+                                                  ...draft.vertices.slice(
+                                                    index + 1
+                                                  )
+                                                ]
+                                              }
+                                            : draft,
+                                        true
+                                      );
+                                    }}
+                                    onPointerDown={STOP_PROPAGATION}
+                                    stroke="rgba(250, 204, 21, 0.01)"
+                                    strokeWidth={18}
+                                    x1={from.x}
+                                    x2={to.x}
+                                    y1={from.z}
+                                    y2={to.z}
+                                  />
+                                );
+                              })}
+                          </>
+                        );
+                      })()}
 
                     {controlPoints.map(point => {
                       const screen = toScreenPoint(point);
                       const selected = point.id === selectedControlPointId;
+                      const visualRadius = selected ? 8 : 7;
                       return (
                         <g key={point.id}>
                           <circle
                             cx={screen.x}
                             cy={screen.z}
-                            fill={selected ? '#f97316' : '#e2e8f0'}
+                            data-testid="editor-control-point-handle"
+                            fill="rgba(0,0,0,0.001)"
                             onClick={event => {
                               STOP_PROPAGATION(event);
-                              setSelectedControlPointId(point.id);
-                              setSelectedPolygonIds([]);
-                              setSelectedIslandId(null);
-                              setPolygonDraft(null);
+                              onControlPointClick(event, point);
                             }}
-                            onPointerDown={event => {
-                              STOP_PROPAGATION(event);
-                              interactionRef.current?.setPointerCapture(
-                                event.pointerId
-                              );
-                              setSelectedControlPointId(point.id);
-                              setSelectedPolygonIds([]);
-                              setSelectedIslandId(null);
-                              setDragState({
-                                kind: 'control-point',
-                                pointId: point.id,
-                                pointerId: event.pointerId
-                              });
-                            }}
-                            r={7}
-                            stroke="#0f172a"
-                            strokeWidth={2}
+                            onPointerDown={event =>
+                              onControlPointPointerDown(event, point)
+                            }
+                            pointerEvents="all"
+                            r={Math.max(18, visualRadius + 10)}
+                          />
+                          <circle
+                            cx={screen.x}
+                            cy={screen.z}
+                            fill={selected ? '#fb923c' : '#e2e8f0'}
+                            pointerEvents="none"
+                            r={visualRadius}
+                            stroke={selected ? '#fff7ed' : '#0f172a'}
+                            strokeWidth={selected ? 3 : 2}
                           />
                           {(selected || controlPointDraft?.id === point.id) && (
                             <circle
@@ -408,47 +545,76 @@ export function EditorCanvas({
                                   map.resolution.metersPerTile) *
                                 viewport.zoom
                               }
-                              stroke="rgba(249,115,22,0.45)"
-                              strokeDasharray="8 6"
-                              strokeWidth={2}
+                              stroke="rgba(251,146,60,0.6)"
+                              strokeDasharray="10 6"
+                              strokeWidth={2.5}
                             />
                           )}
                         </g>
                       );
                     })}
 
-                    {controlPointDraft && (
-                      <>
-                        <circle
-                          cx={toScreenPoint(controlPointDraft).x}
-                          cy={toScreenPoint(controlPointDraft).z}
-                          fill="transparent"
-                          pointerEvents="none"
-                          r={
-                            (controlPointDraft.influenceMeters /
-                              map.resolution.metersPerTile) *
-                            viewport.zoom
-                          }
-                          stroke="rgba(251,146,60,0.4)"
-                          strokeDasharray="8 6"
-                          strokeWidth={2}
-                        />
-                        <circle
-                          cx={toScreenPoint(controlPointDraft).x}
-                          cy={toScreenPoint(controlPointDraft).z}
-                          fill="#fb923c"
-                          pointerEvents="none"
-                          r={8}
-                          stroke="#fff7ed"
-                          strokeWidth={2}
-                        />
-                      </>
-                    )}
+                    {controlPointDraft &&
+                      (() => {
+                        const screenDraft = toScreenPoint(controlPointDraft);
+                        return (
+                          <>
+                            <circle
+                              cx={screenDraft.x}
+                              cy={screenDraft.z}
+                              fill="transparent"
+                              pointerEvents="none"
+                              r={
+                                (controlPointDraft.influenceMeters /
+                                  map.resolution.metersPerTile) *
+                                viewport.zoom
+                              }
+                              stroke="rgba(251,146,60,0.4)"
+                              strokeDasharray="10 6"
+                              strokeWidth={2.5}
+                            />
+                            <circle
+                              cx={screenDraft.x}
+                              cy={screenDraft.z}
+                              fill="#fb923c"
+                              pointerEvents="none"
+                              r={9}
+                              stroke="#fff7ed"
+                              strokeWidth={3}
+                            />
+                          </>
+                        );
+                      })()}
+
+                    {marqueeBounds &&
+                      (() => {
+                        const screenMin = toScreenPoint({
+                          x: marqueeBounds.minX,
+                          z: marqueeBounds.minZ
+                        });
+                        const screenMax = toScreenPoint({
+                          x: marqueeBounds.maxX,
+                          z: marqueeBounds.maxZ
+                        });
+                        return (
+                          <rect
+                            fill="rgba(56, 189, 248, 0.16)"
+                            height={Math.abs(screenMax.z - screenMin.z) || 1}
+                            pointerEvents="none"
+                            stroke="#38bdf8"
+                            strokeDasharray="8 4"
+                            strokeWidth={2}
+                            width={Math.abs(screenMax.x - screenMin.x) || 1}
+                            x={Math.min(screenMin.x, screenMax.x)}
+                            y={Math.min(screenMin.z, screenMax.z)}
+                          />
+                        );
+                      })()}
                   </svg>
                 </div>
-                <div className="absolute right-3 bottom-3 flex gap-1">
+                <div className="absolute right-3 bottom-3 z-10 flex gap-1 rounded-xl border border-slate-800/80 bg-slate-950/80 p-1 shadow-lg backdrop-blur">
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={zoomIn}
                     size="icon"
                     title="Zoom in"
@@ -457,7 +623,7 @@ export function EditorCanvas({
                     <Plus className="h-4 w-4" />
                   </Button>
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={zoomOut}
                     size="icon"
                     title="Zoom out"
@@ -466,7 +632,7 @@ export function EditorCanvas({
                     <Minus className="h-4 w-4" />
                   </Button>
                   <Button
-                    className="h-8 w-8"
+                    className="h-9 w-9 rounded-lg"
                     onClick={fitToView}
                     size="icon"
                     title="Reset view"
@@ -478,33 +644,18 @@ export function EditorCanvas({
               </>
             )}
           </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Infinite · Zoom {zoomPercent}%</span>
-            <span>
-              {tool === 'draw-polygon'
-                ? 'Click to place vertices · Enter or first vertex to save · Esc to cancel'
-                : 'Drag to pan · Scroll to zoom · Delete removes selected items'}
-            </span>
+          <div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Infinite map</span>
+              <span>Zoom {zoomPercent}%</span>
+              {tool === 'draw-polygon' ? (
+                <span>{draftVertexCount} vertices in current draft</span>
+              ) : null}
+            </div>
+            <span>{nextActionHint}</span>
           </div>
         </div>
-      </CardShell>
-    </div>
-  );
-}
-
-function CardShell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-      <div className="flex flex-col space-y-1.5 p-6">
-        <h3 className="text-2xl font-semibold leading-none tracking-tight">
-          Terrain Editor
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Drag to pan, scroll to zoom, click to author objects, and use
-          shift-click for ordered boolean selection.
-        </p>
       </div>
-      <div className="p-6 pt-0">{children}</div>
     </div>
   );
-}
+};

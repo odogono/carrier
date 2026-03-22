@@ -9,17 +9,17 @@ type ChunkBitmapEntry = {
 const cache = new Map<string, ChunkBitmapEntry>();
 
 const hashChunk = (chunk: RuntimeMapChunk) => {
-  let hash = 2166136261;
+  let hash = 2_166_136_261;
 
   for (const height of chunk.heights) {
     hash ^= Math.round(height * 100);
-    hash = Math.imul(hash, 16777619);
+    hash = Math.imul(hash, 16_777_619);
   }
 
   if (chunk.materials) {
     for (const material of chunk.materials) {
       hash ^= Number(material) + 1;
-      hash = Math.imul(hash, 16777619);
+      hash = Math.imul(hash, 16_777_619);
     }
   }
 
