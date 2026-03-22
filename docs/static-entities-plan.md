@@ -331,6 +331,8 @@ Acceptance:
 
 ### Phase 2: Asset upload and processing pipeline
 
+Status: complete on 2026-03-22.
+
 Goal: make the API the source of truth for uploaded assets and normalized runtime artifacts.
 
 Changes:

@@ -11,11 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity Phase 1 foundations: shared `AssetVersion`, `Archetype`, and `StaticEntity` contracts plus supporting enums in `carrier-contracts`
 - SQLite persistence for static entity catalog data via new `asset_versions`, `archetypes`, and `map_static_entities` tables in the API repository
 - Repository-level static entity mutation helpers with shared map revision participation
+- Static entity Phase 2 asset pipeline in the API: asset upload endpoints, original/runtime asset storage, async GLB processing, asset status reads, and runtime artifact fetches
 
 ### Changed
 
 - Map chunk contracts now include placement-only `staticEntities` metadata on both JSON and binary chunk responses
 - Binary chunk decoding now restores static entity metadata alongside height/material payloads
+- Asset version repository support now includes direct reads and status/metadata updates for upload, processing, review, and failure transitions
 
 ## [0.4.0] - 2026-03-22
 

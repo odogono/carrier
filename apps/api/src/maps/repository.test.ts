@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-
 import { isFiniteMap } from 'carrier-contracts/types';
 
 import { MapRepository, MapRepositoryError } from './repository';
@@ -25,9 +24,10 @@ const getChunkCount = (repository: MapRepository) =>
 const hasTable = (repository: MapRepository, name: string) =>
   Boolean(
     repository.db
-      .query<{ name: string }, [string]>(
-        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
-      )
+      .query<
+        { name: string },
+        [string]
+      >(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
       .get(name)
   );
 
@@ -221,8 +221,13 @@ describe('map repository', () => {
         minX: -18,
         minZ: -18
       });
-      expect(xorResult.retiredPolygonIds).toEqual([left.polygon.id, right.polygon.id]);
-      expect(repository.listSourcePolygons(created.id, 'active')).toHaveLength(2);
+      expect(xorResult.retiredPolygonIds).toEqual([
+        left.polygon.id,
+        right.polygon.id
+      ]);
+      expect(repository.listSourcePolygons(created.id, 'active')).toHaveLength(
+        2
+      );
       expect(repository.listSourcePolygons(created.id)).toHaveLength(4);
 
       const rejectMap = repository.createMap({
@@ -254,7 +259,9 @@ describe('map repository', () => {
       ).toThrow(MapRepositoryError);
 
       expect(rejectMap.id).toBeTruthy();
-      expect(repository.listSourcePolygons(rejectMap.id, 'active')).toHaveLength(2);
+      expect(
+        repository.listSourcePolygons(rejectMap.id, 'active')
+      ).toHaveLength(2);
       expect(repository.getMap(rejectMap.id)?.revision).toBe(2);
     } finally {
       repository.close();
@@ -294,6 +301,22 @@ describe('map repository', () => {
         status: 'uploaded'
       });
       expect(repository.listAssetVersions()).toEqual([assetVersion]);
+      expect(repository.getAssetVersion(assetVersion.id)).toEqual(assetVersion);
+
+      const updatedAssetVersion = repository.updateAssetVersion({
+        diagnostics: ['normalized'],
+        id: assetVersion.id,
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/warehouse-v1.glb',
+          sizeBytes: 1200
+        },
+        status: 'review'
+      });
+      expect(updatedAssetVersion.status).toBe('review');
+      expect(updatedAssetVersion.runtimeFile?.path).toBe(
+        'runtime/warehouse-v1.glb'
+      );
 
       const archetype = repository.createArchetype({
         assetVersionId: assetVersion.id,
@@ -421,8 +444,12 @@ describe('map repository', () => {
       expect(updated.mapRevision).toBe(2);
       expect(updated.result.state).toBe('disabled');
 
-      expect(repository.getMapChunk(map.id, 0, 0)?.staticEntities).toHaveLength(0);
-      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(1);
+      expect(repository.getMapChunk(map.id, 0, 0)?.staticEntities).toHaveLength(
+        0
+      );
+      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(
+        1
+      );
 
       expect(() =>
         repository.createStaticEntity({
@@ -532,9 +559,10 @@ describe('map repository', () => {
 
       const snapshotCount =
         repository.db
-          .query<{ count: number }, [string]>(
-            'SELECT COUNT(*) AS count FROM map_derived_islands WHERE map_id = ?'
-          )
+          .query<
+            { count: number },
+            [string]
+          >('SELECT COUNT(*) AS count FROM map_derived_islands WHERE map_id = ?')
           .get(exported.id)?.count ?? 0;
       expect(snapshotCount).toBeGreaterThan(0);
 
@@ -565,9 +593,15 @@ describe('map repository', () => {
         z: 160
       });
 
-      expect(repository.findExport(exported.id)?.export?.sourceRevision).toBe(1);
-      expect(repository.getMapChunk(exported.id, 0, 0)?.heights).toEqual(exportedChunk?.heights);
-      expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(beforeExportChunk?.heights);
+      expect(repository.findExport(exported.id)?.export?.sourceRevision).toBe(
+        1
+      );
+      expect(repository.getMapChunk(exported.id, 0, 0)?.heights).toEqual(
+        exportedChunk?.heights
+      );
+      expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(
+        beforeExportChunk?.heights
+      );
     } finally {
       repository.close();
     }
@@ -629,8 +663,12 @@ describe('map repository', () => {
 
       const splitIslands = repository.listDerivedIslands(created.id);
       expect(splitIslands).toHaveLength(2);
-      expect(splitIslands.some(island => island.id === largeIsland?.id)).toBe(true);
-      expect(splitIslands.some(island => island.id === smallIsland?.id)).toBe(false);
+      expect(splitIslands.some(island => island.id === largeIsland?.id)).toBe(
+        true
+      );
+      expect(splitIslands.some(island => island.id === smallIsland?.id)).toBe(
+        false
+      );
 
       const lineage = repository.listDerivedIslandLineage(created.id);
       expect(lineage.some(row => row.operation === 'merge')).toBe(true);
@@ -682,7 +720,9 @@ describe('map repository', () => {
       expect(negative?.chunkX).toBe(-1);
 
       for (let row = 0; row < 33; row += 1) {
-        expect(chunkA?.heights[row * 33 + 32]).toBe(adjacent?.heights[row * 33]);
+        expect(chunkA?.heights[row * 33 + 32]).toBe(
+          adjacent?.heights[row * 33]
+        );
       }
     } finally {
       repository.close();

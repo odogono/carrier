@@ -1,10 +1,11 @@
-import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import type {
   ApplyBooleanOutput,
   Archetype,
+  AssetVersion,
   BooleanOperation,
   ControlPoint,
   CreateMapExportInput,
@@ -14,11 +15,10 @@ import type {
   MapGenerator,
   MapMetadata,
   MapOverview,
-  AssetVersion,
-  StaticEntity,
   SourcePolygon,
   SourcePolygonParams,
   SourcePolygonStatus,
+  StaticEntity,
   WorldBounds,
   WorldPoint
 } from 'carrier-contracts';
@@ -206,6 +206,20 @@ type MutateStaticEntityOptions = {
 
 type CreateAssetVersionInput = Omit<AssetVersion, 'createdAt' | 'updatedAt'>;
 
+type UpdateAssetVersionInput = {
+  id: string;
+  collisionBox?: AssetVersion['collisionBox'];
+  collisionClass?: AssetVersion['collisionClass'];
+  diagnostics?: AssetVersion['diagnostics'];
+  footprint?: AssetVersion['footprint'];
+  groundingPolicy?: AssetVersion['groundingPolicy'];
+  instancingEligible?: AssetVersion['instancingEligible'];
+  maxHeightDeltaMeters?: AssetVersion['maxHeightDeltaMeters'];
+  originalFile?: AssetVersion['originalFile'];
+  runtimeFile?: AssetVersion['runtimeFile'];
+  status?: AssetVersion['status'];
+};
+
 type CreateArchetypeInput = Omit<Archetype, 'createdAt' | 'updatedAt'>;
 
 type CreateStaticEntityInput = Omit<StaticEntity, 'createdAt' | 'updatedAt'> & {
@@ -382,7 +396,10 @@ const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
   return tiles;
 };
 
-const deriveTileCoordinateFromMeters = (meters: number, metersPerTile: number) => {
+const deriveTileCoordinateFromMeters = (
+  meters: number,
+  metersPerTile: number
+) => {
   const tiles = meters / metersPerTile;
 
   if (!Number.isInteger(tiles)) {
@@ -431,7 +448,11 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
         }
       : undefined;
 
-  if (row.extentKind === 'finite' && row.widthTiles !== null && row.heightTiles !== null) {
+  if (
+    row.extentKind === 'finite' &&
+    row.widthTiles !== null &&
+    row.heightTiles !== null
+  ) {
     return {
       createdAt: row.createdAt,
       extent: {
@@ -444,7 +465,10 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
         wrapZ: row.wrapZ === 1
       },
       export: exportMetadata,
-      generator: row.kind === 'wrapped-classic' ? (row.generator as MapMetadata['generator']) : undefined,
+      generator:
+        row.kind === 'wrapped-classic'
+          ? (row.generator as MapMetadata['generator'])
+          : undefined,
       id: row.id,
       kind: row.kind as MapMetadata['kind'],
       name: row.name,
@@ -531,7 +555,9 @@ const controlPointRowToModel = (row: ControlPointRow): ControlPoint => ({
   z: row.z
 });
 
-const derivedIslandRowToModel = (row: DerivedIslandRow): DerivedIslandGeometryRecord => {
+const derivedIslandRowToModel = (
+  row: DerivedIslandRow
+): DerivedIslandGeometryRecord => {
   const geometry = parseJson<WorldPoint[]>(row.geometryJson);
 
   return {
@@ -550,7 +576,9 @@ const derivedIslandRowToModel = (row: DerivedIslandRow): DerivedIslandGeometryRe
   };
 };
 
-const toPublicDerivedIsland = (island: DerivedIslandGeometryRecord): DerivedIsland => ({
+const toPublicDerivedIsland = (
+  island: DerivedIslandGeometryRecord
+): DerivedIsland => ({
   areaMeters2: island.areaMeters2,
   bbox: island.bbox,
   centroid: island.centroid,
@@ -646,7 +674,9 @@ export class MapRepository {
 
   constructor(options: MapRepositoryOptions = {}) {
     this.db = new Database(
-      ensureDatabasePath(options.dbPath ?? process.env.API_DB_PATH ?? '.data/carrier.sqlite')
+      ensureDatabasePath(
+        options.dbPath ?? process.env.API_DB_PATH ?? '.data/carrier.sqlite'
+      )
     );
     this.migrate();
   }
@@ -670,11 +700,13 @@ export class MapRepository {
 
   private findMapRow(id: string) {
     return this.db
-      .query<MapRow, [string]>(`
+      .query<MapRow, [string]>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         WHERE id = ?
-      `)
+      `
+      )
       .get(id);
   }
 
@@ -704,8 +736,15 @@ export class MapRepository {
   private ensureExportedMapRow(id: string) {
     const row = this.getMapRowOrThrow(id);
 
-    if (row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
-      throw new MapRepositoryError('BAD_REQUEST', `Map ${id} is not an exported slice`);
+    if (
+      row.sourceMapId === null ||
+      row.sourceRevision === null ||
+      row.exportedAt === null
+    ) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Map ${id} is not an exported slice`
+      );
     }
 
     return row;
@@ -720,9 +759,14 @@ export class MapRepository {
     }
   }
 
-  private getChunkRow(mapId: string, chunkX: number, chunkZ: number): ChunkRow | null {
+  private getChunkRow(
+    mapId: string,
+    chunkX: number,
+    chunkZ: number
+  ): ChunkRow | null {
     return this.db
-      .query<ChunkRow, [string, number, number]>(`
+      .query<ChunkRow, [string, number, number]>(
+        `
         SELECT
           chunk_x AS chunkX,
           chunk_z AS chunkZ,
@@ -736,7 +780,8 @@ export class MapRepository {
           tile_width AS tileWidth
         FROM map_chunks
         WHERE map_id = ? AND chunk_x = ? AND chunk_z = ?
-      `)
+      `
+      )
       .get(mapId, chunkX, chunkZ);
   }
 
@@ -766,8 +811,14 @@ export class MapRepository {
       return this.getChunkRow(row.id, requestedChunkX, requestedChunkZ);
     }
 
-    const canonicalChunkX = toCanonicalChunkCoordinate(requestedChunkX, chunkCountX);
-    const canonicalChunkZ = toCanonicalChunkCoordinate(requestedChunkZ, chunkCountZ);
+    const canonicalChunkX = toCanonicalChunkCoordinate(
+      requestedChunkX,
+      chunkCountX
+    );
+    const canonicalChunkZ = toCanonicalChunkCoordinate(
+      requestedChunkZ,
+      chunkCountZ
+    );
 
     return this.getChunkRow(row.id, canonicalChunkX, canonicalChunkZ);
   }
@@ -778,20 +829,24 @@ export class MapRepository {
   ): SourcePolygonRow[] {
     return status
       ? this.db
-          .query<SourcePolygonRow, [string, string]>(`
+          .query<SourcePolygonRow, [string, string]>(
+            `
             SELECT ${SOURCE_POLYGON_COLUMNS}
             FROM map_source_polygons
             WHERE map_id = ? AND status = ?
             ORDER BY created_at ASC, id ASC
-          `)
+          `
+          )
           .all(mapId, status)
       : this.db
-          .query<SourcePolygonRow, [string]>(`
+          .query<SourcePolygonRow, [string]>(
+            `
             SELECT ${SOURCE_POLYGON_COLUMNS}
             FROM map_source_polygons
             WHERE map_id = ?
             ORDER BY created_at ASC, id ASC
-          `)
+          `
+          )
           .all(mapId);
   }
 
@@ -800,11 +855,13 @@ export class MapRepository {
     id: string
   ): SourcePolygonRow | null {
     return this.db
-      .query<SourcePolygonRow, [string, string]>(`
+      .query<SourcePolygonRow, [string, string]>(
+        `
         SELECT ${SOURCE_POLYGON_COLUMNS}
         FROM map_source_polygons
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -827,22 +884,26 @@ export class MapRepository {
 
   private listControlPointRows(mapId: string): ControlPointRow[] {
     return this.db
-      .query<ControlPointRow, [string]>(`
+      .query<ControlPointRow, [string]>(
+        `
         SELECT ${CONTROL_POINT_COLUMNS}
         FROM map_control_points
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
   private getControlPointRow(mapId: string, id: string) {
     return this.db
-      .query<ControlPointRow, [string, string]>(`
+      .query<ControlPointRow, [string, string]>(
+        `
         SELECT ${CONTROL_POINT_COLUMNS}
         FROM map_control_points
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -861,22 +922,26 @@ export class MapRepository {
 
   private listDerivedIslandRows(mapId: string): DerivedIslandRow[] {
     return this.db
-      .query<DerivedIslandRow, [string]>(`
+      .query<DerivedIslandRow, [string]>(
+        `
         SELECT ${DERIVED_ISLAND_COLUMNS}
         FROM map_derived_islands
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
   private getDerivedIslandRow(mapId: string, id: string) {
     return this.db
-      .query<DerivedIslandRow, [string, string]>(`
+      .query<DerivedIslandRow, [string, string]>(
+        `
         SELECT ${DERIVED_ISLAND_COLUMNS}
         FROM map_derived_islands
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -895,21 +960,25 @@ export class MapRepository {
 
   private listAssetVersionRows(): AssetVersionRow[] {
     return this.db
-      .query<AssetVersionRow, []>(`
+      .query<AssetVersionRow, []>(
+        `
         SELECT ${ASSET_VERSION_COLUMNS}
         FROM asset_versions
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all();
   }
 
   private getAssetVersionRow(id: string) {
     return this.db
-      .query<AssetVersionRow, [string]>(`
+      .query<AssetVersionRow, [string]>(
+        `
         SELECT ${ASSET_VERSION_COLUMNS}
         FROM asset_versions
         WHERE id = ?
-      `)
+      `
+      )
       .get(id);
   }
 
@@ -917,7 +986,10 @@ export class MapRepository {
     const row = this.getAssetVersionRow(id);
 
     if (!row) {
-      throw new MapRepositoryError('NOT_FOUND', `Asset version ${id} was not found`);
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Asset version ${id} was not found`
+      );
     }
 
     return row;
@@ -925,21 +997,25 @@ export class MapRepository {
 
   private listArchetypeRows(): ArchetypeRow[] {
     return this.db
-      .query<ArchetypeRow, []>(`
+      .query<ArchetypeRow, []>(
+        `
         SELECT ${ARCHETYPE_COLUMNS}
         FROM archetypes
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all();
   }
 
   private getArchetypeRow(id: string) {
     return this.db
-      .query<ArchetypeRow, [string]>(`
+      .query<ArchetypeRow, [string]>(
+        `
         SELECT ${ARCHETYPE_COLUMNS}
         FROM archetypes
         WHERE id = ?
-      `)
+      `
+      )
       .get(id);
   }
 
@@ -947,7 +1023,10 @@ export class MapRepository {
     const row = this.getArchetypeRow(id);
 
     if (!row) {
-      throw new MapRepositoryError('NOT_FOUND', `Archetype ${id} was not found`);
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Archetype ${id} was not found`
+      );
     }
 
     return row;
@@ -955,22 +1034,26 @@ export class MapRepository {
 
   private listStaticEntityRows(mapId: string): StaticEntityRow[] {
     return this.db
-      .query<StaticEntityRow, [string]>(`
+      .query<StaticEntityRow, [string]>(
+        `
         SELECT ${STATIC_ENTITY_COLUMNS}
         FROM map_static_entities
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
   private getStaticEntityRow(mapId: string, id: string) {
     return this.db
-      .query<StaticEntityRow, [string, string]>(`
+      .query<StaticEntityRow, [string, string]>(
+        `
         SELECT ${STATIC_ENTITY_COLUMNS}
         FROM map_static_entities
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -987,7 +1070,11 @@ export class MapRepository {
     return row;
   }
 
-  private listStaticEntitiesForChunk(mapRow: MapRow, chunkX: number, chunkZ: number) {
+  private listStaticEntitiesForChunk(
+    mapRow: MapRow,
+    chunkX: number,
+    chunkZ: number
+  ) {
     const chunkWorldSize = mapRow.chunkSizeTiles * mapRow.metersPerTile;
     const minX = chunkX * chunkWorldSize;
     const minZ = chunkZ * chunkWorldSize;
@@ -995,14 +1082,16 @@ export class MapRepository {
     const maxZ = minZ + chunkWorldSize;
 
     return this.db
-      .query<StaticEntityRow, [string, number, number, number, number]>(`
+      .query<StaticEntityRow, [string, number, number, number, number]>(
+        `
         SELECT ${STATIC_ENTITY_COLUMNS}
         FROM map_static_entities
         WHERE map_id = ?
           AND position_x >= ? AND position_x < ?
           AND position_z >= ? AND position_z < ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapRow.id, minX, maxX, minZ, maxZ)
       .map(staticEntityRowToModel);
   }
@@ -1014,14 +1103,16 @@ export class MapRepository {
     const now = new Date().toISOString();
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         UPDATE maps
         SET
           revision = revision + 1,
           terrain_revision = terrain_revision + ?,
           updated_at = ?
         WHERE id = ?
-      `)
+      `
+      )
       .run(options.terrainAffecting ? 1 : 0, now, mapId);
 
     return this.getMapRowOrThrow(mapId);
@@ -1029,9 +1120,15 @@ export class MapRepository {
 
   private loadVectorTerrainState(mapRow: MapRow) {
     const map = mapRowToMetadata(mapRow);
-    const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapRow.id).map(controlPointRowToModel);
-    const derivedIslands = this.listDerivedIslandRows(mapRow.id).map(derivedIslandRowToModel);
+    const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapRow.id).map(
+      controlPointRowToModel
+    );
+    const derivedIslands = this.listDerivedIslandRows(mapRow.id).map(
+      derivedIslandRowToModel
+    );
 
     return {
       controlPoints,
@@ -1053,13 +1150,15 @@ export class MapRepository {
     const bbox = computePolygonBbox(canonicalVertices);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT INTO map_source_polygons (
           id, map_id, status, vertices_json, params_json,
           bbox_min_x, bbox_min_z, bbox_max_x, bbox_max_z,
           created_at, updated_at, retired_at
         ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-      `)
+      `
+      )
       .run(
         id,
         mapId,
@@ -1077,16 +1176,19 @@ export class MapRepository {
   }
 
   private rebuildDerivedIslands(mapId: string, now: string) {
-    const previous = this.listDerivedIslandRows(mapId).map(derivedIslandRowToModel);
-    const activePolygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
+    const previous = this.listDerivedIslandRows(mapId).map(
+      derivedIslandRowToModel
+    );
+    const activePolygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
     const resolved = resolveConnectedLandMasses(activePolygons);
     const overlaps = previous.map(previousIsland =>
       resolved.map((resolvedIsland, resolvedIndex) => ({
-        overlapArea:
-          intersectPolygons(previousIsland.geometry, resolvedIsland.vertices).reduce(
-            (sum, polygon) => sum + computePolygonArea(polygon),
-            0
-          ),
+        overlapArea: intersectPolygons(
+          previousIsland.geometry,
+          resolvedIsland.vertices
+        ).reduce((sum, polygon) => sum + computePolygonArea(polygon), 0),
         previousId: previousIsland.id,
         resolvedIndex
       }))
@@ -1108,13 +1210,19 @@ export class MapRepository {
       }
 
       for (const candidate of candidates) {
-        const predecessors = predecessorIdsByResolved.get(candidate.resolvedIndex) ?? [];
+        const predecessors =
+          predecessorIdsByResolved.get(candidate.resolvedIndex) ?? [];
         predecessors.push(candidate.previousId);
         predecessorIdsByResolved.set(candidate.resolvedIndex, predecessors);
 
-        const bestPredecessor = bestPredecessorByResolved.get(candidate.resolvedIndex);
+        const bestPredecessor = bestPredecessorByResolved.get(
+          candidate.resolvedIndex
+        );
 
-        if (!bestPredecessor || candidate.overlapArea > bestPredecessor.overlapArea) {
+        if (
+          !bestPredecessor ||
+          candidate.overlapArea > bestPredecessor.overlapArea
+        ) {
           bestPredecessorByResolved.set(candidate.resolvedIndex, {
             overlapArea: candidate.overlapArea,
             previousId: candidate.previousId
@@ -1127,7 +1235,10 @@ export class MapRepository {
       proposedIds[resolvedIndex] = candidate.previousId;
     });
 
-    const claimedByPrevious = new Map<string, Array<{ overlapArea: number; resolvedIndex: number }>>();
+    const claimedByPrevious = new Map<
+      string,
+      Array<{ overlapArea: number; resolvedIndex: number }>
+    >();
 
     overlaps.forEach(overlapGroup => {
       overlapGroup
@@ -1159,7 +1270,9 @@ export class MapRepository {
     const previousById = new Map(previous.map(island => [island.id, island]));
     const nextIslands = resolved.map((resolvedIsland, index) => {
       const predecessorId = proposedIds[index];
-      const predecessor = predecessorId ? previousById.get(predecessorId) : undefined;
+      const predecessor = predecessorId
+        ? previousById.get(predecessorId)
+        : undefined;
       const geometry = resolvedIsland.vertices;
       const bbox = computePolygonBbox(geometry);
 
@@ -1178,7 +1291,9 @@ export class MapRepository {
       };
     });
 
-    this.db.prepare('DELETE FROM map_derived_islands WHERE map_id = ?').run(mapId);
+    this.db
+      .prepare('DELETE FROM map_derived_islands WHERE map_id = ?')
+      .run(mapId);
 
     const insertDerivedIsland = this.db.prepare(`
       INSERT INTO map_derived_islands (
@@ -1239,7 +1354,14 @@ export class MapRepository {
       const operation = parents.length > 1 ? 'merge' : 'update';
 
       parents.forEach(parentId => {
-        insertLineage.run(randomUUID(), mapId, operation, parentId, island.id, now);
+        insertLineage.run(
+          randomUUID(),
+          mapId,
+          operation,
+          parentId,
+          island.id,
+          now
+        );
       });
     });
 
@@ -1253,15 +1375,24 @@ export class MapRepository {
 
       if (children.length > 1) {
         children.forEach(childId => {
-          insertLineage.run(randomUUID(), mapId, 'split', island.id, childId, now);
+          insertLineage.run(
+            randomUUID(),
+            mapId,
+            'split',
+            island.id,
+            childId,
+            now
+          );
         });
       }
     });
 
-    return nextIslands.map(island => toPublicDerivedIsland({
-      ...island,
-      centroid: computePolygonCentroid(island.geometry)
-    }));
+    return nextIslands.map(island =>
+      toPublicDerivedIsland({
+        ...island,
+        centroid: computePolygonCentroid(island.geometry)
+      })
+    );
   }
 
   private computeInvalidationExpansion(
@@ -1289,15 +1420,26 @@ export class MapRepository {
     return maxDisplacement + maxInfluence;
   }
 
-  private getExpandedDirtyBounds(mapId: string, dirtyBounds: WorldBounds | null) {
+  private getExpandedDirtyBounds(
+    mapId: string,
+    dirtyBounds: WorldBounds | null
+  ) {
     if (!dirtyBounds) {
       return null;
     }
 
     const mapRow = this.getMapRowOrThrow(mapId);
-    const polygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapId).map(controlPointRowToModel);
-    const expansion = this.computeInvalidationExpansion(polygons, controlPoints, dirtyBounds);
+    const polygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapId).map(
+      controlPointRowToModel
+    );
+    const expansion = this.computeInvalidationExpansion(
+      polygons,
+      controlPoints,
+      dirtyBounds
+    );
     return expandWorldBounds(dirtyBounds, expansion);
   }
 
@@ -1316,19 +1458,24 @@ export class MapRepository {
     const maxChunkZ = Math.floor(expandedBounds.maxZ / chunkWorldSize);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         DELETE FROM map_chunks
         WHERE
           map_id = ? AND
           chunk_x BETWEEN ? AND ? AND
           chunk_z BETWEEN ? AND ?
-      `)
+      `
+      )
       .run(mapId, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
   }
 
   private performTerrainMutation<Value>(
     options: MutateTerrainOptions,
-    mutate: (mapRow: MapRow, now: string) => {
+    mutate: (
+      mapRow: MapRow,
+      now: string
+    ) => {
       dirtyBounds: WorldBounds | null;
       result: Value;
     }
@@ -1342,11 +1489,17 @@ export class MapRepository {
       const updatedMapRow = this.bumpMapRevisions(options.mapId, {
         terrainAffecting: true
       });
-      const expandedDirtyBounds = this.getExpandedDirtyBounds(options.mapId, dirtyBounds);
+      const expandedDirtyBounds = this.getExpandedDirtyBounds(
+        options.mapId,
+        dirtyBounds
+      );
 
       this.rebuildDerivedIslands(options.mapId, now);
       this.invalidateChunks(options.mapId, dirtyBounds);
-      clearCompiledVectorTerrainArtifact(options.mapId, previousTerrainRevision);
+      clearCompiledVectorTerrainArtifact(
+        options.mapId,
+        previousTerrainRevision
+      );
 
       return {
         dirtyBounds: expandedDirtyBounds,
@@ -1405,14 +1558,16 @@ export class MapRepository {
     const encodedHeights = encodeFloat32Heights(generated.heights);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT OR IGNORE INTO map_chunks (
           map_id, chunk_x, chunk_z,
           origin_tile_x, origin_tile_z,
           tile_width, tile_height,
           samples_wide, samples_high, heights
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
+      `
+      )
       .run(
         row.id,
         generated.chunkX,
@@ -1449,7 +1604,9 @@ export class MapRepository {
     now: string
   ) {
     const clipPolygon = worldBoundsToPolygon(bounds);
-    const islands = this.listDerivedIslandRows(sourceMapId).map(derivedIslandRowToModel);
+    const islands = this.listDerivedIslandRows(sourceMapId).map(
+      derivedIslandRowToModel
+    );
     const insertDerivedIsland = this.db.prepare(`
       INSERT INTO map_derived_islands (
         id, map_id, name, default_owner, default_faction,
@@ -1514,8 +1671,14 @@ export class MapRepository {
       try {
         const widthMeters = input.bounds.maxX - input.bounds.minX;
         const heightMeters = input.bounds.maxZ - input.bounds.minZ;
-        widthTiles = deriveTileCountFromMeters(widthMeters, input.metersPerTile);
-        heightTiles = deriveTileCountFromMeters(heightMeters, input.metersPerTile);
+        widthTiles = deriveTileCountFromMeters(
+          widthMeters,
+          input.metersPerTile
+        );
+        heightTiles = deriveTileCountFromMeters(
+          heightMeters,
+          input.metersPerTile
+        );
         sourceTileOffsetX = deriveTileCoordinateFromMeters(
           input.bounds.minX,
           input.metersPerTile
@@ -1560,7 +1723,9 @@ export class MapRepository {
         wrapZ: wrap ? 1 : 0
       };
 
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         INSERT INTO maps (
           id, name, kind, extent_kind,
           width_tiles, height_tiles, wrap_x, wrap_z,
@@ -1570,31 +1735,33 @@ export class MapRepository {
           export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
           created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        row.id,
-        row.name,
-        row.kind,
-        row.extentKind,
-        row.widthTiles,
-        row.heightTiles,
-        row.wrapX,
-        row.wrapZ,
-        row.metersPerTile,
-        row.chunkSizeTiles,
-        row.generator,
-        row.seed,
-        row.revision,
-        row.terrainRevision,
-        row.sourceMapId,
-        row.sourceRevision,
-        row.exportedAt,
-        row.exportBoundsMinX,
-        row.exportBoundsMinZ,
-        row.exportBoundsMaxX,
-        row.exportBoundsMaxZ,
-        row.createdAt,
-        row.updatedAt
-      );
+      `
+        )
+        .run(
+          row.id,
+          row.name,
+          row.kind,
+          row.extentKind,
+          row.widthTiles,
+          row.heightTiles,
+          row.wrapX,
+          row.wrapZ,
+          row.metersPerTile,
+          row.chunkSizeTiles,
+          row.generator,
+          row.seed,
+          row.revision,
+          row.terrainRevision,
+          row.sourceMapId,
+          row.sourceRevision,
+          row.exportedAt,
+          row.exportBoundsMinX,
+          row.exportBoundsMinZ,
+          row.exportBoundsMaxX,
+          row.exportBoundsMaxZ,
+          row.createdAt,
+          row.updatedAt
+        );
 
       const sourceTerrainState = this.loadVectorTerrainState(sourceRow);
       const artifact = getCompiledVectorTerrainArtifact({
@@ -1625,8 +1792,14 @@ export class MapRepository {
         for (let chunkX = 0; chunkX < chunkCountX; chunkX += 1) {
           const originTileX = chunkX * input.chunkSizeTiles;
           const originTileZ = chunkZ * input.chunkSizeTiles;
-          const tileWidth = Math.min(input.chunkSizeTiles, widthTiles - originTileX);
-          const tileHeight = Math.min(input.chunkSizeTiles, heightTiles - originTileZ);
+          const tileWidth = Math.min(
+            input.chunkSizeTiles,
+            widthTiles - originTileX
+          );
+          const tileHeight = Math.min(
+            input.chunkSizeTiles,
+            heightTiles - originTileZ
+          );
           const generated = generateVectorChunk(artifact, chunkX, chunkZ, {
             mapId: id,
             materialOriginTileX: sourceTileOffsetX + originTileX,
@@ -1706,14 +1879,16 @@ export class MapRepository {
     const encodedHeights = encodeFloat32Heights(generated.heights);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT OR IGNORE INTO map_chunks (
           map_id, chunk_x, chunk_z,
           origin_tile_x, origin_tile_z,
           tile_width, tile_height,
           samples_wide, samples_high, heights
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
+      `
+      )
       .run(
         row.id,
         generated.chunkX,
@@ -1823,7 +1998,9 @@ export class MapRepository {
       };
     }
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO maps (
         id, name, kind, extent_kind,
         width_tiles, height_tiles, wrap_x, wrap_z,
@@ -1833,31 +2010,33 @@ export class MapRepository {
         export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      row.id,
-      row.name,
-      row.kind,
-      row.extentKind,
-      row.widthTiles,
-      row.heightTiles,
-      row.wrapX,
-      row.wrapZ,
-      row.metersPerTile,
-      row.chunkSizeTiles,
-      row.generator,
-      row.seed,
-      row.revision,
-      row.terrainRevision,
-      row.sourceMapId,
-      row.sourceRevision,
-      row.exportedAt,
-      row.exportBoundsMinX,
-      row.exportBoundsMinZ,
-      row.exportBoundsMaxX,
-      row.exportBoundsMaxZ,
-      row.createdAt,
-      row.updatedAt
-    );
+    `
+      )
+      .run(
+        row.id,
+        row.name,
+        row.kind,
+        row.extentKind,
+        row.widthTiles,
+        row.heightTiles,
+        row.wrapX,
+        row.wrapZ,
+        row.metersPerTile,
+        row.chunkSizeTiles,
+        row.generator,
+        row.seed,
+        row.revision,
+        row.terrainRevision,
+        row.sourceMapId,
+        row.sourceRevision,
+        row.exportedAt,
+        row.exportBoundsMinX,
+        row.exportBoundsMinZ,
+        row.exportBoundsMaxX,
+        row.exportBoundsMaxZ,
+        row.createdAt,
+        row.updatedAt
+      );
 
     return mapRowToMetadata(row);
   }
@@ -1887,14 +2066,16 @@ export class MapRepository {
 
     try {
       this.db
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO asset_versions (
             id, status, original_file_json, runtime_file_json,
             diagnostics_json, footprint_json, collision_box_json,
             collision_class, grounding_policy, max_height_delta_meters,
             instancing_eligible, map_preview_category, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
+        `
+        )
         .run(
           input.id,
           input.status,
@@ -1922,17 +2103,102 @@ export class MapRepository {
     return this.listAssetVersionRows().map(assetVersionRowToModel);
   }
 
+  listAssetVersionIdsByPrefix(prefix: string) {
+    return this.db
+      .query<{ id: string }, [string]>(
+        `
+        SELECT id FROM asset_versions
+        WHERE id LIKE ?
+        ORDER BY id ASC
+      `
+      )
+      .all(`${prefix}%`)
+      .map(row => row.id);
+  }
+
+  getAssetVersion(id: string) {
+    const row = this.getAssetVersionRow(id);
+    return row ? assetVersionRowToModel(row) : null;
+  }
+
+  updateAssetVersion(input: UpdateAssetVersionInput) {
+    const current = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.id)
+    );
+    const next: AssetVersion = {
+      ...current,
+      collisionBox: input.collisionBox ?? current.collisionBox,
+      collisionClass: input.collisionClass ?? current.collisionClass,
+      diagnostics: input.diagnostics ?? current.diagnostics,
+      footprint: input.footprint ?? current.footprint,
+      groundingPolicy: input.groundingPolicy ?? current.groundingPolicy,
+      instancingEligible:
+        input.instancingEligible ?? current.instancingEligible,
+      maxHeightDeltaMeters:
+        input.maxHeightDeltaMeters ?? current.maxHeightDeltaMeters,
+      originalFile: input.originalFile ?? current.originalFile,
+      runtimeFile:
+        input.runtimeFile === undefined
+          ? current.runtimeFile
+          : input.runtimeFile,
+      status: input.status ?? current.status,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      this.db
+        .prepare(
+          `
+          UPDATE asset_versions
+          SET
+            status = ?,
+            original_file_json = ?,
+            runtime_file_json = ?,
+            diagnostics_json = ?,
+            footprint_json = ?,
+            collision_box_json = ?,
+            collision_class = ?,
+            grounding_policy = ?,
+            max_height_delta_meters = ?,
+            instancing_eligible = ?,
+            updated_at = ?
+          WHERE id = ?
+        `
+        )
+        .run(
+          next.status,
+          JSON.stringify(next.originalFile),
+          next.runtimeFile ? JSON.stringify(next.runtimeFile) : null,
+          JSON.stringify(next.diagnostics),
+          JSON.stringify(next.footprint),
+          JSON.stringify(next.collisionBox),
+          next.collisionClass,
+          next.groundingPolicy,
+          next.maxHeightDeltaMeters,
+          next.instancingEligible ? 1 : 0,
+          next.updatedAt,
+          input.id
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return next;
+  }
+
   createArchetype(input: CreateArchetypeInput) {
     const now = new Date().toISOString();
 
     try {
       this.db
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO archetypes (
             id, name, category, tags_json, asset_version_id,
             status, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `)
+        `
+        )
         .run(
           input.id,
           input.name,
@@ -1967,7 +2233,11 @@ export class MapRepository {
       return null;
     }
 
-    const staticEntities = this.listStaticEntitiesForChunk(mapRow, row.chunkX, row.chunkZ);
+    const staticEntities = this.listStaticEntitiesForChunk(
+      mapRow,
+      row.chunkX,
+      row.chunkZ
+    );
 
     return toMapChunkResponse({
       ...chunkRowToRecord(row),
@@ -1991,13 +2261,17 @@ export class MapRepository {
     const heights = decodeFloat32Heights(row.heights);
     const materialOriginTileX =
       mapRow.exportBoundsMinX !== null
-        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinX, mapRow.metersPerTile) +
-          row.originTileX
+        ? deriveTileCoordinateFromMeters(
+            mapRow.exportBoundsMinX,
+            mapRow.metersPerTile
+          ) + row.originTileX
         : row.originTileX;
     const materialOriginTileZ =
       mapRow.exportBoundsMinZ !== null
-        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinZ, mapRow.metersPerTile) +
-          row.originTileZ
+        ? deriveTileCoordinateFromMeters(
+            mapRow.exportBoundsMinZ,
+            mapRow.metersPerTile
+          ) + row.originTileZ
         : row.originTileZ;
     const quantized = quantizeUint16Heights(heights);
     const materials = deriveChunkMaterialIds(
@@ -2010,7 +2284,11 @@ export class MapRepository {
       materialOriginTileX,
       materialOriginTileZ
     );
-    const staticEntities = this.listStaticEntitiesForChunk(mapRow, row.chunkX, row.chunkZ);
+    const staticEntities = this.listStaticEntitiesForChunk(
+      mapRow,
+      row.chunkX,
+      row.chunkZ
+    );
 
     return {
       chunkX: row.chunkX,
@@ -2039,12 +2317,14 @@ export class MapRepository {
     return this.performStaticEntityMutation(input, (mapRow, now) => {
       try {
         this.db
-          .prepare(`
+          .prepare(
+            `
             INSERT INTO map_static_entities (
               id, map_id, label, archetype_id, position_x, position_z,
               yaw, scale, y_offset, state, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `)
+          `
+          )
           .run(
             input.id,
             mapRow.id,
@@ -2063,7 +2343,9 @@ export class MapRepository {
         throw normalizeSqliteError(error);
       }
 
-      return staticEntityRowToModel(this.getStaticEntityRowOrThrow(mapRow.id, input.id));
+      return staticEntityRowToModel(
+        this.getStaticEntityRowOrThrow(mapRow.id, input.id)
+      );
     });
   }
 
@@ -2083,7 +2365,8 @@ export class MapRepository {
 
       try {
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_static_entities
             SET
               label = ?,
@@ -2096,7 +2379,8 @@ export class MapRepository {
               state = ?,
               updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(
             next.label,
             next.archetypeId,
@@ -2114,20 +2398,24 @@ export class MapRepository {
         throw normalizeSqliteError(error);
       }
 
-      return staticEntityRowToModel(this.getStaticEntityRowOrThrow(mapRow.id, input.id));
+      return staticEntityRowToModel(
+        this.getStaticEntityRowOrThrow(mapRow.id, input.id)
+      );
     });
   }
 
   deleteStaticEntity(input: DeleteStaticEntityInput) {
-    return this.performStaticEntityMutation(input, (mapRow) => {
+    return this.performStaticEntityMutation(input, mapRow => {
       const current = staticEntityRowToModel(
         this.getStaticEntityRowOrThrow(mapRow.id, input.id)
       );
       this.db
-        .prepare(`
+        .prepare(
+          `
           DELETE FROM map_static_entities
           WHERE map_id = ? AND id = ?
-        `)
+        `
+        )
         .run(mapRow.id, input.id);
 
       return current;
@@ -2150,11 +2438,13 @@ export class MapRepository {
 
   listMaps() {
     return this.db
-      .query<MapRow, []>(`
+      .query<MapRow, []>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         ORDER BY updated_at DESC, created_at DESC
-      `)
+      `
+      )
       .all()
       .map(mapRowToMetadata);
   }
@@ -2162,7 +2452,12 @@ export class MapRepository {
   findExport(id: string) {
     const row = this.findMapRow(id);
 
-    if (!row || row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
+    if (
+      !row ||
+      row.sourceMapId === null ||
+      row.sourceRevision === null ||
+      row.exportedAt === null
+    ) {
       return null;
     }
 
@@ -2173,19 +2468,23 @@ export class MapRepository {
     this.ensureInfiniteVectorMapRow(mapId);
 
     return this.db
-      .query<MapRow, [string]>(`
+      .query<MapRow, [string]>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         WHERE source_map_id = ?
         ORDER BY exported_at DESC, created_at DESC
-      `)
+      `
+      )
       .all(mapId)
       .map(mapRowToMetadata);
   }
 
   listSourcePolygons(mapId: string, status?: SourcePolygonStatus) {
     this.ensureInfiniteVectorMapRow(mapId);
-    return this.listSourcePolygonRows(mapId, status).map(sourcePolygonRowToModel);
+    return this.listSourcePolygonRows(mapId, status).map(
+      sourcePolygonRowToModel
+    );
   }
 
   createSourcePolygon(input: {
@@ -2200,7 +2499,12 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const row = this.insertSourcePolygonRecord(input.mapId, input.vertices, input.params, now);
+        const row = this.insertSourcePolygonRecord(
+          input.mapId,
+          input.vertices,
+          input.params,
+          now
+        );
 
         return {
           dirtyBounds: rowToBounds(row),
@@ -2236,15 +2540,21 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const existing = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const existing = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
         const nextVertices = input.vertices
           ? ensurePolygonVertices(input.vertices)
           : parseJson<WorldPoint[]>(existing.verticesJson);
-        const nextParams = input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson);
+        const nextParams =
+          input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson);
         const nextBounds = computePolygonBbox(nextVertices);
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_source_polygons
             SET
               vertices_json = ?,
@@ -2255,7 +2565,8 @@ export class MapRepository {
               bbox_max_z = ?,
               updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(
             JSON.stringify(nextVertices),
             JSON.stringify(nextParams),
@@ -2268,7 +2579,11 @@ export class MapRepository {
             input.id
           );
 
-        const row = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const row = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
 
         return {
           dirtyBounds: mergeBounds(rowToBounds(existing), rowToBounds(row)),
@@ -2295,14 +2610,20 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const existing = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const existing = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_source_polygons
             SET status = 'retired', retired_at = ?, updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(now, now, input.mapId, input.id);
 
         const row = this.getSourcePolygonRowOrThrow(input.mapId, input.id);
@@ -2326,9 +2647,11 @@ export class MapRepository {
     return this.listControlPointRows(mapId).map(controlPointRowToModel);
   }
 
-  createControlPoint(input: Omit<ControlPoint, 'createdAt' | 'id' | 'updatedAt'> & {
-    expectedRevision: number;
-  }) {
+  createControlPoint(
+    input: Omit<ControlPoint, 'createdAt' | 'id' | 'updatedAt'> & {
+      expectedRevision: number;
+    }
+  ) {
     const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
@@ -2338,12 +2661,14 @@ export class MapRepository {
         const id = randomUUID();
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             INSERT INTO map_control_points (
               id, map_id, x, z, type, elevation_meters, influence_meters, strength,
               created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `)
+          `
+          )
           .run(
             id,
             input.mapId,
@@ -2368,7 +2693,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -2407,7 +2733,8 @@ export class MapRepository {
         const existing = this.getControlPointRowOrThrow(input.mapId, input.id);
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_control_points
             SET
               x = ?,
@@ -2418,7 +2745,8 @@ export class MapRepository {
               strength = ?,
               updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(
             input.x ?? existing.x,
             input.z ?? existing.z,
@@ -2445,7 +2773,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -2468,7 +2797,10 @@ export class MapRepository {
           .run(input.mapId, input.id);
 
         return {
-          dirtyBounds: boundsFromPointRadius(existing, existing.influenceMeters),
+          dirtyBounds: boundsFromPointRadius(
+            existing,
+            existing.influenceMeters
+          ),
           result: model
         };
       }
@@ -2476,7 +2808,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -2503,7 +2836,8 @@ export class MapRepository {
       const now = new Date().toISOString();
 
       this.db
-        .prepare(`
+        .prepare(
+          `
           UPDATE map_derived_islands
           SET
             name = ?,
@@ -2511,7 +2845,8 @@ export class MapRepository {
             default_faction = ?,
             updated_at = ?
           WHERE map_id = ? AND id = ?
-        `)
+        `
+        )
         .run(
           input.name === undefined ? existing.name : input.name,
           input.defaultOwner === undefined
@@ -2579,7 +2914,12 @@ export class MapRepository {
 
         const combinedParams = averageSourcePolygonParams(operands);
         const createdRows = resultPolygons.map(vertices =>
-          this.insertSourcePolygonRecord(input.mapId, vertices, combinedParams, now)
+          this.insertSourcePolygonRecord(
+            input.mapId,
+            vertices,
+            combinedParams,
+            now
+          )
         );
 
         const retire = this.db.prepare(`
@@ -2595,7 +2935,10 @@ export class MapRepository {
         const dirtyBounds = [
           ...operands.map(operand => operand.bbox),
           ...createdRows.map(rowToBounds)
-        ].reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null);
+        ].reduce<WorldBounds | null>(
+          (bounds, bbox) => mergeBounds(bounds, bbox),
+          null
+        );
 
         return {
           dirtyBounds,
@@ -2609,12 +2952,13 @@ export class MapRepository {
 
     return {
       createdPolygons: result.createdPolygons,
-      dirtyBounds:
-        dirtyBounds ??
+      dirtyBounds: dirtyBounds ??
         result.createdPolygons
           .map(polygon => polygon.bbox)
-          .reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null) ??
-        {
+          .reduce<WorldBounds | null>(
+            (bounds, bbox) => mergeBounds(bounds, bbox),
+            null
+          ) ?? {
           maxX: 0,
           maxZ: 0,
           minX: 0,
@@ -2627,11 +2971,22 @@ export class MapRepository {
 
   getOverview(mapId: string): MapOverview {
     const map = this.ensureInfiniteVectorMapRow(mapId);
-    const polygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapId).map(controlPointRowToModel);
-    const islands = this.listDerivedIslandRows(mapId).map(derivedIslandRowToModel);
-    const overallBounds = [...polygons.map(polygon => polygon.bbox), ...controlPoints.map(point => boundsFromPointRadius(point))]
-      .reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null);
+    const polygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapId).map(
+      controlPointRowToModel
+    );
+    const islands = this.listDerivedIslandRows(mapId).map(
+      derivedIslandRowToModel
+    );
+    const overallBounds = [
+      ...polygons.map(polygon => polygon.bbox),
+      ...controlPoints.map(point => boundsFromPointRadius(point))
+    ].reduce<WorldBounds | null>(
+      (bounds, bbox) => mergeBounds(bounds, bbox),
+      null
+    );
     const padding = map.chunkSizeTiles * map.metersPerTile;
     const nodes = [
       ...polygons.map(polygon => ({
@@ -2666,7 +3021,11 @@ export class MapRepository {
         controlPointCount += current.controlPointCount;
         sourcePolygonCount += current.sourcePolygonCount;
 
-        for (let candidateIndex = 0; candidateIndex < nodes.length; candidateIndex += 1) {
+        for (
+          let candidateIndex = 0;
+          candidateIndex < nodes.length;
+          candidateIndex += 1
+        ) {
           if (visited.has(candidateIndex)) {
             continue;
           }
@@ -2717,7 +3076,8 @@ export class MapRepository {
 
   listDerivedIslandLineage(mapId: string) {
     return this.db
-      .query<LineageRow, [string]>(`
+      .query<LineageRow, [string]>(
+        `
         SELECT
           child_island_id AS childIslandId,
           created_at AS createdAt,
@@ -2728,11 +3088,16 @@ export class MapRepository {
         FROM map_derived_island_lineage
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
-  private ensureColumnExists(table: string, column: string, definition: string) {
+  private ensureColumnExists(
+    table: string,
+    column: string,
+    definition: string
+  ) {
     const columns = this.db
       .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
       .all()
@@ -2913,7 +3278,11 @@ export class MapRepository {
     `);
 
     this.ensureColumnExists('maps', 'revision', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumnExists('maps', 'terrain_revision', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumnExists(
+      'maps',
+      'terrain_revision',
+      'INTEGER NOT NULL DEFAULT 0'
+    );
     this.ensureColumnExists('maps', 'source_map_id', 'TEXT');
     this.ensureColumnExists('maps', 'source_revision', 'INTEGER');
     this.ensureColumnExists('maps', 'exported_at', 'TEXT');

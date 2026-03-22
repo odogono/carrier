@@ -1,27 +1,22 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { contract } from 'carrier-contracts/contract';
 import { decodeMapChunkBinary } from 'carrier-contracts/types';
 
+import { resetAssetPipeline } from '@/maps/assets';
+import { getMapRepository, resetMapRepository } from '@/maps/repository';
 import { createORPCClient } from '@orpc/client';
 import { type ContractRouterClient } from '@orpc/contract';
 import type { JsonifiedClient } from '@orpc/openapi-client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
 
-import { getMapRepository, resetMapRepository } from '@/maps/repository';
-
 import { createServer } from './index';
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const request = async (
-  method: string,
-  path: string,
-  body?: unknown
-) => {
+const request = async (method: string, path: string, body?: unknown) => {
   const { app } = await createServer();
   const response = await app.handle(
     new Request(`http://localhost${path}`, {
@@ -35,6 +30,11 @@ const request = async (
     json: await response.json(),
     response
   };
+};
+
+const requestRaw = async (request: Request) => {
+  const { app } = await createServer();
+  return app.handle(request);
 };
 
 const createTestClient = async () => {
@@ -57,13 +57,35 @@ const createTestClient = async () => {
 describe('API server map routes', () => {
   beforeEach(() => {
     process.env.API_DB_PATH = ':memory:';
+    process.env.API_ASSET_STORAGE_ROOT = mkdtempSync('/tmp/carrier-assets-');
     resetMapRepository();
+    resetAssetPipeline();
   });
 
   afterEach(() => {
+    resetAssetPipeline();
     resetMapRepository();
+    delete process.env.API_ASSET_STORAGE_ROOT;
     delete process.env.API_DB_PATH;
   });
+
+  const waitForAssetStatus = async (id: string, expectedStatuses: string[]) => {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await request('GET', `/api/maps/assets/${id}`);
+      const assetVersion = response.json as Record<string, unknown>;
+      const status = assetVersion.status;
+
+      if (typeof status === 'string' && expectedStatuses.includes(status)) {
+        return assetVersion;
+      }
+
+      await Bun.sleep(10);
+    }
+
+    throw new Error(
+      `Timed out waiting for asset ${id} to reach ${expectedStatuses.join(', ')}`
+    );
+  };
 
   test('supports create/list/find/getChunk/delete through the public contract', async () => {
     const createdResponse = await request('POST', '/api/maps', {
@@ -85,7 +107,10 @@ describe('API server map routes', () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]?.id).toBe(created.id);
 
-    const fetchedResponse = await request('GET', `/api/maps/${created.id as string}`);
+    const fetchedResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}`
+    );
     const fetched = fetchedResponse.json as Record<string, unknown>;
     expect(fetched.seed).toBe('contract-seed');
 
@@ -122,7 +147,10 @@ describe('API server map routes', () => {
 
     expect(created.generator).toBe('island-clusters');
 
-    const fetchedResponse = await request('GET', `/api/maps/${created.id as string}`);
+    const fetchedResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}`
+    );
     const fetched = fetchedResponse.json as Record<string, unknown>;
     expect(fetched.generator).toBe('island-clusters');
 
@@ -296,7 +324,9 @@ describe('API server map routes', () => {
       }
     );
     const islandUpdate = islandUpdateResponse.json as Record<string, unknown>;
-    expect((islandUpdate.island as Record<string, unknown>).name).toBe('Main Island');
+    expect((islandUpdate.island as Record<string, unknown>).name).toBe(
+      'Main Island'
+    );
 
     const repository = getMapRepository();
     const assetVersion = repository.createAssetVersion({
@@ -359,13 +389,15 @@ describe('API server map routes', () => {
     );
     const chunk = chunkResponse.json as Record<string, unknown>;
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
-    expect((chunk.staticEntities as unknown[])).toHaveLength(1);
+    expect(chunk.staticEntities as unknown[]).toHaveLength(1);
     expect(
-      ((chunk.staticEntities as Array<Record<string, unknown>>)[0]?.id)
+      (chunk.staticEntities as Array<Record<string, unknown>>)[0]?.id
     ).toBe('lighthouse-1');
 
     const binaryChunk = await decodeMapChunkBinary(
-      await (await createTestClient()).maps.getChunkBinary({
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
         chunkX: 0,
         chunkZ: 0,
         mapId: created.id as string
@@ -402,7 +434,9 @@ describe('API server map routes', () => {
         ]
       }
     );
-    expect((polygonResponse.json as Record<string, unknown>).mapRevision).toBe(1);
+    expect((polygonResponse.json as Record<string, unknown>).mapRevision).toBe(
+      1
+    );
 
     const exportResponse = await request(
       'POST',
@@ -424,13 +458,17 @@ describe('API server map routes', () => {
     );
     const exported = exportResponse.json as Record<string, unknown>;
     expect(exported.kind).toBe('finite-vector-slice');
-    expect((exported.export as Record<string, unknown>).sourceMapId).toBe(created.id);
+    expect((exported.export as Record<string, unknown>).sourceMapId).toBe(
+      created.id
+    );
 
     const listedExportsResponse = await request(
       'GET',
       `/api/maps/${created.id as string}/exports`
     );
-    const listedExports = listedExportsResponse.json as Array<Record<string, unknown>>;
+    const listedExports = listedExportsResponse.json as Array<
+      Record<string, unknown>
+    >;
     expect(listedExports).toHaveLength(1);
     expect(listedExports[0]?.id).toBe(exported.id);
 
@@ -439,10 +477,14 @@ describe('API server map routes', () => {
       `/api/maps/exports/${exported.id as string}`
     );
     const fetchedExport = fetchedExportResponse.json as Record<string, unknown>;
-    expect((fetchedExport.export as Record<string, unknown>).sourceRevision).toBe(1);
+    expect(
+      (fetchedExport.export as Record<string, unknown>).sourceRevision
+    ).toBe(1);
 
     const chunk = await decodeMapChunkBinary(
-      await (await createTestClient()).maps.getChunkBinary({
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
         chunkX: 0,
         chunkZ: 0,
         mapId: exported.id as string
@@ -456,6 +498,95 @@ describe('API server map routes', () => {
       `/api/maps/${exported.id as string}/chunks/2/0`
     );
     expect(outOfBoundsChunkResponse.response.status).toBe(404);
+  });
+
+  test('processes uploaded GLBs into reviewable runtime assets', async () => {
+    const header = new Uint8Array([
+      0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
+    ]);
+    const payload = new Uint8Array([
+      ...header,
+      0x4a,
+      0x53,
+      0x4f,
+      0x4e,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x7b,
+      0x7d,
+      0x20,
+      0x20
+    ]);
+    const formData = new FormData();
+    formData.set(
+      'file',
+      new File([payload], 'watchtower.glb', {
+        type: 'model/gltf-binary'
+      })
+    );
+
+    const uploadResponse = await requestRaw(
+      new Request('http://localhost/api/maps/assets', {
+        body: formData,
+        method: 'POST'
+      })
+    );
+    expect(uploadResponse.status).toBe(201);
+    const uploaded = (await uploadResponse.json()) as Record<string, unknown>;
+    expect(uploaded.status).toBe('uploaded');
+
+    const finalAsset = await waitForAssetStatus(uploaded.id as string, [
+      'review'
+    ]);
+    expect(finalAsset.runtimeFile).toEqual({
+      contentType: 'model/gltf-binary',
+      path: `runtime/${uploaded.id as string}.glb`,
+      sizeBytes: payload.byteLength
+    });
+    expect(finalAsset.diagnostics).toEqual([
+      'Candidate metadata auto-derived from uploaded asset',
+      'Normalization pipeline completed'
+    ]);
+
+    const runtimeResponse = await requestRaw(
+      new Request(
+        `http://localhost/api/maps/assets/${uploaded.id as string}/runtime`
+      )
+    );
+    expect(runtimeResponse.status).toBe(200);
+    expect(new Uint8Array(await runtimeResponse.arrayBuffer())).toEqual(
+      payload
+    );
+  });
+
+  test('marks invalid uploads as failed with diagnostics', async () => {
+    const formData = new FormData();
+    formData.set(
+      'file',
+      new File([new TextEncoder().encode('not-a-glb')], 'broken.glb', {
+        type: 'model/gltf-binary'
+      })
+    );
+
+    const uploadResponse = await requestRaw(
+      new Request('http://localhost/api/maps/assets', {
+        body: formData,
+        method: 'POST'
+      })
+    );
+    expect(uploadResponse.status).toBe(201);
+    const uploaded = (await uploadResponse.json()) as Record<string, unknown>;
+
+    const finalAsset = await waitForAssetStatus(uploaded.id as string, [
+      'failed'
+    ]);
+    expect(finalAsset.runtimeFile).toBeNull();
+    expect(finalAsset.diagnostics).toEqual([
+      'Candidate metadata auto-derived from uploaded asset',
+      'Uploaded asset is too small to be a valid GLB'
+    ]);
   });
 
   test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {
@@ -475,11 +606,15 @@ describe('API server map routes', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe(
       'http://localhost:5179'
     );
-    expect(response.headers.get('access-control-allow-methods')).toContain('PATCH');
+    expect(response.headers.get('access-control-allow-methods')).toContain(
+      'PATCH'
+    );
   });
 
   test('package exports resolve to real source files', async () => {
-    const packageJson = await Bun.file(resolve(apiRoot, 'package.json')).json() as {
+    const packageJson = (await Bun.file(
+      resolve(apiRoot, 'package.json')
+    ).json()) as {
       exports?: Record<string, string>;
     };
 

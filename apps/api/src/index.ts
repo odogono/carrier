@@ -4,6 +4,8 @@ import { createLog } from 'odgn-ts-helpers/log';
 import { safeParseInt } from 'odgn-ts-helpers/number';
 import { z } from 'zod';
 
+import { getAssetPipeline } from '@/maps/assets';
+import { MapRepositoryError } from '@/maps/repository';
 import { cors } from '@elysiajs/cors';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
@@ -16,6 +18,30 @@ const SERVER_HOST = process.env.API_HOST || '0.0.0.0';
 const SERVER_PORT = safeParseInt(process.env.API_PORT, 6021);
 
 const log = createLog('server');
+
+const HTTP_STATUS_TEXT: Record<number, string> = {
+  400: 'Bad Request',
+  404: 'Not Found'
+};
+
+const toJsonErrorResponse = (
+  status: number,
+  message: string,
+  requestId: string
+) =>
+  new Response(
+    JSON.stringify({
+      error: HTTP_STATUS_TEXT[status] ?? 'Error',
+      message
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-ID': requestId
+      },
+      status
+    }
+  );
 
 export const createServer = async () => {
   const openApiHandler = new OpenAPIHandler(orpcRouter, {
@@ -119,6 +145,73 @@ export const createServer = async () => {
       status: 'ok',
       timestamp: new Date().toISOString()
     }))
+    .get('/api/maps/assets', ({ requestId }) =>
+      Response.json(getAssetPipeline().list(), {
+        headers: {
+          'X-Request-ID': requestId
+        }
+      })
+    )
+    .get('/api/maps/assets/:id', ({ params, requestId }) => {
+      const assetVersion = getAssetPipeline().get(params.id);
+
+      if (!assetVersion) {
+        return toJsonErrorResponse(
+          404,
+          `Asset version ${params.id} was not found`,
+          requestId
+        );
+      }
+
+      return Response.json(assetVersion, {
+        headers: {
+          'X-Request-ID': requestId
+        }
+      });
+    })
+    .get('/api/maps/assets/:id/runtime', async ({ params, requestId }) => {
+      const response = await getAssetPipeline().runtimeResponse(params.id);
+
+      if (!response) {
+        return toJsonErrorResponse(
+          404,
+          `Runtime artifact for asset version ${params.id} was not found`,
+          requestId
+        );
+      }
+
+      response.headers.set('X-Request-ID', requestId);
+      return response;
+    })
+    .post('/api/maps/assets', async ({ request, requestId }) => {
+      try {
+        const formData = await request.formData();
+        const entry = formData.get('file');
+
+        if (!(entry instanceof File)) {
+          return toJsonErrorResponse(
+            400,
+            'Expected multipart form-data with a file field',
+            requestId
+          );
+        }
+
+        const assetVersion = await getAssetPipeline().upload(entry);
+
+        return Response.json(assetVersion, {
+          headers: {
+            'X-Request-ID': requestId
+          },
+          status: 201
+        });
+      } catch (error) {
+        if (error instanceof MapRepositoryError) {
+          return toJsonErrorResponse(400, error.message, requestId);
+        }
+
+        throw error;
+      }
+    })
 
     .all(
       '/api/*',
