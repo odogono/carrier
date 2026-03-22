@@ -133,7 +133,8 @@ const getChunkBinary = os
         ? new Blob([chunk.materials], {
             type: 'application/octet-stream'
           })
-        : undefined
+        : undefined,
+      staticEntitiesJson: JSON.stringify(chunk.staticEntities)
     };
   });
 

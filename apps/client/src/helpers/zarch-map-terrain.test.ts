@@ -64,6 +64,7 @@ const chunk00: RuntimeMapChunk = {
   originTileZ: 0,
   samplesHigh: 33,
   samplesWide: 33,
+  staticEntities: [],
   tileHeight: 32,
   tileWidth: 32
 };

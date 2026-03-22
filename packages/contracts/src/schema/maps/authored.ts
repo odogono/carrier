@@ -5,6 +5,7 @@ import { type Route } from '@orpc/server';
 
 const finiteNumber = z.number().finite();
 const nonNegativeFiniteNumber = z.number().finite().nonnegative();
+const positiveFiniteNumber = z.number().finite().positive();
 const timestampSchema = z.string();
 
 const hasAtLeastThreeUniqueVertices = (vertices: readonly { x: number; z: number }[]) =>
@@ -108,6 +109,98 @@ export const MapOverviewSchema = z.object({
   revision: z.number().int().nonnegative()
 });
 export type MapOverview = z.infer<typeof MapOverviewSchema>;
+
+export const AssetVersionStatusSchema = z.enum([
+  'uploaded',
+  'processing',
+  'review',
+  'ready',
+  'failed'
+]);
+export type AssetVersionStatus = z.infer<typeof AssetVersionStatusSchema>;
+
+export const ArchetypeStatusSchema = z.enum(['active', 'deprecated', 'archived']);
+export type ArchetypeStatus = z.infer<typeof ArchetypeStatusSchema>;
+
+export const StaticEntityStateSchema = z.enum(['active', 'disabled']);
+export type StaticEntityState = z.infer<typeof StaticEntityStateSchema>;
+
+export const ArchetypeCategorySchema = z.enum([
+  'building',
+  'landmark',
+  'industrial',
+  'natural-prop'
+]);
+export type ArchetypeCategory = z.infer<typeof ArchetypeCategorySchema>;
+
+export const AssetFileMetadataSchema = z.object({
+  contentType: z.string().trim().min(1).max(255).nullable(),
+  path: z.string().trim().min(1).max(1024),
+  sizeBytes: z.number().int().nonnegative()
+});
+export type AssetFileMetadata = z.infer<typeof AssetFileMetadataSchema>;
+
+export const AssetVersionFootprintSchema = z.object({
+  depthMeters: positiveFiniteNumber,
+  widthMeters: positiveFiniteNumber
+});
+export type AssetVersionFootprint = z.infer<typeof AssetVersionFootprintSchema>;
+
+export const AssetVersionCollisionBoxSchema = z.object({
+  depthMeters: positiveFiniteNumber,
+  heightMeters: positiveFiniteNumber,
+  widthMeters: positiveFiniteNumber
+});
+export type AssetVersionCollisionBox = z.infer<typeof AssetVersionCollisionBoxSchema>;
+
+export const AssetVersionSchema = z.object({
+  collisionBox: AssetVersionCollisionBoxSchema,
+  collisionClass: z.string().trim().min(1).max(120),
+  createdAt: timestampSchema,
+  diagnostics: z.array(z.string().trim().min(1).max(500)).max(100),
+  footprint: AssetVersionFootprintSchema,
+  groundingPolicy: z.string().trim().min(1).max(120),
+  id: z.string().min(1),
+  instancingEligible: z.boolean(),
+  maxHeightDeltaMeters: nonNegativeFiniteNumber,
+  originalFile: AssetFileMetadataSchema,
+  runtimeFile: AssetFileMetadataSchema.nullable(),
+  status: AssetVersionStatusSchema,
+  updatedAt: timestampSchema
+});
+export type AssetVersion = z.infer<typeof AssetVersionSchema>;
+
+export const ArchetypeSchema = z.object({
+  assetVersionId: z.string().min(1),
+  category: ArchetypeCategorySchema,
+  createdAt: timestampSchema,
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  status: ArchetypeStatusSchema,
+  tags: z.array(z.string().trim().min(1).max(120)).max(100),
+  updatedAt: timestampSchema
+});
+export type Archetype = z.infer<typeof ArchetypeSchema>;
+
+export const StaticEntityRotationSchema = z.object({
+  yaw: finiteNumber
+});
+export type StaticEntityRotation = z.infer<typeof StaticEntityRotationSchema>;
+
+export const StaticEntitySchema = z.object({
+  archetypeId: z.string().min(1),
+  createdAt: timestampSchema,
+  id: z.string().min(1),
+  label: z.string().trim().min(1).max(120).nullable(),
+  mapId: z.string().min(1),
+  position: WorldPointSchema,
+  rotation: StaticEntityRotationSchema,
+  scale: positiveFiniteNumber,
+  state: StaticEntityStateSchema,
+  updatedAt: timestampSchema,
+  yOffset: finiteNumber
+});
+export type StaticEntity = z.infer<typeof StaticEntitySchema>;
 
 export const CreateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),

@@ -3,13 +3,17 @@ import { describe, expect, test } from 'bun:test';
 import {
   ApplyBooleanOutput,
   ApplyBooleanInput,
+  ArchetypeCategorySchema,
+  ArchetypeSchema,
+  AssetVersionSchema,
   CreateMapExportInput,
   CreateControlPointOutput,
   CreateControlPointInput,
   CreateSourcePolygonOutput,
   CreateSourcePolygonInput,
   MapMetadataSchema,
-  MapOverviewSchema
+  MapOverviewSchema,
+  StaticEntitySchema
 } from './index';
 
 describe('authored map schemas', () => {
@@ -137,6 +141,102 @@ describe('authored map schemas', () => {
         revision: 0
       }).bounds
     ).toBeNull();
+  });
+
+  test('validates static entity catalog record shapes', () => {
+    const now = new Date().toISOString();
+
+    expect(
+      AssetVersionSchema.parse({
+        collisionBox: {
+          depthMeters: 18,
+          heightMeters: 24,
+          widthMeters: 20
+        },
+        collisionClass: 'building-solid',
+        createdAt: now,
+        diagnostics: ['auto-derived footprint'],
+        footprint: {
+          depthMeters: 18,
+          widthMeters: 20
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'watchtower-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 2.5,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/watchtower/source.glb',
+          sizeBytes: 1024
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/watchtower/normalized.glb',
+          sizeBytes: 2048
+        },
+        status: 'review',
+        updatedAt: now
+      }).status
+    ).toBe('review');
+
+    expect(
+      ArchetypeSchema.parse({
+        assetVersionId: 'watchtower-v1',
+        category: 'landmark',
+        createdAt: now,
+        id: 'watchtower',
+        name: 'Watchtower',
+        status: 'active',
+        tags: ['coastal', 'defensive'],
+        updatedAt: now
+      }).category
+    ).toBe('landmark');
+
+    expect(
+      StaticEntitySchema.parse({
+        archetypeId: 'watchtower',
+        createdAt: now,
+        id: 'watchtower-north',
+        label: null,
+        mapId: 'map-1',
+        position: {
+          x: 120,
+          z: -40
+        },
+        rotation: {
+          yaw: 90
+        },
+        scale: 1,
+        state: 'active',
+        updatedAt: now,
+        yOffset: 0.25
+      }).position
+    ).toEqual({
+      x: 120,
+      z: -40
+    });
+
+    expect(() => ArchetypeCategorySchema.parse('bridge')).toThrow();
+    expect(() =>
+      StaticEntitySchema.parse({
+        archetypeId: 'watchtower',
+        createdAt: now,
+        id: 'bad-entity',
+        label: 'Bad entity',
+        mapId: 'map-1',
+        position: {
+          x: 0,
+          z: 0
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 0,
+        state: 'active',
+        updatedAt: now,
+        yOffset: 0
+      })
+    ).toThrow();
   });
 
   test('validates terrain mutation outputs with dirty bounds', () => {

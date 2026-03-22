@@ -11,7 +11,7 @@ import { type ContractRouterClient } from '@orpc/contract';
 import type { JsonifiedClient } from '@orpc/openapi-client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
 
-import { resetMapRepository } from '@/maps/repository';
+import { getMapRepository, resetMapRepository } from '@/maps/repository';
 
 import { createServer } from './index';
 
@@ -189,6 +189,7 @@ describe('API server map routes', () => {
     expect(chunk.heights).toBeInstanceOf(Float32Array);
     expect(chunk.heights.length).toBe(33 * 33);
     expect(chunk.materials?.length).toBe(32 * 32);
+    expect(chunk.staticEntities).toEqual([]);
   });
 
   test('supports infinite-vector authored routes through the public API', async () => {
@@ -297,12 +298,81 @@ describe('API server map routes', () => {
     const islandUpdate = islandUpdateResponse.json as Record<string, unknown>;
     expect((islandUpdate.island as Record<string, unknown>).name).toBe('Main Island');
 
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 16,
+        heightMeters: 20,
+        widthMeters: 16
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 16,
+        widthMeters: 16
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'lighthouse-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/lighthouse.glb',
+        sizeBytes: 123
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/lighthouse.glb',
+        sizeBytes: 456
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'landmark',
+      id: 'lighthouse',
+      name: 'Lighthouse',
+      status: 'active',
+      tags: []
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 3,
+      id: 'lighthouse-1',
+      label: 'Harbor lighthouse',
+      mapId: created.id as string,
+      position: {
+        x: 100,
+        z: 100
+      },
+      rotation: {
+        yaw: 15
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+
     const chunkResponse = await request(
       'GET',
       `/api/maps/${created.id as string}/chunks/0/0`
     );
     const chunk = chunkResponse.json as Record<string, unknown>;
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+    expect((chunk.staticEntities as unknown[])).toHaveLength(1);
+    expect(
+      ((chunk.staticEntities as Array<Record<string, unknown>>)[0]?.id)
+    ).toBe('lighthouse-1');
+
+    const binaryChunk = await decodeMapChunkBinary(
+      await (await createTestClient()).maps.getChunkBinary({
+        chunkX: 0,
+        chunkZ: 0,
+        mapId: created.id as string
+      })
+    );
+    expect(binaryChunk.staticEntities).toHaveLength(1);
+    expect(binaryChunk.staticEntities[0]?.rotation.yaw).toBe(15);
   });
 
   test('supports exported slice routes through the public API', async () => {

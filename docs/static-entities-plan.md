@@ -301,6 +301,8 @@ The API should remain the source of truth for all catalog and placement data.
 
 ### Phase 1: Contracts and persistence foundations
 
+Status: complete on 2026-03-22.
+
 Goal: define the three-record model and establish persistence primitives.
 
 Changes:

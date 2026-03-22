@@ -4,7 +4,11 @@ import { oc } from '@orpc/contract';
 import { type Route } from '@orpc/server';
 import { oz } from '@orpc/zod';
 
-import { WorldBoundsSchema, authoredMapsContract } from './authored';
+import {
+  StaticEntitySchema,
+  WorldBoundsSchema,
+  authoredMapsContract
+} from './authored';
 
 export * from './authored';
 
@@ -166,6 +170,7 @@ export const MapChunkSchema = z.object({
   originTileZ: z.number().int(),
   samplesHigh: z.number().int().min(2),
   samplesWide: z.number().int().min(2),
+  staticEntities: z.array(StaticEntitySchema),
   tileHeight: z.number().int().positive(),
   tileWidth: z.number().int().positive()
 });
@@ -178,7 +183,8 @@ export type MapChunkMetadata = z.infer<typeof MapChunkMetadataSchema>;
 
 export const MapChunkBinarySchema = MapChunkMetadataSchema.extend({
   heights: oz.blob(),
-  materials: oz.blob().optional()
+  materials: oz.blob().optional(),
+  staticEntitiesJson: z.string().optional()
 });
 export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
 

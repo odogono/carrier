@@ -460,6 +460,7 @@ const buildChunkFromSampler = (
   return {
     chunkX: canonicalChunkX,
     chunkZ: canonicalChunkZ,
+    staticEntities: [],
     mapId: map.id,
     originTileX,
     originTileZ,
