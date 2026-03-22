@@ -254,6 +254,47 @@ export type CreateArchetypeInput = z.infer<typeof CreateArchetypeInput>;
 export const CreateArchetypeOutput = ArchetypeSchema;
 export type CreateArchetypeOutput = z.infer<typeof CreateArchetypeOutput>;
 
+export const ListArchetypesInput = z.object({
+  status: ArchetypeStatusSchema.optional()
+});
+export type ListArchetypesInput = z.infer<typeof ListArchetypesInput>;
+
+export const ListArchetypesOutput = z.array(ArchetypeSchema);
+export type ListArchetypesOutput = z.infer<typeof ListArchetypesOutput>;
+
+export const GetArchetypeInput = z.object({
+  id: z.string().min(1)
+});
+export type GetArchetypeInput = z.infer<typeof GetArchetypeInput>;
+
+export const GetArchetypeOutput = ArchetypeSchema;
+export type GetArchetypeOutput = z.infer<typeof GetArchetypeOutput>;
+
+export const UpdateArchetypeInput = z
+  .object({
+    category: ArchetypeCategorySchema.optional(),
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(120).optional(),
+    status: ArchetypeStatusSchema.optional(),
+    tags: z.array(z.string().trim().min(1).max(120)).max(100).optional()
+  });
+export type UpdateArchetypeInput = z.infer<typeof UpdateArchetypeInput>;
+
+export const UpdateArchetypeOutput = ArchetypeSchema;
+export type UpdateArchetypeOutput = z.infer<typeof UpdateArchetypeOutput>;
+
+export const ListReferencedArchetypesInput = z.object({
+  mapId: z.string().min(1)
+});
+export type ListReferencedArchetypesInput = z.infer<
+  typeof ListReferencedArchetypesInput
+>;
+
+export const ListReferencedArchetypesOutput = z.array(ArchetypeSchema);
+export type ListReferencedArchetypesOutput = z.infer<
+  typeof ListReferencedArchetypesOutput
+>;
+
 export const CreateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   mapId: z.string().min(1),
@@ -544,6 +585,34 @@ export const CreateArchetypeRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const ListArchetypesRoute: Route = {
+  description: 'List global archetypes in the content catalog',
+  method: 'GET',
+  path: '/maps/archetypes',
+  tags: ['maps']
+} as const;
+
+export const GetArchetypeRoute: Route = {
+  description: 'Retrieve a single archetype from the content catalog',
+  method: 'GET',
+  path: '/maps/archetypes/{id}',
+  tags: ['maps']
+} as const;
+
+export const UpdateArchetypeRoute: Route = {
+  description: 'Update mutable archetype metadata and lifecycle status',
+  method: 'PATCH',
+  path: '/maps/archetypes/{id}',
+  tags: ['maps']
+} as const;
+
+export const ListReferencedArchetypesRoute: Route = {
+  description: 'List distinct archetypes referenced by placements in a map',
+  method: 'GET',
+  path: '/maps/{mapId}/archetypes',
+  tags: ['maps']
+} as const;
+
 export const authoredMapsContract = {
   approveAssetVersion: oc
     .route(ApproveAssetVersionRoute)
@@ -578,10 +647,18 @@ export const authoredMapsContract = {
     .route(GetAssetVersionRoute)
     .input(GetAssetVersionInput)
     .output(GetAssetVersionOutput),
+  getArchetype: oc
+    .route(GetArchetypeRoute)
+    .input(GetArchetypeInput)
+    .output(GetArchetypeOutput),
   listAssetVersions: oc
     .route(ListAssetVersionsRoute)
     .input(ListAssetVersionsInput)
     .output(ListAssetVersionsOutput),
+  listArchetypes: oc
+    .route(ListArchetypesRoute)
+    .input(ListArchetypesInput)
+    .output(ListArchetypesOutput),
   listControlPoints: oc
     .route(ListControlPointsRoute)
     .input(ListControlPointsInput)
@@ -590,10 +667,18 @@ export const authoredMapsContract = {
     .route(ListDerivedIslandsRoute)
     .input(ListDerivedIslandsInput)
     .output(ListDerivedIslandsOutput),
+  listReferencedArchetypes: oc
+    .route(ListReferencedArchetypesRoute)
+    .input(ListReferencedArchetypesInput)
+    .output(ListReferencedArchetypesOutput),
   listSourcePolygons: oc
     .route(ListSourcePolygonsRoute)
     .input(ListSourcePolygonsInput)
     .output(ListSourcePolygonsOutput),
+  updateArchetype: oc
+    .route(UpdateArchetypeRoute)
+    .input(UpdateArchetypeInput)
+    .output(UpdateArchetypeOutput),
   updateControlPoint: oc
     .route(UpdateControlPointRoute)
     .input(UpdateControlPointInput)

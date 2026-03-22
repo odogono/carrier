@@ -13,18 +13,26 @@ import {
   DeleteControlPointRoute,
   DeleteSourcePolygonInput,
   DeleteSourcePolygonRoute,
+  GetArchetypeInput,
+  GetArchetypeRoute,
   GetAssetVersionInput,
   GetAssetVersionRoute,
   GetOverviewInput,
   GetOverviewRoute,
+  ListArchetypesInput,
+  ListArchetypesRoute,
   ListAssetVersionsInput,
   ListAssetVersionsRoute,
   ListControlPointsInput,
   ListControlPointsRoute,
   ListDerivedIslandsInput,
   ListDerivedIslandsRoute,
+  ListReferencedArchetypesInput,
+  ListReferencedArchetypesRoute,
   ListSourcePolygonsInput,
   ListSourcePolygonsRoute,
+  UpdateArchetypeInput,
+  UpdateArchetypeRoute,
   UpdateAssetVersionReviewInput,
   UpdateAssetVersionReviewRoute,
   UpdateControlPointInput,
@@ -109,6 +117,57 @@ const createArchetype = os
   .handler(async ({ input }) => {
     try {
       return getMapRepository().createArchetype(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listArchetypes = os
+  .route(ListArchetypesRoute)
+  .input(ListArchetypesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listArchetypes(input.status);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const getArchetype = os
+  .route(GetArchetypeRoute)
+  .input(GetArchetypeInput)
+  .handler(async ({ input }) => {
+    try {
+      const archetype = getMapRepository().getArchetype(input.id);
+      if (!archetype) {
+        throw new ORPCError('NOT_FOUND', {
+          message: `Archetype ${input.id} was not found`
+        });
+      }
+
+      return archetype;
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const updateArchetype = os
+  .route(UpdateArchetypeRoute)
+  .input(UpdateArchetypeInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().updateArchetype(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listReferencedArchetypes = os
+  .route(ListReferencedArchetypesRoute)
+  .input(ListReferencedArchetypesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listReferencedArchetypes(input.mapId);
     } catch (error) {
       return asOrpcError(error);
     }
@@ -243,12 +302,16 @@ export const authored = {
   createSourcePolygon,
   deleteControlPoint,
   deleteSourcePolygon,
+  getArchetype,
   getAssetVersion,
   getOverview,
+  listArchetypes,
   listAssetVersions,
   listControlPoints,
   listDerivedIslands,
+  listReferencedArchetypes,
   listSourcePolygons,
+  updateArchetype,
   updateAssetVersionReview,
   updateControlPoint,
   updateDerivedIsland,

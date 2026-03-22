@@ -11,9 +11,13 @@ import {
   CreateControlPointInput,
   CreateSourcePolygonOutput,
   CreateSourcePolygonInput,
+  GetArchetypeInput,
+  ListArchetypesInput,
+  ListReferencedArchetypesInput,
   MapMetadataSchema,
   MapOverviewSchema,
-  StaticEntitySchema
+  StaticEntitySchema,
+  UpdateArchetypeInput
 } from './index';
 
 describe('authored map schemas', () => {
@@ -217,6 +221,24 @@ describe('authored map schemas', () => {
     });
 
     expect(() => ArchetypeCategorySchema.parse('bridge')).toThrow();
+    expect(ListArchetypesInput.parse({ status: 'archived' }).status).toBe(
+      'archived'
+    );
+    expect(GetArchetypeInput.parse({ id: 'watchtower' }).id).toBe('watchtower');
+    expect(
+      ListReferencedArchetypesInput.parse({
+        mapId: 'map-1'
+      }).mapId
+    ).toBe('map-1');
+    expect(
+      UpdateArchetypeInput.parse({
+        category: 'building',
+        id: 'watchtower',
+        name: 'Watchtower Mk II',
+        status: 'deprecated',
+        tags: ['legacy']
+      }).status
+    ).toBe('deprecated');
     expect(() =>
       StaticEntitySchema.parse({
         archetypeId: 'watchtower',

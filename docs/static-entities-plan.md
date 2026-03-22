@@ -380,6 +380,8 @@ Acceptance:
 
 ### Phase 4: Archetype catalog and referenced-subset reads
 
+Status: complete on 2026-03-22.
+
 Goal: introduce the global content catalog and resolve placements through archetypes.
 
 Changes:

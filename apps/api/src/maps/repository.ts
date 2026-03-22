@@ -222,6 +222,14 @@ type UpdateAssetVersionInput = {
 
 type CreateArchetypeInput = Omit<Archetype, 'createdAt' | 'updatedAt'>;
 
+type UpdateArchetypeInput = {
+  category?: Archetype['category'];
+  id: string;
+  name?: string;
+  status?: Archetype['status'];
+  tags?: Archetype['tags'];
+};
+
 type ReviewAssetVersionInput = Omit<
   UpdateAssetVersionInput,
   'originalFile' | 'runtimeFile' | 'status'
@@ -1042,7 +1050,20 @@ export class MapRepository {
     return row;
   }
 
-  private listArchetypeRows(): ArchetypeRow[] {
+  private listArchetypeRows(status?: Archetype['status']): ArchetypeRow[] {
+    if (status) {
+      return this.db
+        .query<ArchetypeRow, [string]>(
+          `
+          SELECT ${ARCHETYPE_COLUMNS}
+          FROM archetypes
+          WHERE status = ?
+          ORDER BY created_at ASC, id ASC
+        `
+        )
+        .all(status);
+    }
+
     return this.db
       .query<ArchetypeRow, []>(
         `
@@ -2318,8 +2339,73 @@ export class MapRepository {
     return archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
   }
 
-  listArchetypes() {
-    return this.listArchetypeRows().map(archetypeRowToModel);
+  listArchetypes(status?: Archetype['status']) {
+    return this.listArchetypeRows(status).map(archetypeRowToModel);
+  }
+
+  getArchetype(id: string) {
+    const row = this.getArchetypeRow(id);
+
+    return row ? archetypeRowToModel(row) : null;
+  }
+
+  updateArchetype(input: UpdateArchetypeInput) {
+    const current = archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
+    const next = {
+      category: input.category ?? current.category,
+      name: input.name ?? current.name,
+      status: input.status ?? current.status,
+      tags: input.tags ?? current.tags
+    };
+    const now = new Date().toISOString();
+
+    try {
+      this.db
+        .prepare(
+          `
+          UPDATE archetypes
+          SET
+            name = ?,
+            category = ?,
+            tags_json = ?,
+            status = ?,
+            updated_at = ?
+          WHERE id = ?
+        `
+        )
+        .run(
+          next.name,
+          next.category,
+          JSON.stringify(next.tags),
+          next.status,
+          now,
+          input.id
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
+  }
+
+  listReferencedArchetypes(mapId: string) {
+    if (!this.findMapRow(mapId)) {
+      throw new MapRepositoryError('NOT_FOUND', `Map ${mapId} was not found`);
+    }
+
+    return this.db
+      .query<ArchetypeRow, [string]>(
+        `
+        SELECT DISTINCT ${ARCHETYPE_COLUMNS}
+        FROM archetypes
+        WHERE id IN (
+          SELECT archetype_id FROM map_static_entities WHERE map_id = ?
+        )
+        ORDER BY created_at ASC, id ASC
+      `
+      )
+      .all(mapId)
+      .map(archetypeRowToModel);
   }
 
   getMapChunk(mapId: string, chunkX: number, chunkZ: number): MapChunk | null {

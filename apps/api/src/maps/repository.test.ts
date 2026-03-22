@@ -373,6 +373,33 @@ describe('map repository', () => {
         tags: ['cargo']
       });
       expect(repository.listArchetypes()).toEqual([archetype]);
+      expect(repository.listArchetypes('active')).toEqual([archetype]);
+      expect(repository.getArchetype(archetype.id)).toEqual(archetype);
+
+      const updatedArchetype = repository.updateArchetype({
+        category: 'building',
+        id: archetype.id,
+        name: 'Warehouse Depot',
+        status: 'deprecated',
+        tags: ['cargo', 'legacy']
+      });
+      expect(updatedArchetype.name).toBe('Warehouse Depot');
+      expect(updatedArchetype.category).toBe('building');
+      expect(updatedArchetype.status).toBe('deprecated');
+      expect(updatedArchetype.tags).toEqual(['cargo', 'legacy']);
+      expect(
+        new Date(updatedArchetype.updatedAt).getTime()
+      ).toBeGreaterThanOrEqual(new Date(archetype.updatedAt).getTime());
+      expect(repository.listArchetypes('deprecated')).toEqual([
+        updatedArchetype
+      ]);
+
+      expect(() =>
+        repository.updateArchetype({
+          id: 'missing-archetype',
+          name: 'Missing'
+        })
+      ).toThrow(MapRepositoryError);
 
       expect(() =>
         repository.createArchetype({
@@ -395,6 +422,49 @@ describe('map repository', () => {
           tags: []
         })
       ).toThrow(MapRepositoryError);
+
+      const map = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Referenced subset map',
+        seed: 'subset-seed'
+      });
+
+      expect(repository.listReferencedArchetypes(map.id)).toEqual([]);
+
+      const activeArchetype = repository.updateArchetype({
+        id: archetype.id,
+        status: 'active'
+      });
+
+      repository.createStaticEntity({
+        archetypeId: activeArchetype.id,
+        expectedRevision: 0,
+        id: 'warehouse-1',
+        label: null,
+        mapId: map.id,
+        position: {
+          x: 0,
+          z: 0
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+
+      const archivedArchetype = repository.updateArchetype({
+        id: activeArchetype.id,
+        status: 'archived'
+      });
+
+      expect(repository.listReferencedArchetypes(map.id)).toEqual([
+        archivedArchetype
+      ]);
+      expect(() => repository.listReferencedArchetypes('missing-map')).toThrow(
+        MapRepositoryError
+      );
     } finally {
       repository.close();
     }

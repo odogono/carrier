@@ -220,6 +220,94 @@ describe('API server map routes', () => {
     expect(chunk.staticEntities).toEqual([]);
   });
 
+  test('supports archetype catalog reads and updates through the public contract', async () => {
+    const repository = getMapRepository();
+    const map = repository.createMap({
+      kind: 'infinite-vector',
+      name: 'Archetype map',
+      seed: 'archetype-seed'
+    });
+    const readyAsset = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 10,
+        heightMeters: 12,
+        widthMeters: 8
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 10,
+        widthMeters: 8
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'tower-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/tower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/tower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: readyAsset.id,
+      category: 'landmark',
+      id: 'tower',
+      name: 'Tower',
+      status: 'active',
+      tags: ['stone']
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 0,
+      id: 'tower-1',
+      label: null,
+      mapId: map.id,
+      position: {
+        x: 5,
+        z: 5
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+
+    const client = await createTestClient();
+
+    expect(await client.maps.listArchetypes({})).toEqual([archetype]);
+    expect(await client.maps.getArchetype({ id: archetype.id })).toEqual(
+      archetype
+    );
+
+    const updated = await client.maps.updateArchetype({
+      category: 'building',
+      id: archetype.id,
+      name: 'Tower Keep',
+      status: 'deprecated',
+      tags: ['stone', 'legacy']
+    });
+    expect(updated.status).toBe('deprecated');
+    expect(updated.assetVersionId).toBe(readyAsset.id);
+
+    expect(await client.maps.listArchetypes({ status: 'deprecated' })).toEqual([
+      updated
+    ]);
+    expect(
+      await client.maps.listReferencedArchetypes({
+        mapId: map.id
+      })
+    ).toEqual([updated]);
+  });
+
   test('supports infinite-vector authored routes through the public API', async () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'infinite-vector',

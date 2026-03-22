@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { apiUrl, client } from '@/lib/api-client';
+import { formatTimestamp, parseTags } from '@/lib/format';
 import { toMessage } from '@/pages/maps/editor/helpers/errors';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
@@ -53,18 +54,6 @@ const titleCaseSlug = (value: string) =>
 
 const defaultArchetypeId = (assetId: string) =>
   assetId.replace(/-v\d+$/, '') || assetId;
-
-const formatTimestamp = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  });
-
-const parseTags = (value: string) =>
-  value
-    .split(',')
-    .map(tag => tag.trim())
-    .filter(Boolean);
 
 type ArchetypeDraft = {
   category: ArchetypeCategory;
