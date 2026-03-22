@@ -1,4 +1,4 @@
-import { Map, Plus } from 'lucide-react';
+import { Boxes, Map, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -86,6 +86,12 @@ export function DashboardPage() {
               <Button className="w-full justify-start" variant="outline">
                 <Map className="mr-2 h-4 w-4" />
                 View All Maps
+              </Button>
+            </Link>
+            <Link to="/assets">
+              <Button className="w-full justify-start" variant="outline">
+                <Boxes className="mr-2 h-4 w-4" />
+                Review Assets
               </Button>
             </Link>
           </CardContent>

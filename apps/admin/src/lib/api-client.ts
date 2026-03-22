@@ -25,7 +25,7 @@ const runtimeGlobals = globalThis as RuntimeGlobals;
 // set `PUBLIC_API_URL` (see `dev.defaults.env`). Bun only inlines `process.env.PUBLIC_*` when
 // referenced directly (`bunfig.toml` `[serve.static] env = "PUBLIC_*"`); reading through
 // `globalThis.process` skips substitution and the client fell back to port 6021 during E2E.
-const apiUrl =
+export const apiUrl =
   runtimeGlobals.__API_URL__ ||
   process.env.PUBLIC_API_URL ||
   'http://localhost:6021/api';

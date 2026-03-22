@@ -353,6 +353,8 @@ Acceptance:
 
 ### Phase 3: Asset review and archetype creation workflow
 
+Status: complete on 2026-03-22.
+
 Goal: let admins review derived asset metadata and promote assets into placeable archetypes.
 
 Changes:

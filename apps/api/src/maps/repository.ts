@@ -222,6 +222,11 @@ type UpdateAssetVersionInput = {
 
 type CreateArchetypeInput = Omit<Archetype, 'createdAt' | 'updatedAt'>;
 
+type ReviewAssetVersionInput = Omit<
+  UpdateAssetVersionInput,
+  'originalFile' | 'runtimeFile' | 'status'
+>;
+
 type CreateStaticEntityInput = Omit<StaticEntity, 'createdAt' | 'updatedAt'> & {
   expectedRevision: number;
 };
@@ -640,6 +645,35 @@ const staticEntityRowToModel = (row: StaticEntityRow): StaticEntity => ({
   yOffset: row.yOffset
 });
 
+const assetVersionHasChanges = (
+  current: AssetVersion,
+  next: AssetVersion
+) =>
+  JSON.stringify({
+    collisionBox: current.collisionBox,
+    collisionClass: current.collisionClass,
+    diagnostics: current.diagnostics,
+    footprint: current.footprint,
+    groundingPolicy: current.groundingPolicy,
+    instancingEligible: current.instancingEligible,
+    maxHeightDeltaMeters: current.maxHeightDeltaMeters,
+    originalFile: current.originalFile,
+    runtimeFile: current.runtimeFile,
+    status: current.status
+  }) !==
+  JSON.stringify({
+    collisionBox: next.collisionBox,
+    collisionClass: next.collisionClass,
+    diagnostics: next.diagnostics,
+    footprint: next.footprint,
+    groundingPolicy: next.groundingPolicy,
+    instancingEligible: next.instancingEligible,
+    maxHeightDeltaMeters: next.maxHeightDeltaMeters,
+    originalFile: next.originalFile,
+    runtimeFile: next.runtimeFile,
+    status: next.status
+  });
+
 const ensurePolygonVertices = (vertices: readonly WorldPoint[]) => {
   const canonical = canonicalizeVertices(vertices);
 
@@ -958,16 +992,29 @@ export class MapRepository {
     return row;
   }
 
-  private listAssetVersionRows(): AssetVersionRow[] {
-    return this.db
-      .query<AssetVersionRow, []>(
-        `
-        SELECT ${ASSET_VERSION_COLUMNS}
-        FROM asset_versions
-        ORDER BY created_at ASC, id ASC
-      `
-      )
-      .all();
+  private listAssetVersionRows(
+    status?: AssetVersion['status']
+  ): AssetVersionRow[] {
+    return status
+      ? this.db
+          .query<AssetVersionRow, [string]>(
+            `
+            SELECT ${ASSET_VERSION_COLUMNS}
+            FROM asset_versions
+            WHERE status = ?
+            ORDER BY created_at ASC, id ASC
+          `
+          )
+          .all(status)
+      : this.db
+          .query<AssetVersionRow, []>(
+            `
+            SELECT ${ASSET_VERSION_COLUMNS}
+            FROM asset_versions
+            ORDER BY created_at ASC, id ASC
+          `
+          )
+          .all();
   }
 
   private getAssetVersionRow(id: string) {
@@ -2099,8 +2146,8 @@ export class MapRepository {
     return assetVersionRowToModel(this.getAssetVersionRowOrThrow(input.id));
   }
 
-  listAssetVersions() {
-    return this.listAssetVersionRows().map(assetVersionRowToModel);
+  listAssetVersions(status?: AssetVersion['status']) {
+    return this.listAssetVersionRows(status).map(assetVersionRowToModel);
   }
 
   listAssetVersionIdsByPrefix(prefix: string) {
@@ -2121,10 +2168,13 @@ export class MapRepository {
     return row ? assetVersionRowToModel(row) : null;
   }
 
-  updateAssetVersion(input: UpdateAssetVersionInput) {
-    const current = assetVersionRowToModel(
-      this.getAssetVersionRowOrThrow(input.id)
-    );
+  updateAssetVersion(
+    input: UpdateAssetVersionInput,
+    prefetched?: AssetVersion
+  ) {
+    const current =
+      prefetched ??
+      assetVersionRowToModel(this.getAssetVersionRowOrThrow(input.id));
     const next: AssetVersion = {
       ...current,
       collisionBox: input.collisionBox ?? current.collisionBox,
@@ -2144,6 +2194,13 @@ export class MapRepository {
       status: input.status ?? current.status,
       updatedAt: new Date().toISOString()
     };
+
+    if (current.status === 'ready' && assetVersionHasChanges(current, next)) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset version ${input.id} is ready and immutable`
+      );
+    }
 
     try {
       this.db
@@ -2186,8 +2243,53 @@ export class MapRepository {
     return next;
   }
 
+  reviewAssetVersion(input: ReviewAssetVersionInput) {
+    const current = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.id)
+    );
+
+    if (current.status !== 'review') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${input.id} is not in review`
+      );
+    }
+
+    return this.updateAssetVersion(input, current);
+  }
+
+  approveAssetVersion(id: string) {
+    const current = assetVersionRowToModel(this.getAssetVersionRowOrThrow(id));
+
+    if (current.status !== 'review') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${id} must be in review before approval`
+      );
+    }
+
+    if (current.runtimeFile === null) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${id} is missing a runtime artifact`
+      );
+    }
+
+    return this.updateAssetVersion({ id, status: 'ready' }, current);
+  }
+
   createArchetype(input: CreateArchetypeInput) {
     const now = new Date().toISOString();
+    const assetVersion = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.assetVersionId)
+    );
+
+    if (assetVersion.status !== 'ready') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${input.assetVersionId} is not ready for archetype creation`
+      );
+    }
 
     try {
       this.db

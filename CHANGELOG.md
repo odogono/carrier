@@ -12,12 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - SQLite persistence for static entity catalog data via new `asset_versions`, `archetypes`, and `map_static_entities` tables in the API repository
 - Repository-level static entity mutation helpers with shared map revision participation
 - Static entity Phase 2 asset pipeline in the API: asset upload endpoints, original/runtime asset storage, async GLB processing, asset status reads, and runtime artifact fetches
+- Static entity Phase 3 review workflow in the API and contracts: asset review/update routes, approval to `ready`, archetype creation routes, and ready-asset immutability enforcement
+- Admin static-entities asset workspace at `/assets`, including upload, review, approval, and archetype-promotion flows
+- Admin 3D asset preview with runtime GLB inspection, synthetic terrain preview, real-map chunk terrain preview, footprint overlays, and grounding diagnostics
+- Shared `carrier-preview` workspace package for preview model normalization, terrain mesh generation, and grounding math
+- Low-poly GLB test fixtures for tank, truck, and building assets under `test-assets/`
 
 ### Changed
 
 - Map chunk contracts now include placement-only `staticEntities` metadata on both JSON and binary chunk responses
 - Binary chunk decoding now restores static entity metadata alongside height/material payloads
 - Asset version repository support now includes direct reads and status/metadata updates for upload, processing, review, and failure transitions
+- Static entity Phase 3 is now complete in the implementation plan, with admin review tooling and archetype-promotion support landed in the repo
 
 ## [0.4.0] - 2026-03-22
 

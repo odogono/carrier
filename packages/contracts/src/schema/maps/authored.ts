@@ -202,6 +202,58 @@ export const StaticEntitySchema = z.object({
 });
 export type StaticEntity = z.infer<typeof StaticEntitySchema>;
 
+export const ListAssetVersionsInput = z.object({
+  status: AssetVersionStatusSchema.optional()
+});
+export type ListAssetVersionsInput = z.infer<typeof ListAssetVersionsInput>;
+
+export const ListAssetVersionsOutput = z.array(AssetVersionSchema);
+export type ListAssetVersionsOutput = z.infer<typeof ListAssetVersionsOutput>;
+
+export const GetAssetVersionInput = z.object({
+  id: z.string().min(1)
+});
+export type GetAssetVersionInput = z.infer<typeof GetAssetVersionInput>;
+
+export const GetAssetVersionOutput = AssetVersionSchema;
+export type GetAssetVersionOutput = z.infer<typeof GetAssetVersionOutput>;
+
+export const UpdateAssetVersionReviewInput = z.object({
+  collisionBox: AssetVersionCollisionBoxSchema.optional(),
+  collisionClass: z.string().trim().min(1).max(120).optional(),
+  diagnostics: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
+  footprint: AssetVersionFootprintSchema.optional(),
+  groundingPolicy: z.string().trim().min(1).max(120).optional(),
+  id: z.string().min(1),
+  instancingEligible: z.boolean().optional(),
+  maxHeightDeltaMeters: nonNegativeFiniteNumber.optional()
+});
+export type UpdateAssetVersionReviewInput = z.infer<
+  typeof UpdateAssetVersionReviewInput
+>;
+
+export const UpdateAssetVersionReviewOutput = AssetVersionSchema;
+export type UpdateAssetVersionReviewOutput = z.infer<
+  typeof UpdateAssetVersionReviewOutput
+>;
+
+export const ApproveAssetVersionInput = z.object({
+  id: z.string().min(1)
+});
+export type ApproveAssetVersionInput = z.infer<typeof ApproveAssetVersionInput>;
+
+export const ApproveAssetVersionOutput = AssetVersionSchema;
+export type ApproveAssetVersionOutput = z.infer<typeof ApproveAssetVersionOutput>;
+
+export const CreateArchetypeInput = ArchetypeSchema.omit({
+  createdAt: true,
+  updatedAt: true
+});
+export type CreateArchetypeInput = z.infer<typeof CreateArchetypeInput>;
+
+export const CreateArchetypeOutput = ArchetypeSchema;
+export type CreateArchetypeOutput = z.infer<typeof CreateArchetypeOutput>;
+
 export const CreateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   mapId: z.string().min(1),
@@ -457,11 +509,54 @@ export const GetOverviewRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const ListAssetVersionsRoute: Route = {
+  description: 'List uploaded asset versions',
+  method: 'GET',
+  path: '/maps/assets',
+  tags: ['maps']
+} as const;
+
+export const GetAssetVersionRoute: Route = {
+  description: 'Retrieve asset version metadata',
+  method: 'GET',
+  path: '/maps/assets/{id}',
+  tags: ['maps']
+} as const;
+
+export const UpdateAssetVersionReviewRoute: Route = {
+  description: 'Update derived asset review metadata while the asset is in review',
+  method: 'PATCH',
+  path: '/maps/assets/{id}/review',
+  tags: ['maps']
+} as const;
+
+export const ApproveAssetVersionRoute: Route = {
+  description: 'Approve a reviewed asset version and mark it ready',
+  method: 'POST',
+  path: '/maps/assets/{id}/approve',
+  tags: ['maps']
+} as const;
+
+export const CreateArchetypeRoute: Route = {
+  description: 'Create an archetype from a ready asset version',
+  method: 'POST',
+  path: '/maps/archetypes',
+  tags: ['maps']
+} as const;
+
 export const authoredMapsContract = {
+  approveAssetVersion: oc
+    .route(ApproveAssetVersionRoute)
+    .input(ApproveAssetVersionInput)
+    .output(ApproveAssetVersionOutput),
   applyBoolean: oc
     .route(ApplyBooleanRoute)
     .input(ApplyBooleanInput)
     .output(ApplyBooleanOutput),
+  createArchetype: oc
+    .route(CreateArchetypeRoute)
+    .input(CreateArchetypeInput)
+    .output(CreateArchetypeOutput),
   createControlPoint: oc
     .route(CreateControlPointRoute)
     .input(CreateControlPointInput)
@@ -479,6 +574,14 @@ export const authoredMapsContract = {
     .input(DeleteSourcePolygonInput)
     .output(DeleteSourcePolygonOutput),
   getOverview: oc.route(GetOverviewRoute).input(GetOverviewInput).output(GetOverviewOutput),
+  getAssetVersion: oc
+    .route(GetAssetVersionRoute)
+    .input(GetAssetVersionInput)
+    .output(GetAssetVersionOutput),
+  listAssetVersions: oc
+    .route(ListAssetVersionsRoute)
+    .input(ListAssetVersionsInput)
+    .output(ListAssetVersionsOutput),
   listControlPoints: oc
     .route(ListControlPointsRoute)
     .input(ListControlPointsInput)
@@ -495,6 +598,10 @@ export const authoredMapsContract = {
     .route(UpdateControlPointRoute)
     .input(UpdateControlPointInput)
     .output(UpdateControlPointOutput),
+  updateAssetVersionReview: oc
+    .route(UpdateAssetVersionReviewRoute)
+    .input(UpdateAssetVersionReviewInput)
+    .output(UpdateAssetVersionReviewOutput),
   updateDerivedIsland: oc
     .route(UpdateDerivedIslandRoute)
     .input(UpdateDerivedIslandInput)

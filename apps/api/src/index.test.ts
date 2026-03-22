@@ -589,6 +589,83 @@ describe('API server map routes', () => {
     ]);
   });
 
+  test('supports review approval and archetype creation for uploaded assets', async () => {
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 18,
+        heightMeters: 20,
+        widthMeters: 18
+      },
+      collisionClass: 'building-solid',
+      diagnostics: ['Candidate metadata auto-derived from uploaded asset'],
+      footprint: {
+        depthMeters: 18,
+        widthMeters: 18
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'refinery-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1.5,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/refinery.glb',
+        sizeBytes: 512
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/refinery-v1.glb',
+        sizeBytes: 512
+      },
+      status: 'review'
+    });
+
+    const client = await createTestClient();
+    const listed = await client.maps.listAssetVersions({});
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(assetVersion.id);
+
+    const reviewed = await client.maps.updateAssetVersionReview({
+      collisionBox: {
+        depthMeters: 16,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      diagnostics: ['Candidate metadata auto-derived from uploaded asset', 'Admin adjusted footprint'],
+      footprint: {
+        depthMeters: 16,
+        widthMeters: 20
+      },
+      id: assetVersion.id,
+      instancingEligible: true,
+      maxHeightDeltaMeters: 0.75
+    });
+    expect(reviewed.footprint.widthMeters).toBe(20);
+    expect(reviewed.instancingEligible).toBe(true);
+
+    const ready = await client.maps.approveAssetVersion({
+      id: assetVersion.id
+    });
+    expect(ready.status).toBe('ready');
+
+    const archetype = await client.maps.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'industrial',
+      id: 'refinery',
+      name: 'Refinery',
+      status: 'active',
+      tags: ['fuel', 'steel']
+    });
+    expect(archetype.assetVersionId).toBe(assetVersion.id);
+
+    await expect(
+      client.maps.updateAssetVersionReview({
+        id: assetVersion.id,
+        maxHeightDeltaMeters: 1
+      })
+    ).rejects.toThrow('Asset version refinery-v1 is not in review');
+  });
+
   test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {
     const { app } = await createServer();
     const response = await app.handle(

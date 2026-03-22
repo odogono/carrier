@@ -318,6 +318,52 @@ describe('map repository', () => {
         'runtime/warehouse-v1.glb'
       );
 
+      const reviewedAssetVersion = repository.reviewAssetVersion({
+        collisionBox: {
+          depthMeters: 14,
+          heightMeters: 24,
+          widthMeters: 19
+        },
+        diagnostics: ['normalized', 'reviewed by admin'],
+        footprint: {
+          depthMeters: 14,
+          widthMeters: 19
+        },
+        id: assetVersion.id,
+        instancingEligible: true,
+        maxHeightDeltaMeters: 1.25
+      });
+      expect(reviewedAssetVersion.footprint.widthMeters).toBe(19);
+      expect(reviewedAssetVersion.instancingEligible).toBe(true);
+
+      expect(() =>
+        repository.createArchetype({
+          assetVersionId: assetVersion.id,
+          category: 'industrial',
+          id: 'warehouse-before-ready',
+          name: 'Warehouse Before Ready',
+          status: 'active',
+          tags: []
+        })
+      ).toThrow(MapRepositoryError);
+
+      const readyAssetVersion = repository.approveAssetVersion(assetVersion.id);
+      expect(readyAssetVersion.status).toBe('ready');
+
+      expect(() =>
+        repository.reviewAssetVersion({
+          id: assetVersion.id,
+          maxHeightDeltaMeters: 2
+        })
+      ).toThrow(MapRepositoryError);
+
+      expect(() =>
+        repository.updateAssetVersion({
+          id: assetVersion.id,
+          maxHeightDeltaMeters: 2
+        })
+      ).toThrow(MapRepositoryError);
+
       const archetype = repository.createArchetype({
         assetVersionId: assetVersion.id,
         category: 'industrial',

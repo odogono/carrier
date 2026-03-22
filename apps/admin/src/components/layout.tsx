@@ -1,4 +1,4 @@
-import { LayoutDashboard, Map, Moon, Sun } from 'lucide-react';
+import { Boxes, LayoutDashboard, Map, Moon, Sun } from 'lucide-react';
 import { type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 
 const navItems = [
   { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/assets', icon: Boxes, label: 'Assets' },
   { href: '/maps', icon: Map, label: 'Maps' }
 ];
 
