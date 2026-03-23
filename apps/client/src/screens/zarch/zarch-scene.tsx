@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useMemo, useRef } from 'react';
 
 import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
@@ -8,15 +8,27 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DynamicDrawUsage,
   FrontSide,
   Group,
+  InstancedMesh,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshLambertMaterial,
+  Object3D,
   Plane,
+  PlaneGeometry,
+  Raycaster,
+  Vector2,
   Vector3
 } from 'three';
-import type { AmbientLight, DirectionalLight, PerspectiveCamera } from 'three';
+import type {
+  AmbientLight,
+  DirectionalLight,
+  Intersection,
+  PerspectiveCamera
+} from 'three';
 
 import {
   clampZoom,
@@ -25,15 +37,26 @@ import {
   TREE_POOL_SIZE,
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
-import { useSceneConfigRef } from '@/hooks/use-scene-controls';
+import {
+  useSceneConfigRef,
+  useSceneConfigValue
+} from '@/hooks/use-scene-controls';
 
 import type {
   ZarchInputState,
   ZarchRuntimeState
 } from './use-zarch-runtime';
+import {
+  PARTICLE_ASPECT_BY_KIND,
+  PARTICLE_CAPACITY,
+  createParticleSystemState,
+  emitTapParticlePreset,
+  simulateParticleSystem
+} from './zarch-particles';
 import { wrapWorldCoordinate } from './zarch-minimap';
 
 type TileMesh = Mesh<BufferGeometry, MeshLambertMaterial>;
+type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
 
 type TreeMeshEntry = {
   pine: Group;
@@ -41,6 +64,8 @@ type TreeMeshEntry = {
 };
 
 type ScenePools = {
+  particleMesh: ParticleMesh;
+  particleShadowMesh: ParticleMesh;
   root: Group;
   tilePool: TileMesh[];
   treePool: TreeMeshEntry[];
@@ -54,6 +79,7 @@ type ZarchSceneProps = {
 
 const TILE_BASE_COLOR = new Color();
 const TREE_BASE_COLOR = new Color();
+const PARTICLE_COLOR = new Color();
 
 const createClipPlanes = () => [
   new Plane(new Vector3(1, 0, 0), 0),
@@ -78,6 +104,45 @@ const buildTileMesh = (clipPlanes: Plane[]) => {
   const mesh = new Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
+  return mesh;
+};
+
+const buildParticleMesh = (clipPlanes: Plane[]) => {
+  const geometry = new PlaneGeometry(1, 1);
+  const material = new MeshBasicMaterial({
+    clippingPlanes: clipPlanes,
+    color: 0xff_ff_ff,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+    transparent: true
+  });
+
+  const mesh = new InstancedMesh(geometry, material, PARTICLE_CAPACITY);
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  mesh.renderOrder = 10;
+  return mesh;
+};
+
+const buildParticleShadowMesh = (clipPlanes: Plane[]) => {
+  const geometry = new PlaneGeometry(1, 1);
+  const material = new MeshBasicMaterial({
+    clippingPlanes: clipPlanes,
+    color: 0x00_00_00,
+    depthTest: true,
+    depthWrite: false,
+    opacity: 0.34,
+    toneMapped: false,
+    transparent: true
+  });
+
+  const mesh = new InstancedMesh(geometry, material, PARTICLE_CAPACITY);
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  mesh.renderOrder = 5;
   return mesh;
 };
 
@@ -161,8 +226,13 @@ const buildRoundTree = (clipPlanes: Plane[]) => {
 
 const createScenePools = (clipPlanes: Plane[]): ScenePools => {
   const root = new Group();
+  const particleMesh = buildParticleMesh(clipPlanes);
+  const particleShadowMesh = buildParticleShadowMesh(clipPlanes);
   const tilePool: TileMesh[] = [];
   const treePool: TreeMeshEntry[] = [];
+
+  root.add(particleShadowMesh);
+  root.add(particleMesh);
 
   for (let index = 0; index < TILE_POOL_SIZE; index += 1) {
     const mesh = buildTileMesh(clipPlanes);
@@ -181,7 +251,7 @@ const createScenePools = (clipPlanes: Plane[]): ScenePools => {
     treePool.push({ pine, round });
   }
 
-  return { root, tilePool, treePool };
+  return { particleMesh, particleShadowMesh, root, tilePool, treePool };
 };
 
 const disposeScenePools = (root: Group) => {
@@ -220,14 +290,52 @@ export const ZarchScene = ({
   terrain
 }: ZarchSceneProps) => {
   const configRef = useSceneConfigRef();
+  const ambientIntensity = useSceneConfigValue('ambientIntensity');
   const ambientRef = useRef<AmbientLight>(null);
+  const backgroundColor = useSceneConfigValue('backgroundColor');
   const cameraRef = useRef<PerspectiveCamera>(null);
+  const cameraFov = useSceneConfigValue('cameraFov');
   const clipPlanesRef = useRef<Plane[] | null>(null);
+  const directionalIntensity = useSceneConfigValue('directionalIntensity');
+  const directionalPosition = useSceneConfigValue('directionalPosition');
   const directionalRef = useRef<DirectionalLight>(null);
+  const shadowBias = useSceneConfigValue('shadowBias');
+  const shadowMapSize = useSceneConfigValue('shadowMapSize');
+  const viewRadiusBase = useSceneConfigValue('viewRadiusBase');
   const forwardRef = useRef(new Vector3());
+  const intersectionsRef = useRef<Intersection[]>([]);
+  const particleDummyRef = useRef(new Object3D());
+  const particleShadowDummyRef = useRef(new Object3D());
+  const particleNdcRef = useRef(new Vector2());
+  const particleRaycasterRef = useRef(new Raycaster());
+  const particleSystemRef = useRef(createParticleSystemState());
   const poolsRef = useRef<ScenePools | null>(null);
   const rightRef = useRef(new Vector3());
   const worldRef = useRef<Group>(null);
+  const particleSurface = useMemo(
+    () => ({
+      getHeightAt: (x: number, z: number) => {
+        const gx = Math.floor(x / TILE);
+        const gz = Math.floor(z / TILE);
+
+        if (!terrain.isTileLoaded(gx, gz)) {
+          return null;
+        }
+
+        if (terrain.isWaterTile(gx, gz)) {
+          return configRef.current.seaY;
+        }
+
+        return terrain.getTileAverageHeight(gx, gz);
+      },
+      isWaterAt: (x: number, z: number) => {
+        const gx = Math.floor(x / TILE);
+        const gz = Math.floor(z / TILE);
+        return terrain.isTileLoaded(gx, gz) && terrain.isWaterTile(gx, gz);
+      }
+    }),
+    [configRef, terrain]
+  );
 
   useEffect(() => {
     const world = worldRef.current;
@@ -251,9 +359,19 @@ export const ZarchScene = ({
     };
   }, []);
 
-  useFrame((_, delta) => {
+  useEffect(() => {
+    particleSystemRef.current.count = 0;
+  }, [terrain.id]);
+
+  useFrame((state, delta) => {
     const camera = cameraRef.current;
     const config = configRef.current;
+    const intersections = intersectionsRef.current;
+    const particleDummy = particleDummyRef.current;
+    const particleShadowDummy = particleShadowDummyRef.current;
+    const particleNdc = particleNdcRef.current;
+    const particleRaycaster = particleRaycasterRef.current;
+    const particleSystem = particleSystemRef.current;
     const runtime = runtimeRef.current;
     const input = inputRef.current;
     const clipPlanes = clipPlanesRef.current;
@@ -454,11 +572,14 @@ export const ZarchScene = ({
           .multiplyScalar(brightness);
         tileMesh.material.wireframe = config.wireframe;
         tileMesh.visible = true;
+        tileMesh.userData.gridX = gx;
+        tileMesh.userData.gridZ = gz;
         positions.setXYZ(0, worldX, h00, worldZ);
         positions.setXYZ(1, worldX + TILE, h10, worldZ);
         positions.setXYZ(2, worldX, h01, worldZ + TILE);
         positions.setXYZ(3, worldX + TILE, h11, worldZ + TILE);
         positions.needsUpdate = true;
+        tileMesh.geometry.computeBoundingSphere();
 
         if (tileMesh.userData.tileKey !== tileKey) {
           tileMesh.geometry.computeVertexNormals();
@@ -509,38 +630,148 @@ export const ZarchScene = ({
     clipPlanes[1].setComponents(-1, 0, 0, clipRadius);
     clipPlanes[2].setComponents(0, 0, 1, clipRadius);
     clipPlanes[3].setComponents(0, 0, -1, clipRadius);
+
+    if (input.queuedTap) {
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const tap = input.queuedTap;
+      input.queuedTap = null;
+
+      if (rect.width > 0 && rect.height > 0) {
+        particleNdc.set(
+          ((tap.clientX - rect.left) / rect.width) * 2 - 1,
+          -(((tap.clientY - rect.top) / rect.height) * 2 - 1)
+        );
+        intersections.length = 0;
+        particleRaycaster.setFromCamera(particleNdc, camera);
+        particleRaycaster.intersectObjects(
+          pools.tilePool,
+          false,
+          intersections
+        );
+
+        const hit = intersections[0];
+
+        if (hit) {
+          const tileMesh = hit.object as TileMesh;
+          const gx = tileMesh.userData.gridX as number | undefined;
+          const gz = tileMesh.userData.gridZ as number | undefined;
+
+          if (
+            typeof gx === 'number' &&
+            typeof gz === 'number' &&
+            terrain.isTileLoaded(gx, gz)
+          ) {
+            const isWater = terrain.isWaterTile(gx, gz);
+            emitTapParticlePreset(
+              particleSystem,
+              isWater ? 'water-tap' : 'land-tap',
+              {
+                x: hit.point.x + runtime.camX,
+                y: isWater ? config.seaY : hit.point.y,
+                z: hit.point.z + runtime.camZ
+              },
+              config
+            );
+          }
+        }
+      }
+    }
+
+    simulateParticleSystem(particleSystem, dt, particleSurface, config);
+
+    let shadowCount = 0;
+
+    for (let index = 0; index < particleSystem.count; index += 1) {
+      const size = particleSystem.size[index];
+      const aspect = PARTICLE_ASPECT_BY_KIND[particleSystem.kind[index] ?? 0] ?? 1;
+      const surfaceHeight = particleSurface.getHeightAt(
+        particleSystem.x[index],
+        particleSystem.z[index]
+      );
+
+      particleDummy.position.set(
+        particleSystem.x[index] - runtime.camX,
+        particleSystem.y[index],
+        particleSystem.z[index] - runtime.camZ
+      );
+      particleDummy.quaternion.copy(camera.quaternion);
+      particleDummy.scale.set(size, size * aspect, 1);
+      particleDummy.updateMatrix();
+      pools.particleMesh.setMatrixAt(index, particleDummy.matrix);
+      PARTICLE_COLOR.setHex(particleSystem.color[index] ?? 0xff_ff_ff);
+      pools.particleMesh.setColorAt(index, PARTICLE_COLOR);
+
+      if (surfaceHeight === null) {
+        continue;
+      }
+
+      const heightAboveSurface = Math.max(
+        particleSystem.y[index] - surfaceHeight,
+        0
+      );
+      const shadowScale =
+        size *
+        config.particleShadowScale *
+        (1 + Math.min(heightAboveSurface * 0.025, 1.2));
+      const shadowDepth = shadowScale * (aspect * config.particleShadowStretch);
+      particleShadowDummy.position.set(
+        particleSystem.x[index] - runtime.camX,
+        surfaceHeight + config.particleShadowLift,
+        particleSystem.z[index] - runtime.camZ
+      );
+      particleShadowDummy.rotation.set(-Math.PI / 2, 0, 0);
+      particleShadowDummy.scale.set(shadowScale, shadowDepth, 1);
+      particleShadowDummy.updateMatrix();
+      pools.particleShadowMesh.setMatrixAt(shadowCount, particleShadowDummy.matrix);
+      PARTICLE_COLOR.setRGB(0, 0, 0);
+      pools.particleShadowMesh.setColorAt(shadowCount, PARTICLE_COLOR);
+      shadowCount += 1;
+    }
+
+    pools.particleMesh.count = particleSystem.count;
+    pools.particleMesh.instanceMatrix.needsUpdate = true;
+    pools.particleShadowMesh.count = shadowCount;
+    pools.particleShadowMesh.instanceMatrix.needsUpdate = true;
+    pools.particleShadowMesh.material.opacity = config.particleShadowOpacity;
+
+    if (pools.particleMesh.instanceColor) {
+      pools.particleMesh.instanceColor.needsUpdate = true;
+    }
+
+    if (pools.particleShadowMesh.instanceColor) {
+      pools.particleShadowMesh.instanceColor.needsUpdate = true;
+    }
   });
 
-  const config = configRef.current;
-  const shadowExtent = config.viewRadiusBase * 2.5 * TILE * 1.2;
+  const shadowExtent = viewRadiusBase * 2.5 * TILE * 1.2;
 
   return (
     <>
-      <color args={[config.backgroundColor]} attach="background" />
+      <color args={[backgroundColor]} attach="background" />
       <PerspectiveCameraImpl
         far={5000}
-        fov={config.cameraFov}
+        fov={cameraFov}
         makeDefault
         near={1}
         position={[0, 0, 0]}
         ref={cameraRef}
       />
       <group ref={worldRef} />
-      <ambientLight intensity={config.ambientIntensity} ref={ambientRef} />
+      <ambientLight intensity={ambientIntensity} ref={ambientRef} />
       <directionalLight
         castShadow
-        intensity={config.directionalIntensity}
-        position={config.directionalPosition}
+        intensity={directionalIntensity}
+        position={directionalPosition}
         ref={directionalRef}
-        shadow-bias={config.shadowBias}
+        shadow-bias={shadowBias}
         shadow-camera-bottom={-shadowExtent}
         shadow-camera-far={2000}
         shadow-camera-left={-shadowExtent}
         shadow-camera-near={1}
         shadow-camera-right={shadowExtent}
         shadow-camera-top={shadowExtent}
-        shadow-mapSize-height={config.shadowMapSize}
-        shadow-mapSize-width={config.shadowMapSize}
+        shadow-mapSize-height={shadowMapSize}
+        shadow-mapSize-width={shadowMapSize}
       />
     </>
   );

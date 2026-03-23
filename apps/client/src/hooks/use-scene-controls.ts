@@ -93,9 +93,9 @@ export const DevSceneControls = () => {
       value: DEFAULT_SCENE_CONFIG.directionalIntensity
     },
     directionalPosition: {
+      joystick: true,
       label: 'Dir position',
-      value: DEFAULT_SCENE_CONFIG.directionalPosition,
-      joystick: true
+      value: DEFAULT_SCENE_CONFIG.directionalPosition
     },
     shadowBias: {
       label: 'Shadow bias',
@@ -164,6 +164,107 @@ export const DevSceneControls = () => {
     }
   });
 
+  const particleValues = useControls('Particles', {
+    particleGravity: {
+      label: 'Gravity',
+      max: 400,
+      min: 20,
+      step: 5,
+      value: DEFAULT_SCENE_CONFIG.particleGravity
+    },
+    particleLandClusterCount: {
+      label: 'Land clusters',
+      max: 12,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleLandClusterCount
+    },
+    particleLandVelocityScale: {
+      label: 'Land velocity',
+      max: 3,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleLandVelocityScale
+    },
+    particleShadowLift: {
+      label: 'Shadow lift',
+      max: 2,
+      min: 0,
+      step: 0.01,
+      value: DEFAULT_SCENE_CONFIG.particleShadowLift
+    },
+    particleShadowOpacity: {
+      label: 'Shadow alpha',
+      max: 0.8,
+      min: 0,
+      step: 0.01,
+      value: DEFAULT_SCENE_CONFIG.particleShadowOpacity
+    },
+    particleShadowScale: {
+      label: 'Shadow scale',
+      max: 3,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleShadowScale
+    },
+    particleShadowStretch: {
+      label: 'Shadow stretch',
+      max: 2,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleShadowStretch
+    },
+    particleSizeScale: {
+      label: 'Size scale',
+      max: 3,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleSizeScale
+    },
+    particleSmokeRiseScale: {
+      label: 'Smoke rise',
+      max: 3,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleSmokeRiseScale
+    },
+    particleTapMaxDurationMs: {
+      label: 'Tap ms',
+      max: 400,
+      min: 50,
+      step: 5,
+      value: DEFAULT_SCENE_CONFIG.particleTapMaxDurationMs
+    },
+    particleTapMaxMovementPx: {
+      label: 'Tap px',
+      max: 24,
+      min: 2,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleTapMaxMovementPx
+    },
+    particleWaterImpactSprayCount: {
+      label: 'Impact spray',
+      max: 48,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleWaterImpactSprayCount
+    },
+    particleWaterVelocityScale: {
+      label: 'Water velocity',
+      max: 3,
+      min: 0.2,
+      step: 0.05,
+      value: DEFAULT_SCENE_CONFIG.particleWaterVelocityScale
+    },
+    particleWaterWaveCount: {
+      label: 'Water count',
+      max: 96,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleWaterWaveCount
+    }
+  });
+
   const debugValues = useControls('Debug', {
     showHud: {
       label: 'HUD',
@@ -180,6 +281,7 @@ export const DevSceneControls = () => {
       ...cameraValues,
       ...viewValues,
       ...lightingValues,
+      ...particleValues,
       ...renderingValues,
       ...sceneValues,
       ...debugValues
@@ -188,6 +290,7 @@ export const DevSceneControls = () => {
     cameraValues,
     viewValues,
     lightingValues,
+    particleValues,
     renderingValues,
     sceneValues,
     debugValues

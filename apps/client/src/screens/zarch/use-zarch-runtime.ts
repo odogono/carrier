@@ -9,6 +9,12 @@ import {
 import { clampZoom } from '@/helpers/zarch-terrain';
 import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 
+import {
+  isQuickTapGesture,
+  type PointerTapCandidate,
+  type PointerTapPayload
+} from './zarch-pointer';
+
 export type ZarchRuntimeState = {
   camX: number;
   camYaw: number;
@@ -24,7 +30,9 @@ export type ZarchInputState = {
   dragActive: boolean;
   keys: Record<string, boolean>;
   lastPointerX: number;
+  pointerCandidate: PointerTapCandidate | null;
   pointerId: number | null;
+  queuedTap: PointerTapPayload | null;
 };
 
 type UseZarchRuntimeArgs = {
@@ -57,7 +65,9 @@ export const useZarchRuntime = ({
     dragActive: false,
     keys: {},
     lastPointerX: 0,
-    pointerId: null
+    pointerCandidate: null,
+    pointerId: null,
+    queuedTap: null
   });
 
   useEffect(() => {
@@ -85,7 +95,7 @@ export const useZarchRuntime = ({
     return () => {
       container.removeEventListener('wheel', handleWheel, true);
     };
-  }, [containerElement]);
+  }, [configRef, containerElement]);
 
   const containerProps = useMemo(() => {
     const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -101,7 +111,11 @@ export const useZarchRuntime = ({
     };
 
     const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
-      if ((event.target as HTMLElement | null)?.closest('button')) {
+      if (
+        !event.isPrimary ||
+        (event.pointerType === 'mouse' && event.button !== 0) ||
+        (event.target as HTMLElement | null)?.closest('button')
+      ) {
         return;
       }
 
@@ -109,6 +123,11 @@ export const useZarchRuntime = ({
       event.currentTarget.setPointerCapture(event.pointerId);
       inputRef.current.dragActive = true;
       inputRef.current.lastPointerX = event.clientX;
+      inputRef.current.pointerCandidate = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        timeStamp: event.timeStamp
+      };
       inputRef.current.pointerId = event.pointerId;
     };
 
@@ -127,6 +146,28 @@ export const useZarchRuntime = ({
 
     const handlePointerUp = (event: PointerEvent<HTMLElement>) => {
       if (
+        event.isPrimary &&
+        (event.pointerType !== 'mouse' || event.button === 0) &&
+        inputRef.current.pointerId === event.pointerId &&
+        inputRef.current.pointerCandidate &&
+        isQuickTapGesture(
+          inputRef.current.pointerCandidate,
+          {
+            clientX: event.clientX,
+            clientY: event.clientY
+          },
+          event.timeStamp,
+          configRef.current.particleTapMaxDurationMs,
+          configRef.current.particleTapMaxMovementPx
+        )
+      ) {
+        inputRef.current.queuedTap = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+      }
+
+      if (
         inputRef.current.pointerId !== null &&
         event.currentTarget.hasPointerCapture(inputRef.current.pointerId)
       ) {
@@ -134,6 +175,7 @@ export const useZarchRuntime = ({
       }
 
       inputRef.current.dragActive = false;
+      inputRef.current.pointerCandidate = null;
       inputRef.current.pointerId = null;
     };
 
@@ -145,7 +187,7 @@ export const useZarchRuntime = ({
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp
     };
-  }, []);
+  }, [configRef]);
 
   return {
     containerProps,
