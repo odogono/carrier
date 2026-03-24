@@ -11,6 +11,8 @@ import type {
   DerivedIslandLike,
   IslandDraft,
   PolygonDraft,
+  StaticEntityDraft,
+  StaticEntityLike,
   SourcePolygonLike
 } from './types';
 
@@ -46,6 +48,21 @@ export const createIslandDraft = (island: DerivedIslandLike): IslandDraft => ({
   name: island.name ?? ''
 });
 
+export const createStaticEntityDraft = (
+  entity: StaticEntityLike
+): StaticEntityDraft => ({
+  archetypeId: entity.archetypeId,
+  id: entity.id,
+  kind: 'edit',
+  label: entity.label ?? '',
+  scale: entity.scale,
+  state: entity.state,
+  x: entity.position.x,
+  yOffset: entity.yOffset,
+  yaw: entity.rotation.yaw,
+  z: entity.position.z
+});
+
 export const isDraftDirty = (
   draft: PolygonDraft,
   polygon: Pick<SourcePolygon, 'params' | 'vertices'> | null
@@ -57,6 +74,26 @@ export const isDraftDirty = (
   return (
     JSON.stringify(draft.vertices) !== JSON.stringify(polygon.vertices) ||
     JSON.stringify(draft.params) !== JSON.stringify(polygon.params)
+  );
+};
+
+export const isStaticEntityDraftDirty = (
+  draft: StaticEntityDraft,
+  entity: StaticEntityLike | null
+) => {
+  if (!entity) {
+    return false;
+  }
+
+  return (
+    draft.archetypeId !== entity.archetypeId ||
+    draft.label !== (entity.label ?? '') ||
+    draft.scale !== entity.scale ||
+    draft.state !== entity.state ||
+    draft.x !== entity.position.x ||
+    draft.yOffset !== entity.yOffset ||
+    draft.yaw !== entity.rotation.yaw ||
+    draft.z !== entity.position.z
   );
 };
 

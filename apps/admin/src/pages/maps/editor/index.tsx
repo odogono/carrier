@@ -2,6 +2,8 @@ import {
   isInfiniteMap,
   type ControlPoint,
   type DerivedIsland,
+  type StaticEntity,
+  type StaticEntityListItem,
   type SourcePolygon
 } from 'carrier-contracts/types';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -50,20 +52,27 @@ import {
   canSavePolygonDraft,
   getExactSelectedIslands,
   getIslandsBySelectedPolygons,
+  filterArchetypeCatalog,
+  getStaticEntityGroundingDiagnostics,
+  getStaticEntitySnapMode,
+  getTerrainGrids,
   mergeWorldBounds,
   nextIslandPolygonSelection,
   nextOrderedSelection,
   pointInPolygon,
   polygonIntersectsBounds,
+  snapWorldPoint,
   type EditorTool
 } from './helpers';
 import {
   createControlPointDraft,
   createIslandDraft,
   createPolygonDraft,
+  createStaticEntityDraft,
   expandBounds,
   getBoundsCenter,
   isDraftDirty,
+  isStaticEntityDraftDirty,
   translateControlPointDraft,
   translateWorldPoint
 } from './helpers/drafts';
@@ -74,6 +83,7 @@ import type {
 } from './helpers/types';
 import { useElementSize } from './hooks/use-element-size';
 import { useMapEditorActions } from './hooks/use-map-editor-actions';
+import { useStaticEntityEditorActions } from './hooks/use-static-entity-editor-actions';
 import {
   canRedoAtom,
   canUndoAtom,
@@ -102,6 +112,23 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   const [editorRevision, setEditorRevision] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [dragState, setDragState] = useState<CanvasDragState>(null);
+  const [activeCatalogCategory, setActiveCatalogCategory] = useState<
+    StaticEntityListItem['archetype']['category'] | 'all'
+  >('all');
+  const [activeCatalogArchetypeId, setActiveCatalogArchetypeId] = useState<
+    string | null
+  >(null);
+  const [activeCatalogSearch, setActiveCatalogSearch] = useState('');
+  const [activeOutlinerArchetypeId, setActiveOutlinerArchetypeId] = useState<
+    string | 'all'
+  >('all');
+  const [activeOutlinerCategory, setActiveOutlinerCategory] = useState<
+    StaticEntityListItem['archetype']['category'] | 'all'
+  >('all');
+  const [activeOutlinerSearch, setActiveOutlinerSearch] = useState('');
+  const [bulkScaleDraft, setBulkScaleDraft] = useState('1');
+  const [bulkStateDraft, setBulkStateDraft] =
+    useState<StaticEntity['state']>('active');
   const [snapshot, setSnapshot] = useAtom(editorSnapshotAtom);
   const canUndo = useAtomValue(canUndoAtom);
   const canRedo = useAtomValue(canRedoAtom);
@@ -120,19 +147,24 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   const snapshotRef = useRef(snapshot);
   const dragSnapshotRef = useRef<EditorSnapshot | null>(null);
   const suppressCanvasClickRef = useRef(false);
+  const suppressEntityClickRef = useRef<string | null>(null);
   const suppressPolygonClickRef = useRef<string | null>(null);
 
   const {
     controlPointDraft,
+    entityDraft,
     islandDraft,
     polygonControlPointDrafts,
     polygonDraft,
     selectedControlPointId,
+    selectedEntityIds,
     selectedPolygonIds,
     tool
   } = snapshot;
 
   const {
+    activeArchetypesQuery,
+    assetVersionsById,
     controlPointsQuery,
     derivedIslandsQuery,
     invalidateIslandMetadataQueries,
@@ -142,8 +174,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     overviewQuery,
     patchControlPoints,
     polygonsQuery,
+    referencedArchetypesQuery,
     reloadAll,
-    replaceSourcePolygons
+    replaceSourcePolygons,
+    staticEntitiesQuery
   } = useMapEditorData(id);
 
   const polygons = useMemo(
@@ -157,6 +191,14 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   const derivedIslands = useMemo(
     () => derivedIslandsQuery.data ?? [],
     [derivedIslandsQuery.data]
+  );
+  const activeArchetypes = useMemo(
+    () => activeArchetypesQuery.data ?? [],
+    [activeArchetypesQuery.data]
+  );
+  const staticEntityItems = useMemo(
+    () => staticEntitiesQuery.data ?? [],
+    [staticEntitiesQuery.data]
   );
   const islandsByPolygonId = useMemo(() => {
     const next = new Map<string, (typeof derivedIslands)[number]>();
@@ -195,6 +237,20 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       new Set(exactSelectedIslands.flatMap(island => island.sourcePolygonIds)),
     [exactSelectedIslands]
   );
+  const referencedArchetypeIds = useMemo(
+    () => new Set((referencedArchetypesQuery.data ?? []).map(archetype => archetype.id)),
+    [referencedArchetypesQuery.data]
+  );
+
+  const filteredCatalogArchetypes = useMemo(() => {
+    const byCategory =
+      activeCatalogCategory === 'all'
+        ? activeArchetypes
+        : activeArchetypes.filter(
+            archetype => archetype.category === activeCatalogCategory
+          );
+    return filterArchetypeCatalog(byCategory, activeCatalogSearch);
+  }, [activeArchetypes, activeCatalogCategory, activeCatalogSearch]);
   const renderedControlPoints = useMemo(() => {
     if (polygonControlPointDrafts.length === 0) {
       return controlPoints;
@@ -233,6 +289,15 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   useEffect(() => {
     resetHistory(createEmptyEditorSnapshot());
   }, [resetHistory]);
+
+  useEffect(() => {
+    if (
+      !activeCatalogArchetypeId &&
+      filteredCatalogArchetypes.length > 0
+    ) {
+      setActiveCatalogArchetypeId(filteredCatalogArchetypes[0]!.id);
+    }
+  }, [activeCatalogArchetypeId, filteredCatalogArchetypes]);
 
   const updateSnapshot = useCallback(
     (
@@ -275,9 +340,11 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       updateSnapshot(
         current => ({
           ...current,
+          entityDraft: null,
           islandDraft: null,
           polygonControlPointDrafts: [],
           selectedControlPointId: null,
+          selectedEntityIds: [],
           selectedIslandId: null,
           selectedPolygonIds: []
         }),
@@ -311,6 +378,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
   const setPolygonDraft = snapshotFieldSetter('polygonDraft');
   const setControlPointDraft = snapshotFieldSetter('controlPointDraft');
+  const setEntityDraft = snapshotFieldSetter('entityDraft');
   const setIslandDraft = snapshotFieldSetter('islandDraft');
   const setPolygonControlPointDrafts = snapshotFieldSetter(
     'polygonControlPointDrafts'
@@ -327,10 +395,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         current => ({
           ...current,
           controlPointDraft: null,
+          entityDraft: null,
           islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft: nextPolygon ? createPolygonDraft(nextPolygon) : null,
           selectedControlPointId: null,
+          selectedEntityIds: [],
           selectedIslandId: null,
           selectedPolygonIds: polygonIds
         }),
@@ -338,6 +408,35 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       );
     },
     [polygons, updateSnapshot]
+  );
+
+  const selectEntityIds = useCallback(
+    (entityIds: string[], record = true) => {
+      const nextEntity =
+        entityIds.length === 1
+          ? (staticEntityItems.find(item => item.entity.id === entityIds[0]) ??
+              null)
+          : null;
+
+      updateSnapshot(
+        current => ({
+          ...current,
+          controlPointDraft: null,
+          entityDraft: nextEntity
+            ? createStaticEntityDraft(nextEntity.entity)
+            : null,
+          islandDraft: null,
+          polygonControlPointDrafts: [],
+          polygonDraft: null,
+          selectedControlPointId: null,
+          selectedEntityIds: entityIds,
+          selectedIslandId: null,
+          selectedPolygonIds: []
+        }),
+        record
+      );
+    },
+    [staticEntityItems, updateSnapshot]
   );
 
   useEffect(() => {
@@ -456,6 +555,88 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     Boolean(map)
   );
 
+  const staticEntityViews = useMemo(
+    () => {
+      const terrains = map ? getTerrainGrids(chunks, map) : undefined;
+      return staticEntityItems.map(item => {
+        const assetVersion = assetVersionsById.get(item.archetype.assetVersionId);
+        return {
+          ...item,
+          assetVersion: assetVersion ?? null,
+          diagnostics: map
+            ? getStaticEntityGroundingDiagnostics({
+                assetVersion,
+                chunks,
+                entity: item.entity,
+                map,
+                terrains
+              })
+            : { status: 'pending' as const }
+        };
+      });
+    },
+    [assetVersionsById, chunks, map, staticEntityItems]
+  );
+  const selectedEntity = useMemo(
+    () =>
+      selectedEntityIds.length === 1
+        ? (staticEntityViews.find(item => item.entity.id === selectedEntityIds[0]) ??
+            null)
+        : null,
+    [selectedEntityIds, staticEntityViews]
+  );
+  const selectedStaticEntities = useMemo(
+    () =>
+      selectedEntityIds
+        .map(id =>
+          staticEntityViews.find(item => item.entity.id === id)?.entity ?? null
+        )
+        .filter((entity): entity is StaticEntity => entity !== null),
+    [selectedEntityIds, staticEntityViews]
+  );
+
+  useEffect(() => {
+    if (
+      selectedEntityIds.length === 1 &&
+      selectedEntity &&
+      entityDraft === null
+    ) {
+      setEntityDraft(createStaticEntityDraft(selectedEntity.entity));
+    }
+  }, [entityDraft, selectedEntity, selectedEntityIds, setEntityDraft]);
+
+  const filteredStaticEntityViews = useMemo(() => {
+    const query = activeOutlinerSearch.trim().toLowerCase();
+    return staticEntityViews.filter(item => {
+      if (
+        activeOutlinerCategory !== 'all' &&
+        item.archetype.category !== activeOutlinerCategory
+      ) {
+        return false;
+      }
+
+      if (
+        activeOutlinerArchetypeId !== 'all' &&
+        item.archetype.id !== activeOutlinerArchetypeId
+      ) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return [item.entity.id, item.entity.label ?? '', item.archetype.name]
+        .map(value => value.toLowerCase())
+        .some(value => value.includes(query));
+    });
+  }, [
+    activeOutlinerArchetypeId,
+    activeOutlinerCategory,
+    activeOutlinerSearch,
+    staticEntityViews
+  ]);
+
   const viewportWorldBounds = map
     ? getViewportWorldBounds(map, viewport, size.width, size.height)
     : null;
@@ -548,6 +729,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       current => ({
         ...current,
         controlPointDraft: null,
+        entityDraft: null,
         islandDraft: null,
         polygonControlPointDrafts: [],
         polygonDraft: createPolygonDraft(selectedPolygon),
@@ -562,13 +744,34 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       current => ({
         ...current,
         controlPointDraft: null,
+        entityDraft: null,
         islandDraft: null,
         polygonControlPointDrafts: [],
         polygonDraft: null,
         selectedControlPointId: null,
+        selectedEntityIds: [],
         selectedIslandId: null,
         selectedPolygonIds: [],
         tool: 'place-control-point'
+      }),
+      true
+    );
+  }, [updateSnapshot]);
+
+  const beginPlaceEntity = useCallback(() => {
+    updateSnapshot(
+      current => ({
+        ...current,
+        controlPointDraft: null,
+        entityDraft: null,
+        islandDraft: null,
+        polygonControlPointDrafts: [],
+        polygonDraft: null,
+        selectedControlPointId: null,
+        selectedEntityIds: [],
+        selectedIslandId: null,
+        selectedPolygonIds: [],
+        tool: 'place-entity'
       }),
       true
     );
@@ -579,10 +782,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       current => ({
         ...current,
         controlPointDraft: null,
+        entityDraft: null,
         islandDraft: null,
         polygonControlPointDrafts: [],
         polygonDraft: createPolygonDraft(),
         selectedControlPointId: null,
+        selectedEntityIds: [],
         selectedIslandId: null,
         selectedPolygonIds: [],
         tool: 'draw-polygon'
@@ -592,6 +797,11 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   }, [updateSnapshot]);
 
   const activeEditorRevision = editorRevision ?? map?.revision ?? null;
+  const activePlaceableArchetypeId =
+    activeCatalogArchetypeId ??
+    filteredCatalogArchetypes[0]?.id ??
+    activeArchetypes[0]?.id ??
+    null;
 
   const {
     applyBooleanOperation,
@@ -632,6 +842,29 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     setIslandDraft,
     setSnapshot
   });
+  const {
+    applyBulkEntityEdit,
+    applyEntityDraft,
+    deleteStaticEntities,
+    duplicateSelectedEntities,
+    pendingAction: pendingEntityAction,
+    placeEntity,
+    saveDraggedEntities,
+    saveRotatedEntity
+  } = useStaticEntityEditorActions({
+    activeArchetypeId: activePlaceableArchetypeId,
+    editorRevision: activeEditorRevision,
+    entityDraft,
+    map,
+    mapId: id,
+    onSelectEntities: selectEntityIds,
+    onSetEntityDraft: setEntityDraft,
+    reloadAll,
+    selectedEntityIds,
+    setEditorRevision,
+    staticEntityItems
+  });
+  const pendingEditorAction = pendingAction ?? pendingEntityAction;
   const overlayPolygons = useMemo(
     () =>
       polygons.filter(
@@ -663,6 +896,42 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       polygon => previewById.get(polygon.id) ?? polygon
     );
   }, [dragState, overlayPolygons]);
+  const renderedStaticEntityViews = useMemo(() => {
+    if (dragState?.kind === 'static-entity') {
+      const previewById = new Map(
+        dragState.entities.map(entity => [
+          entity.id,
+          {
+            ...entity,
+            position: translateWorldPoint(entity.position, dragState.currentDelta)
+          }
+        ])
+      );
+
+      return staticEntityViews.map(item => ({
+        ...item,
+        entity: previewById.get(item.entity.id) ?? item.entity
+      }));
+    }
+
+    if (dragState?.kind === 'static-entity-rotate') {
+      return staticEntityViews.map(item =>
+        item.entity.id === dragState.entity.id
+          ? {
+              ...item,
+              entity: {
+                ...item.entity,
+                rotation: {
+                  yaw: dragState.currentYaw
+                }
+              }
+            }
+          : item
+      );
+    }
+
+    return staticEntityViews;
+  }, [dragState, staticEntityViews]);
 
   const handleWheelCapture = useCallback(
     (event: WheelEvent<HTMLDivElement>) => {
@@ -772,6 +1041,53 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         return;
       }
 
+      if (dragState?.kind === 'static-entity' && map) {
+        const world = snapWorldPoint(
+          toWorldPoint(event),
+          map.resolution.metersPerTile,
+          getStaticEntitySnapMode(event)
+        );
+        const delta = {
+          x: world.x - dragState.startPoint.x,
+          z: world.z - dragState.startPoint.z
+        };
+
+        suppressCanvasClickRef.current = true;
+        suppressEntityClickRef.current = dragState.entities[0]?.id ?? null;
+        setDragState(current =>
+          current?.kind === 'static-entity'
+            ? {
+                ...current,
+                currentDelta: delta
+              }
+            : current
+        );
+        return;
+      }
+
+      if (dragState?.kind === 'static-entity-rotate') {
+        const world = toWorldPoint(event);
+        const currentYaw =
+          (Math.atan2(
+            world.x - dragState.entity.position.x,
+            -(world.z - dragState.entity.position.z)
+          ) *
+            180) /
+          Math.PI;
+
+        suppressCanvasClickRef.current = true;
+        suppressEntityClickRef.current = dragState.entity.id;
+        setDragState(current =>
+          current?.kind === 'static-entity-rotate'
+            ? {
+                ...current,
+                currentYaw
+              }
+            : current
+        );
+        return;
+      }
+
       if (dragState?.kind === 'control-point') {
         const world = toWorldPoint(event);
         setControlPointDraft(draft => {
@@ -801,6 +1117,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       dragState,
       onViewportPointerMove,
       polygonDraft,
+      map,
       setControlPointDraft,
       setDragState,
       setPolygonControlPointDrafts,
@@ -854,10 +1171,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               current => ({
                 ...current,
                 controlPointDraft: null,
+                entityDraft: null,
                 islandDraft: null,
                 polygonControlPointDrafts: [],
                 polygonDraft: polygon ? createPolygonDraft(polygon) : null,
                 selectedControlPointId: null,
+                selectedEntityIds: [],
                 selectedIslandId: null,
                 selectedPolygonIds: selectedIds,
                 tool: current.tool
@@ -869,10 +1188,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               current => ({
                 ...current,
                 controlPointDraft: null,
+                entityDraft: null,
                 islandDraft: null,
                 polygonControlPointDrafts: [],
                 polygonDraft: null,
                 selectedControlPointId: null,
+                selectedEntityIds: [],
                 selectedIslandId: null,
                 selectedPolygonIds: selectedIds,
                 tool: current.tool
@@ -931,6 +1252,45 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         return;
       }
 
+      if (dragState?.kind === 'static-entity') {
+        const moved =
+          Math.abs(dragState.currentDelta.x) >= 0.001 ||
+          Math.abs(dragState.currentDelta.z) >= 0.001;
+
+        if (moved) {
+          void saveDraggedEntities(
+            dragState.entities.map(entity => ({
+              ...entity,
+              position: translateWorldPoint(entity.position, dragState.currentDelta)
+            }))
+          ).finally(() => {
+            setDragState(null);
+          });
+        } else {
+          setDragState(null);
+        }
+        onViewportPointerUp(event);
+        return;
+      }
+
+      if (dragState?.kind === 'static-entity-rotate') {
+        const changed =
+          Math.abs(dragState.currentYaw - dragState.startYaw) >= 0.001;
+
+        if (changed) {
+          void saveRotatedEntity(
+            dragState.entity.id,
+            dragState.currentYaw
+          ).finally(() => {
+            setDragState(null);
+          });
+        } else {
+          setDragState(null);
+        }
+        onViewportPointerUp(event);
+        return;
+      }
+
       if (dragState?.kind === 'control-point') {
         // Pointer capture is on the SVG, so the following click retargets to the
         // SVG and would look like a backdrop tap (see handleCanvasClick).
@@ -947,6 +1307,8 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       onViewportPointerUp,
       polygons,
       releaseCanvasDrag,
+      saveDraggedEntities,
+      saveRotatedEntity,
       saveDraggedSelection,
       setDragState,
       setPolygonControlPointDrafts,
@@ -996,14 +1358,22 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               x: world.x,
               z: world.z
             },
+            entityDraft: null,
             islandDraft: null,
             polygonControlPointDrafts: [],
             selectedControlPointId: null,
+            selectedEntityIds: [],
             selectedIslandId: null,
             selectedPolygonIds: []
           }),
           true
         );
+        return;
+      }
+
+      if (tool === 'place-entity') {
+        const world = toWorldPoint(event);
+        void placeEntity(world);
         return;
       }
 
@@ -1023,7 +1393,15 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         setPolygonDraft(null);
       }
     },
-    [clearSelections, map, setPolygonDraft, toWorldPoint, tool, updateSnapshot]
+    [
+      clearSelections,
+      map,
+      placeEntity,
+      setPolygonDraft,
+      toWorldPoint,
+      tool,
+      updateSnapshot
+    ]
   );
 
   const handlePolygonClick = useCallback(
@@ -1055,6 +1433,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         return {
           ...current,
           controlPointDraft: null,
+          entityDraft: null,
           islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft:
@@ -1062,12 +1441,94 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               ? null
               : createPolygonDraft(polygon),
           selectedControlPointId: null,
+          selectedEntityIds: [],
           selectedIslandId: null,
           selectedPolygonIds: nextSelection
         };
       }, true);
     },
     [islandsByPolygonId, selectIsland, tool, updateSnapshot]
+  );
+
+  const handleStaticEntityClick = useCallback(
+    (event: MouseEvent<SVGElement>, entity: StaticEntity) => {
+      if (suppressEntityClickRef.current === entity.id) {
+        suppressEntityClickRef.current = null;
+        return;
+      }
+
+      if (tool !== 'select') {
+        return;
+      }
+
+      const nextSelection = nextOrderedSelection(
+        selectedEntityIds,
+        entity.id,
+        event.shiftKey
+      );
+      selectEntityIds(nextSelection);
+    },
+    [selectEntityIds, selectedEntityIds, tool]
+  );
+
+  const handleStaticEntityPointerDown = useCallback(
+    (event: PointerEvent<SVGElement>, entity: StaticEntity) => {
+      if (tool === 'pan') {
+        return;
+      }
+
+      event.stopPropagation();
+
+      if (
+        tool !== 'select' ||
+        event.shiftKey ||
+        !selectedEntityIds.includes(entity.id)
+      ) {
+        return;
+      }
+
+      interactionRef.current?.setPointerCapture(event.pointerId);
+      setDragState({
+        currentDelta: { x: 0, z: 0 },
+        entities:
+          selectedStaticEntities.length > 0 ? selectedStaticEntities : [entity],
+        kind: 'static-entity',
+        pointerId: event.pointerId,
+        startPoint: toWorldPoint(event)
+      });
+      suppressCanvasClickRef.current = false;
+      suppressEntityClickRef.current = null;
+    },
+    [
+      interactionRef,
+      selectedEntityIds,
+      selectedStaticEntities,
+      setDragState,
+      toWorldPoint,
+      tool
+    ]
+  );
+
+  const handleStaticEntityRotatePointerDown = useCallback(
+    (event: PointerEvent<SVGCircleElement>, entity: StaticEntity) => {
+      if (tool !== 'select') {
+        return;
+      }
+
+      event.stopPropagation();
+      interactionRef.current?.setPointerCapture(event.pointerId);
+      setDragState({
+        currentYaw: entity.rotation.yaw,
+        entity,
+        kind: 'static-entity-rotate',
+        pointerId: event.pointerId,
+        startAngle: entity.rotation.yaw,
+        startYaw: entity.rotation.yaw
+      });
+      suppressCanvasClickRef.current = false;
+      suppressEntityClickRef.current = null;
+    },
+    [interactionRef, setDragState, tool]
   );
 
   const handlePolygonPointerDown = useCallback(
@@ -1137,10 +1598,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         current => ({
           ...current,
           controlPointDraft: null,
+          entityDraft: null,
           islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft: null,
           selectedControlPointId: point.id,
+          selectedEntityIds: [],
           selectedIslandId: null,
           selectedPolygonIds: []
         }),
@@ -1167,10 +1630,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         current => ({
           ...current,
           controlPointDraft: null,
+          entityDraft: null,
           islandDraft: null,
           polygonControlPointDrafts: [],
           polygonDraft: null,
           selectedControlPointId: point.id,
+          selectedEntityIds: [],
           selectedIslandId: null,
           selectedPolygonIds: []
         }),
@@ -1197,11 +1662,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<SVGSVGElement>) => {
       const modifierPressed = event.metaKey || event.ctrlKey;
-      if (modifierPressed && !pendingAction) {
+      if (modifierPressed && !pendingEditorAction) {
         const isUndo = event.key.toLowerCase() === 'z' && !event.shiftKey;
         const isRedo =
           (event.key.toLowerCase() === 'z' && event.shiftKey) ||
           event.key.toLowerCase() === 'y';
+        const isDuplicate = event.key.toLowerCase() === 'd';
 
         if (isUndo && canUndo) {
           event.preventDefault();
@@ -1212,6 +1678,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         if (isRedo && canRedo) {
           event.preventDefault();
           void redo();
+          return;
+        }
+
+        if (isDuplicate && selectedEntityIds.length > 0) {
+          event.preventDefault();
+          void duplicateSelectedEntities();
           return;
         }
       }
@@ -1240,7 +1712,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
       if (
         (event.key === 'Delete' || event.key === 'Backspace') &&
-        !pendingAction
+        !pendingEditorAction
       ) {
         if (
           polygonDraft &&
@@ -1280,6 +1752,14 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           });
           return;
         }
+
+        if (selectedEntityIds.length > 0) {
+          event.preventDefault();
+          setDeleteTarget({
+            ids: selectedEntityIds,
+            kind: 'static-entity'
+          });
+        }
       }
 
       onViewportKeyDown(event);
@@ -1290,13 +1770,15 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       canUndo,
       commitDrawPolygon,
       controlPointDraft,
+      duplicateSelectedEntities,
       onViewportKeyDown,
-      pendingAction,
+      pendingEditorAction,
       polygonDraft,
       redo,
       resetControlPointDraft,
       resetPolygonDraft,
       selectedControlPoint,
+      selectedEntityIds,
       selectedPolygon,
       setPolygonDraft,
       tool,
@@ -1312,6 +1794,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     (selectedControlPoint
       ? createControlPointDraft(selectedControlPoint)
       : null);
+  const currentEntityForInspector =
+    entityDraft ??
+    (selectedEntity ? createStaticEntityDraft(selectedEntity.entity) : null);
   const islandInspectorDraft =
     islandDraft ?? (selectedIsland ? createIslandDraft(selectedIsland) : null);
   const polygonDirty =
@@ -1321,13 +1806,41 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         selectedPolygon && polygonDraft.kind === 'edit' ? selectedPolygon : null
       )) ||
     polygonControlPointDrafts.length > 0;
+  const entityDirty =
+    currentEntityForInspector !== null &&
+    isStaticEntityDraftDirty(
+      currentEntityForInspector,
+      selectedEntity?.entity ?? null
+    );
+
+  useEffect(() => {
+    if (selectedEntityIds.length === 0) {
+      return;
+    }
+
+    const firstEntity = selectedStaticEntities[0];
+    if (!firstEntity) {
+      return;
+    }
+
+    const nextScale = String(firstEntity.scale);
+    setBulkScaleDraft(current => (current === nextScale ? current : nextScale));
+    setBulkStateDraft(current =>
+      current === firstEntity.state ? current : firstEntity.state
+    );
+  }, [selectedEntityIds, selectedStaticEntities]);
 
   const canApplyUnionLike = selectedPolygonIds.length >= 2 && !polygonDraft;
   const canApplyDifference = selectedPolygonIds.length === 2 && !polygonDraft;
   const hasUnsavedChanges =
-    polygonDirty || controlPointDraft !== null || islandDraft !== null;
+    polygonDirty ||
+    controlPointDraft !== null ||
+    entityDirty ||
+    islandDraft !== null;
   const toolLabel = getToolLabel(tool);
   const selectionSummary = getSelectionSummary({
+    selectedEntity,
+    selectedEntityCount: selectedEntityIds.length,
     polygonDraft,
     selectedControlPoint,
     selectedIsland,
@@ -1337,6 +1850,8 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     tool
   });
   const nextActionHint = getNextActionHint({
+    selectedEntity: Boolean(selectedEntity),
+    selectedEntityCount: selectedEntityIds.length,
     polygonDraft,
     selectedControlPoint: Boolean(selectedControlPoint),
     selectedIslandCount: exactSelectedIslands.length,
@@ -1370,15 +1885,15 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         <Badge variant="secondary">Revision {activeEditorRevision}</Badge>
         <Badge
           className={
-            pendingAction
+            pendingEditorAction
               ? 'border-amber-400/40 bg-amber-500/10 text-amber-200'
               : hasUnsavedChanges
                 ? 'border-sky-400/40 bg-sky-500/10 text-sky-100'
                 : undefined
           }
-          variant={pendingAction || hasUnsavedChanges ? 'outline' : 'secondary'}
+          variant={pendingEditorAction || hasUnsavedChanges ? 'outline' : 'secondary'}
         >
-          {pendingAction
+          {pendingEditorAction
             ? 'Saving changes…'
             : hasUnsavedChanges
               ? 'Unsaved changes'
@@ -1395,11 +1910,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         onApplyBoolean={operation => void applyBooleanOperation(operation)}
         onBeginControlPoint={beginControlPoint}
         onBeginDrawPolygon={beginDrawPolygon}
+        onBeginPlaceEntity={beginPlaceEntity}
         onBeginVertexEdit={beginVertexEdit}
         onRedo={() => void redo()}
         onSelectTool={nextTool => setTool(nextTool, true)}
         onUndo={() => void undo()}
-        pendingAction={pendingAction !== null}
+        pendingAction={pendingEditorAction !== null}
         selectedPolygon={Boolean(selectedPolygon)}
         tool={tool}
       />
@@ -1412,6 +1928,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           controlPointDraft={controlPointDraft}
           controlPoints={renderedControlPoints}
           dragState={dragState}
+          entityItems={renderedStaticEntityViews}
           fitToView={fitToView}
           highlightedIslandPolygonIds={highlightedIslandPolygonIds}
           interactionRef={interactionRef}
@@ -1426,6 +1943,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           onCanvasPointerUp={handleCanvasPointerUp}
           onControlPointClick={handleControlPointClick}
           onControlPointPointerDown={handleControlPointPointerDown}
+          onStaticEntityClick={handleStaticEntityClick}
+          onStaticEntityPointerDown={handleStaticEntityPointerDown}
+          onStaticEntityRotatePointerDown={handleStaticEntityRotatePointerDown}
           onPolygonClick={handlePolygonClick}
           onPolygonPointerDown={handlePolygonPointerDown}
           onWheel={onWheel}
@@ -1433,6 +1953,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           overlayPolygons={renderedPolygons}
           polygonDraft={polygonDraft}
           selectedControlPointId={selectedControlPointId}
+          selectedEntityIds={selectedEntityIds}
           selectedPolygonIds={selectedPolygonIds}
           selectionSummary={selectionSummary}
           setDragState={setDragState}
@@ -1448,34 +1969,73 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         />
 
         <EditorSidebar
+          activeCatalogArchetypeId={activePlaceableArchetypeId}
+          activeCatalogCategory={activeCatalogCategory}
+          activeCatalogSearch={activeCatalogSearch}
+          activeOutlinerArchetypeId={activeOutlinerArchetypeId}
+          activeOutlinerCategory={activeOutlinerCategory}
+          activeOutlinerSearch={activeOutlinerSearch}
           activeTool={tool}
           activeToolLabel={toolLabel}
+          bulkScaleDraft={bulkScaleDraft}
+          bulkStateDraft={bulkStateDraft}
+          catalogArchetypes={activeArchetypes}
           controlPointDraft={controlPointDraft}
           counts={{
             controlPoints: overviewQuery.data?.counts.controlPoints ?? 0,
             derivedIslands: overviewQuery.data?.counts.derivedIslands ?? 0,
-            sourcePolygons: overviewQuery.data?.counts.sourcePolygons ?? 0
+            sourcePolygons: overviewQuery.data?.counts.sourcePolygons ?? 0,
+            staticEntities: staticEntityItems.length
           }}
           currentControlPointForInspector={currentControlPointForInspector}
+          currentEntityForInspector={currentEntityForInspector}
           currentPolygonForInspector={currentPolygonForInspector}
           derivedIslands={derivedIslands}
           islandDraft={islandDraft}
           islandInspectorDraft={islandInspectorDraft}
           nextActionHint={nextActionHint}
+          onApplyBulkEntityEdit={draft =>
+            void applyBulkEntityEdit(draft)
+          }
           onBeginControlPoint={beginControlPoint}
           onBeginDrawPolygon={beginDrawPolygon}
+          onBeginPlaceEntity={beginPlaceEntity}
+          onDuplicateStaticEntities={() => void duplicateSelectedEntities()}
+          onJumpToEntity={entity =>
+            recenterOnWorldPoint(entity.entity.position)
+          }
+          onPickCatalogArchetype={archetypeId => setActiveCatalogArchetypeId(archetypeId)}
           onRecenter={recenterOnWorldPoint}
           onResetControlPointDraft={resetControlPointDraft}
+          onResetEntityDraft={() =>
+            setEntityDraft(
+              selectedEntity ? createStaticEntityDraft(selectedEntity.entity) : null
+            )
+          }
           onResetPolygonDraft={resetPolygonDraft}
           onSaveControlPointDraft={() => void saveControlPointDraft()}
+          onSaveEntityDraft={() => void applyEntityDraft()}
           onSaveIslandDraft={() => void saveIslandDraft()}
           onSavePolygonDraft={() => void savePolygonDraft()}
           onSelectIsland={selectIsland}
+          onSelectStaticEntities={selectEntityIds}
           onSelectTool={nextTool => setTool(nextTool, true)}
+          onSetBulkScaleDraft={setBulkScaleDraft}
+          onSetBulkStateDraft={setBulkStateDraft}
+          onSetCatalogCategory={setActiveCatalogCategory}
+          onSetCatalogSearch={setActiveCatalogSearch}
+          onSetOutlinerArchetypeId={setActiveOutlinerArchetypeId}
+          onSetOutlinerCategory={setActiveOutlinerCategory}
+          onSetOutlinerSearch={setActiveOutlinerSearch}
           overviewBounds={overviewBounds}
           overviewClusters={overviewQuery.data?.clusters ?? EMPTY_CLUSTERS}
-          pendingAction={pendingAction !== null}
+          pendingAction={pendingEditorAction !== null}
+          referencedArchetypeIds={referencedArchetypeIds}
+          selectedEntity={selectedEntity}
+          selectedEntityCount={selectedEntityIds.length}
+          selectedEntityIds={selectedEntityIds}
           polygonDirty={polygonDirty}
+          entityDirty={entityDirty}
           polygonDraft={polygonDraft}
           selectedControlPoint={selectedControlPoint}
           selectedIsland={selectedIsland}
@@ -1486,8 +2046,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           selectionSummary={selectionSummary}
           setControlPointDraft={setControlPointDraft}
           setDeleteTarget={setDeleteTarget}
+          setEntityDraft={setEntityDraft}
           setIslandDraft={setIslandDraft}
           setPolygonDraft={setPolygonDraft}
+          staticEntityItems={filteredStaticEntityViews}
           viewportBounds={viewportWorldBounds}
         />
       </div>
@@ -1500,11 +2062,19 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           <DialogHeader>
             <DialogTitle>
               Delete{' '}
-              {deleteTarget?.kind === 'polygon' ? 'Polygon' : 'Control Point'}
+              {deleteTarget?.kind === 'polygon'
+                ? 'Polygon'
+                : deleteTarget?.kind === 'control-point'
+                  ? 'Control Point'
+                  : deleteTarget?.kind === 'static-entity' &&
+                      deleteTarget.ids.length === 1
+                    ? 'Entity'
+                    : 'Entities'}
             </DialogTitle>
             <DialogDescription>
-              This will remove the selected authored object and refresh affected
-              terrain chunks after the mutation succeeds.
+              {deleteTarget?.kind === 'static-entity'
+                ? 'This will remove the selected static entity placements and refresh visible chunks after the mutation succeeds.'
+                : 'This will remove the selected authored object and refresh affected terrain chunks after the mutation succeeds.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1512,11 +2082,17 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
               Cancel
             </Button>
             <Button
-              disabled={pendingAction !== null}
-              onClick={() => void confirmDelete()}
+              disabled={pendingEditorAction !== null}
+              onClick={() =>
+                deleteTarget?.kind === 'static-entity'
+                  ? void deleteStaticEntities(deleteTarget.ids).finally(() =>
+                      setDeleteTarget(null)
+                    )
+                  : void confirmDelete()
+              }
               variant="destructive"
             >
-              {pendingAction ? 'Deleting...' : 'Delete'}
+              {pendingEditorAction ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1525,28 +2101,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   );
 };
 
-const StatusPanel = ({
-  detail,
-  label,
-  value
-}: {
-  detail: string;
-  label: string;
-  value: string;
-}) => (
-  <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
-    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-      {label}
-    </div>
-    <div className="mt-2 text-lg font-semibold tracking-tight">{value}</div>
-    <div className="mt-1 text-sm text-muted-foreground">{detail}</div>
-  </div>
-);
-
 const getToolLabel = (tool: EditorTool) => {
   switch (tool) {
     case 'pan':
       return 'Pan View';
+    case 'place-entity':
+      return 'Place Entity';
     case 'draw-polygon':
       return 'Draw Polygon';
     case 'edit-vertices':
@@ -1562,6 +2122,8 @@ const getToolLabel = (tool: EditorTool) => {
 const getSelectionSummary = ({
   polygonDraft,
   selectedControlPoint,
+  selectedEntity,
+  selectedEntityCount,
   selectedIsland,
   selectedIslandCount,
   selectedPolygon,
@@ -1570,12 +2132,24 @@ const getSelectionSummary = ({
 }: {
   polygonDraft: EditorSnapshot['polygonDraft'];
   selectedControlPoint: ControlPoint | null;
+  selectedEntity: { entity: StaticEntity } | null;
+  selectedEntityCount: number;
   selectedIsland: DerivedIsland | null;
   selectedIslandCount: number;
   selectedPolygon: SourcePolygon | null;
   selectedPolygonCount: number;
   tool: EditorTool;
 }) => {
+  if (selectedEntityCount > 1) {
+    return `${selectedEntityCount} entities selected`;
+  }
+
+  if (selectedEntity) {
+    return selectedEntity.entity.label?.trim()
+      ? `Entity: ${selectedEntity.entity.label}`
+      : `Entity: ${selectedEntity.entity.id}`;
+  }
+
   if (selectedControlPoint) {
     return '1 control point selected';
   }
@@ -1608,12 +2182,18 @@ const getSelectionSummary = ({
     return 'Ready to place a control point';
   }
 
+  if (tool === 'place-entity') {
+    return 'Ready to place a static entity';
+  }
+
   return 'Nothing selected';
 };
 
 const getNextActionHint = ({
   polygonDraft,
   selectedControlPoint,
+  selectedEntity,
+  selectedEntityCount,
   selectedIslandCount,
   selectedPolygon,
   selectedPolygonCount,
@@ -1621,11 +2201,17 @@ const getNextActionHint = ({
 }: {
   polygonDraft: EditorSnapshot['polygonDraft'];
   selectedControlPoint: boolean;
+  selectedEntity: boolean;
+  selectedEntityCount: number;
   selectedIslandCount: number;
   selectedPolygon: boolean;
   selectedPolygonCount: number;
   tool: EditorTool;
 }) => {
+  if (tool === 'place-entity') {
+    return 'Choose an archetype in the Entities tab, then click on the canvas to place it.';
+  }
+
   if (tool === 'draw-polygon') {
     return polygonDraft && polygonDraft.vertices.length > 0
       ? 'Click to place more vertices, then press Enter or click the first vertex to save.'
@@ -1648,13 +2234,21 @@ const getNextActionHint = ({
     return 'Adjust values in the inspector or drag the control point on the canvas.';
   }
 
+  if (selectedEntity) {
+    return 'Adjust values in the inspector, drag the footprint to move it, or use the rotate handle on the canvas.';
+  }
+
   if (selectedPolygon) {
     return 'Edit terrain parameters in the inspector or drag the selected polygon to move it.';
+  }
+
+  if (selectedEntityCount > 1) {
+    return 'Use bulk controls in the sidebar, or duplicate or delete the current entity selection.';
   }
 
   if (selectedIslandCount > 1 || selectedPolygonCount > 1) {
     return 'Use boolean actions from the toolbar or drag the selected geometry together on the canvas.';
   }
 
-  return 'Select geometry to inspect it, or start a new polygon or control point.';
+  return 'Select geometry or entities to inspect them, or start a new placement, polygon, or control point.';
 };

@@ -9,15 +9,18 @@ import type { EditorTool } from '../helpers';
 import type {
   ControlPointDraft,
   IslandDraft,
-  PolygonDraft
+  PolygonDraft,
+  StaticEntityDraft
 } from '../helpers/types';
 
 export type EditorSnapshot = {
   controlPointDraft: ControlPointDraft | null;
+  entityDraft: StaticEntityDraft | null;
   islandDraft: IslandDraft | null;
   polygonControlPointDrafts: ControlPointDraft[];
   polygonDraft: PolygonDraft | null;
   selectedControlPointId: string | null;
+  selectedEntityIds: string[];
   selectedIslandId: string | null;
   selectedPolygonIds: string[];
   tool: EditorTool;
@@ -60,10 +63,12 @@ export type EditorHistoryState = {
 
 export const createEmptyEditorSnapshot = (): EditorSnapshot => ({
   controlPointDraft: null,
+  entityDraft: null,
   islandDraft: null,
   polygonControlPointDrafts: [],
   polygonDraft: null,
   selectedControlPointId: null,
+  selectedEntityIds: [],
   selectedIslandId: null,
   selectedPolygonIds: [],
   tool: 'select'
@@ -126,10 +131,12 @@ export const recordEditorHistoryAtom = atom(
 export const snapshotsEqual = (left: EditorSnapshot, right: EditorSnapshot) =>
   left.tool === right.tool &&
   left.selectedControlPointId === right.selectedControlPointId &&
+  left.selectedEntityIds === right.selectedEntityIds &&
   left.selectedIslandId === right.selectedIslandId &&
   left.polygonDraft === right.polygonDraft &&
   left.polygonControlPointDrafts === right.polygonControlPointDrafts &&
   left.controlPointDraft === right.controlPointDraft &&
+  left.entityDraft === right.entityDraft &&
   left.islandDraft === right.islandDraft &&
   left.selectedPolygonIds === right.selectedPolygonIds;
 

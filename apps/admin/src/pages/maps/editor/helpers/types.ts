@@ -1,6 +1,7 @@
 import type {
   ControlPoint,
   DerivedIsland,
+  StaticEntity,
   SourcePolygon,
   SourcePolygonParams,
   WorldBounds,
@@ -33,13 +34,42 @@ export type IslandDraft = {
   name: string;
 };
 
+export type StaticEntityDraft = {
+  archetypeId: string;
+  id: string;
+  kind: 'edit';
+  label: string;
+  scale: number;
+  state: StaticEntity['state'];
+  x: number;
+  yOffset: number;
+  yaw: number;
+  z: number;
+};
+
 export type DeleteTarget =
   | { id: string; kind: 'control-point' }
   | { id: string; kind: 'polygon' }
+  | { ids: string[]; kind: 'static-entity' }
   | null;
 
 export type CanvasDragState =
   | { kind: 'control-point'; pointerId: number; pointId?: string; }
+  | {
+      currentDelta: WorldPoint;
+      entities: StaticEntity[];
+      kind: 'static-entity';
+      pointerId: number;
+      startPoint: WorldPoint;
+    }
+  | {
+      currentYaw: number;
+      entity: StaticEntity;
+      kind: 'static-entity-rotate';
+      pointerId: number;
+      startAngle: number;
+      startYaw: number;
+    }
   | {
       bounds: WorldBounds;
       currentPoint: WorldPoint;
@@ -73,4 +103,8 @@ export type ControlPointLike = Pick<
 export type DerivedIslandLike = Pick<
   DerivedIsland,
   'defaultFaction' | 'defaultOwner' | 'id' | 'name'
+>;
+export type StaticEntityLike = Pick<
+  StaticEntity,
+  'archetypeId' | 'id' | 'label' | 'position' | 'rotation' | 'scale' | 'state' | 'yOffset'
 >;

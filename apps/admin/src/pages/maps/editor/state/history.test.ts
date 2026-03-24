@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createStore } from 'jotai';
 
-import { createPolygonDraft } from '../helpers/drafts';
+import { createPolygonDraft, createStaticEntityDraft } from '../helpers/drafts';
 import {
   canRedoAtom,
   canUndoAtom,
@@ -9,7 +9,8 @@ import {
   editorSnapshotAtom,
   recordEditorHistoryAtom,
   remapSnapshotForTransition,
-  resetEditorHistoryAtom
+  resetEditorHistoryAtom,
+  snapshotsEqual
 } from './history';
 
 describe('editor history state', () => {
@@ -103,5 +104,30 @@ describe('editor history state', () => {
 
     expect(remapped.selectedPolygonIds).toEqual(['polygon-42']);
     expect(remapped.polygonDraft?.id).toBe('polygon-42');
+  });
+
+  test('tracks entity selection and draft state in editor snapshots', () => {
+    const snapshot = {
+      ...createEmptyEditorSnapshot(),
+      entityDraft: createStaticEntityDraft({
+        archetypeId: 'watchtower',
+        id: 'watchtower-1',
+        label: 'North Tower',
+        position: { x: 10, z: 20 },
+        rotation: { yaw: 35 },
+        scale: 1.25,
+        state: 'active',
+        yOffset: 0.5
+      }),
+      selectedEntityIds: ['watchtower-1'],
+      tool: 'place-entity' as const
+    };
+
+    expect(
+      snapshotsEqual(createEmptyEditorSnapshot(), snapshot)
+    ).toBe(false);
+    expect(snapshot.entityDraft?.label).toBe('North Tower');
+    expect(snapshot.selectedEntityIds).toEqual(['watchtower-1']);
+    expect(snapshot.tool).toBe('place-entity');
   });
 });

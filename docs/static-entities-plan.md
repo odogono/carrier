@@ -424,6 +424,8 @@ Acceptance:
 
 ### Phase 6: Admin editor entity workflow
 
+Status: complete on 2026-03-24.
+
 Goal: integrate static entity placement and management into the existing 2D editor.
 
 Changes:

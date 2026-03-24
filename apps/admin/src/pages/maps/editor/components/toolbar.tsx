@@ -5,6 +5,7 @@ import {
   Hand,
   MapPinPlus,
   Move,
+  PackagePlus,
   Redo2,
   ScanSearch,
   Undo2
@@ -25,6 +26,7 @@ type EditorToolbarProps = {
   onApplyBoolean: (operation: BooleanOperation) => void;
   onBeginControlPoint: () => void;
   onBeginDrawPolygon: () => void;
+  onBeginPlaceEntity: () => void;
   onBeginVertexEdit: () => void;
   onRedo: () => void;
   onSelectTool: (tool: EditorTool) => void;
@@ -41,6 +43,7 @@ const toolOptions: Array<{
 }> = [
   { icon: ScanSearch, label: 'Select', tool: 'select' },
   { icon: Hand, label: 'Pan', tool: 'pan' },
+  { icon: PackagePlus, label: 'Place Entity', tool: 'place-entity' },
   { icon: GitBranchPlus, label: 'Draw Polygon', tool: 'draw-polygon' },
   { icon: Move, label: 'Edit Vertices', tool: 'edit-vertices' },
   { icon: MapPinPlus, label: 'Add Control Point', tool: 'place-control-point' }
@@ -55,6 +58,7 @@ export const EditorToolbar = ({
   onApplyBoolean,
   onBeginControlPoint,
   onBeginDrawPolygon,
+  onBeginPlaceEntity,
   onBeginVertexEdit,
   onRedo,
   onSelectTool,
@@ -86,6 +90,19 @@ export const EditorToolbar = ({
                   {...commonProps}
                   key={option.tool}
                   onClick={onBeginDrawPolygon}
+                >
+                  <Icon className="h-4 w-4" />
+                  {option.label}
+                </Button>
+              );
+            }
+
+            if (option.tool === 'place-entity') {
+              return (
+                <Button
+                  {...commonProps}
+                  key={option.tool}
+                  onClick={onBeginPlaceEntity}
                 >
                   <Icon className="h-4 w-4" />
                   {option.label}
