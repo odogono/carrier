@@ -202,6 +202,23 @@ export const StaticEntitySchema = z.object({
 });
 export type StaticEntity = z.infer<typeof StaticEntitySchema>;
 
+export const StaticEntityArchetypeSummarySchema = z.object({
+  assetVersionId: z.string().min(1),
+  category: ArchetypeCategorySchema,
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  status: ArchetypeStatusSchema
+});
+export type StaticEntityArchetypeSummary = z.infer<
+  typeof StaticEntityArchetypeSummarySchema
+>;
+
+export const StaticEntityListItemSchema = z.object({
+  archetype: StaticEntityArchetypeSummarySchema,
+  entity: StaticEntitySchema
+});
+export type StaticEntityListItem = z.infer<typeof StaticEntityListItemSchema>;
+
 export const ListAssetVersionsInput = z.object({
   status: AssetVersionStatusSchema.optional()
 });
@@ -294,6 +311,67 @@ export const ListReferencedArchetypesOutput = z.array(ArchetypeSchema);
 export type ListReferencedArchetypesOutput = z.infer<
   typeof ListReferencedArchetypesOutput
 >;
+
+export const CreateStaticEntityInput = z.object({
+  archetypeId: z.string().min(1),
+  expectedRevision: z.number().int().nonnegative(),
+  id: z.string().min(1).optional(),
+  label: z.string().trim().min(1).max(120).nullable(),
+  mapId: z.string().min(1),
+  position: WorldPointSchema,
+  rotation: StaticEntityRotationSchema,
+  scale: positiveFiniteNumber,
+  state: StaticEntityStateSchema,
+  yOffset: finiteNumber
+});
+export type CreateStaticEntityInput = z.infer<typeof CreateStaticEntityInput>;
+
+export const CreateStaticEntityOutput = z.object({
+  entity: StaticEntitySchema,
+  mapRevision: z.number().int().nonnegative()
+});
+export type CreateStaticEntityOutput = z.infer<typeof CreateStaticEntityOutput>;
+
+export const ListStaticEntitiesInput = z.object({
+  mapId: z.string().min(1)
+});
+export type ListStaticEntitiesInput = z.infer<typeof ListStaticEntitiesInput>;
+
+export const ListStaticEntitiesOutput = z.array(StaticEntityListItemSchema);
+export type ListStaticEntitiesOutput = z.infer<typeof ListStaticEntitiesOutput>;
+
+export const UpdateStaticEntityInput = z.object({
+  archetypeId: z.string().min(1).optional(),
+  expectedRevision: z.number().int().nonnegative(),
+  id: z.string().min(1),
+  label: z.string().trim().min(1).max(120).nullable().optional(),
+  mapId: z.string().min(1),
+  position: WorldPointSchema.optional(),
+  rotation: StaticEntityRotationSchema.optional(),
+  scale: positiveFiniteNumber.optional(),
+  state: StaticEntityStateSchema.optional(),
+  yOffset: finiteNumber.optional()
+});
+export type UpdateStaticEntityInput = z.infer<typeof UpdateStaticEntityInput>;
+
+export const UpdateStaticEntityOutput = z.object({
+  entity: StaticEntitySchema,
+  mapRevision: z.number().int().nonnegative()
+});
+export type UpdateStaticEntityOutput = z.infer<typeof UpdateStaticEntityOutput>;
+
+export const DeleteStaticEntityInput = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  id: z.string().min(1),
+  mapId: z.string().min(1)
+});
+export type DeleteStaticEntityInput = z.infer<typeof DeleteStaticEntityInput>;
+
+export const DeleteStaticEntityOutput = z.object({
+  entity: StaticEntitySchema,
+  mapRevision: z.number().int().nonnegative()
+});
+export type DeleteStaticEntityOutput = z.infer<typeof DeleteStaticEntityOutput>;
 
 export const CreateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
@@ -613,6 +691,34 @@ export const ListReferencedArchetypesRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const CreateStaticEntityRoute: Route = {
+  description: 'Create a static entity placement for a map',
+  method: 'POST',
+  path: '/maps/{mapId}/entities',
+  tags: ['maps']
+} as const;
+
+export const ListStaticEntitiesRoute: Route = {
+  description: 'List static entity placements for a map with resolved archetype summaries',
+  method: 'GET',
+  path: '/maps/{mapId}/entities',
+  tags: ['maps']
+} as const;
+
+export const UpdateStaticEntityRoute: Route = {
+  description: 'Update a static entity placement for a map',
+  method: 'PATCH',
+  path: '/maps/{mapId}/entities/{id}',
+  tags: ['maps']
+} as const;
+
+export const DeleteStaticEntityRoute: Route = {
+  description: 'Delete a static entity placement for a map',
+  method: 'DELETE',
+  path: '/maps/{mapId}/entities/{id}',
+  tags: ['maps']
+} as const;
+
 export const authoredMapsContract = {
   approveAssetVersion: oc
     .route(ApproveAssetVersionRoute)
@@ -630,6 +736,10 @@ export const authoredMapsContract = {
     .route(CreateControlPointRoute)
     .input(CreateControlPointInput)
     .output(CreateControlPointOutput),
+  createStaticEntity: oc
+    .route(CreateStaticEntityRoute)
+    .input(CreateStaticEntityInput)
+    .output(CreateStaticEntityOutput),
   createSourcePolygon: oc
     .route(CreateSourcePolygonRoute)
     .input(CreateSourcePolygonInput)
@@ -638,6 +748,10 @@ export const authoredMapsContract = {
     .route(DeleteControlPointRoute)
     .input(DeleteControlPointInput)
     .output(DeleteControlPointOutput),
+  deleteStaticEntity: oc
+    .route(DeleteStaticEntityRoute)
+    .input(DeleteStaticEntityInput)
+    .output(DeleteStaticEntityOutput),
   deleteSourcePolygon: oc
     .route(DeleteSourcePolygonRoute)
     .input(DeleteSourcePolygonInput)
@@ -671,6 +785,10 @@ export const authoredMapsContract = {
     .route(ListReferencedArchetypesRoute)
     .input(ListReferencedArchetypesInput)
     .output(ListReferencedArchetypesOutput),
+  listStaticEntities: oc
+    .route(ListStaticEntitiesRoute)
+    .input(ListStaticEntitiesInput)
+    .output(ListStaticEntitiesOutput),
   listSourcePolygons: oc
     .route(ListSourcePolygonsRoute)
     .input(ListSourcePolygonsInput)
@@ -691,6 +809,10 @@ export const authoredMapsContract = {
     .route(UpdateDerivedIslandRoute)
     .input(UpdateDerivedIslandInput)
     .output(UpdateDerivedIslandOutput),
+  updateStaticEntity: oc
+    .route(UpdateStaticEntityRoute)
+    .input(UpdateStaticEntityInput)
+    .output(UpdateStaticEntityOutput),
   updateSourcePolygon: oc
     .route(UpdateSourcePolygonRoute)
     .input(UpdateSourcePolygonInput)

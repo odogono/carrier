@@ -519,11 +519,10 @@ describe('map repository', () => {
       const created = repository.createStaticEntity({
         archetypeId: archetype.id,
         expectedRevision: 0,
-        id: 'watchtower-north',
         label: null,
         mapId: map.id,
         position: {
-          x: 10,
+          x: 315,
           z: 20
         },
         rotation: {
@@ -534,22 +533,64 @@ describe('map repository', () => {
         yOffset: 0.5
       });
       expect(created.mapRevision).toBe(1);
-      expect(created.result.id).toBe('watchtower-north');
+      expect(created.result.id).toBe('watchtower-1');
 
       const chunk = repository.getMapChunk(map.id, 0, 0);
       expect(chunk?.staticEntities).toHaveLength(1);
-      expect(chunk?.staticEntities[0]?.id).toBe('watchtower-north');
+      expect(chunk?.staticEntities[0]?.id).toBe('watchtower-1');
+      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(1);
 
       const binaryChunk = repository.getMapChunkBinary(map.id, 0, 0);
       expect(binaryChunk?.staticEntities).toHaveLength(1);
       expect(binaryChunk?.staticEntities[0]?.rotation.yaw).toBe(45);
 
-      const updated = repository.updateStaticEntity({
+      const createdWithGeneratedSuffix = repository.createStaticEntity({
+        archetypeId: archetype.id,
         expectedRevision: 1,
-        id: 'watchtower-north',
+        label: 'South tower',
         mapId: map.id,
         position: {
-          x: 330,
+          x: 32,
+          z: 48
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      expect(createdWithGeneratedSuffix.result.id).toBe('watchtower-2');
+
+      expect(repository.listStaticEntityItems(map.id)).toEqual([
+        {
+          archetype: {
+            assetVersionId: assetVersion.id,
+            category: 'landmark',
+            id: archetype.id,
+            name: 'Watchtower',
+            status: 'active'
+          },
+          entity: created.result
+        },
+        {
+          archetype: {
+            assetVersionId: assetVersion.id,
+            category: 'landmark',
+            id: archetype.id,
+            name: 'Watchtower',
+            status: 'active'
+          },
+          entity: createdWithGeneratedSuffix.result
+        }
+      ]);
+
+      const updated = repository.updateStaticEntity({
+        expectedRevision: 2,
+        id: 'watchtower-1',
+        mapId: map.id,
+        position: {
+          x: 360,
           z: 15
         },
         rotation: {
@@ -557,11 +598,11 @@ describe('map repository', () => {
         },
         state: 'disabled'
       });
-      expect(updated.mapRevision).toBe(2);
+      expect(updated.mapRevision).toBe(3);
       expect(updated.result.state).toBe('disabled');
 
       expect(repository.getMapChunk(map.id, 0, 0)?.staticEntities).toHaveLength(
-        0
+        1
       );
       expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(
         1
@@ -570,7 +611,7 @@ describe('map repository', () => {
       expect(() =>
         repository.createStaticEntity({
           archetypeId: 'missing-archetype',
-          expectedRevision: 2,
+          expectedRevision: 3,
           id: 'broken',
           label: null,
           mapId: map.id,
@@ -590,8 +631,8 @@ describe('map repository', () => {
       expect(() =>
         repository.createStaticEntity({
           archetypeId: archetype.id,
-          expectedRevision: 2,
-          id: 'watchtower-north',
+          expectedRevision: 3,
+          id: 'watchtower-2',
           label: 'Duplicate',
           mapId: map.id,
           position: {
@@ -607,14 +648,48 @@ describe('map repository', () => {
         })
       ).toThrow(MapRepositoryError);
 
+      repository.updateArchetype({
+        id: archetype.id,
+        status: 'archived'
+      });
+      expect(repository.listStaticEntityItems(map.id)[0]?.archetype.status).toBe(
+        'archived'
+      );
+      expect(() =>
+        repository.createStaticEntity({
+          archetypeId: archetype.id,
+          expectedRevision: 3,
+          label: null,
+          mapId: map.id,
+          position: {
+            x: 64,
+            z: 64
+          },
+          rotation: {
+            yaw: 0
+          },
+          scale: 1,
+          state: 'active',
+          yOffset: 0
+        })
+      ).toThrow(MapRepositoryError);
+      expect(() =>
+        repository.updateStaticEntity({
+          expectedRevision: 3,
+          id: 'watchtower-1',
+          mapId: map.id,
+          state: 'active'
+        })
+      ).toThrow(MapRepositoryError);
+
       const deleted = repository.deleteStaticEntity({
-        expectedRevision: 2,
-        id: 'watchtower-north',
+        expectedRevision: 3,
+        id: 'watchtower-1',
         mapId: map.id
       });
-      expect(deleted.mapRevision).toBe(3);
-      expect(repository.listStaticEntities(map.id)).toHaveLength(0);
-      expect(repository.getMap(map.id)?.revision).toBe(3);
+      expect(deleted.mapRevision).toBe(4);
+      expect(repository.listStaticEntities(map.id)).toHaveLength(1);
+      expect(repository.getMap(map.id)?.revision).toBe(4);
     } finally {
       repository.close();
     }

@@ -402,6 +402,8 @@ Acceptance:
 
 ### Phase 5: Static entity CRUD and chunk reads
 
+Status: complete on 2026-03-24.
+
 Goal: persist placements and expose them through map reads using asset-derived geometry.
 
 Changes:

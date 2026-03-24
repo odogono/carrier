@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity Phase 3 review workflow in the API and contracts: asset review/update routes, approval to `ready`, archetype creation routes, and ready-asset immutability enforcement
 - Admin static-entities asset workspace at `/assets`, including upload, review, approval, and archetype-promotion flows
 - Static entity Phase 4 archetype catalog support: global archetype list/get/update routes, map-scoped referenced-subset reads, and immutable asset-version binding enforcement
+- Static entity Phase 5 API/read-model support: map-scoped static entity create/list/update/delete routes, map-wide resolved entity listing, archetype-based ID generation, and overlap-aware chunk inclusion using asset footprint geometry
 - Admin archetype catalog workspace at `/archetypes`, including global catalog browsing, lifecycle/status filtering, and metadata editing
 - Admin 3D asset preview with runtime GLB inspection, synthetic terrain preview, real-map chunk terrain preview, footprint overlays, and grounding diagnostics
 - Shared `carrier-preview` workspace package for preview model normalization, terrain mesh generation, and grounding math
@@ -27,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Asset version repository support now includes direct reads and status/metadata updates for upload, processing, review, and failure transitions
 - Static entity Phase 3 is now complete in the implementation plan, with admin review tooling and archetype-promotion support landed in the repo
 - Static entity Phase 4 is now complete in the implementation plan, with archetype catalog reads/updates and referenced-subset resolution landed in the repo
+- Static entity Phase 5 is now complete in the implementation plan, with public CRUD/list routes, active-archetype placement enforcement, overlap-aware chunk reads, and revision-bearing mutation responses landed in the repo
 
 ## [0.4.0] - 2026-03-22
 

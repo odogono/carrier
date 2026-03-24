@@ -6,17 +6,23 @@ import {
   ArchetypeCategorySchema,
   ArchetypeSchema,
   AssetVersionSchema,
+  CreateStaticEntityInput,
+  CreateStaticEntityOutput,
   CreateMapExportInput,
   CreateControlPointOutput,
   CreateControlPointInput,
   CreateSourcePolygonOutput,
   CreateSourcePolygonInput,
+  DeleteStaticEntityOutput,
   GetArchetypeInput,
   ListArchetypesInput,
   ListReferencedArchetypesInput,
+  ListStaticEntitiesOutput,
   MapMetadataSchema,
   MapOverviewSchema,
   StaticEntitySchema,
+  StaticEntityListItemSchema,
+  UpdateStaticEntityOutput,
   UpdateArchetypeInput
 } from './index';
 
@@ -220,6 +226,25 @@ describe('authored map schemas', () => {
       z: -40
     });
 
+    expect(
+      CreateStaticEntityInput.parse({
+        archetypeId: 'watchtower',
+        expectedRevision: 4,
+        label: null,
+        mapId: 'map-1',
+        position: {
+          x: 12,
+          z: 24
+        },
+        rotation: {
+          yaw: 180
+        },
+        scale: 1.5,
+        state: 'active',
+        yOffset: 0
+      }).id
+    ).toBeUndefined();
+
     expect(() => ArchetypeCategorySchema.parse('bridge')).toThrow();
     expect(ListArchetypesInput.parse({ status: 'archived' }).status).toBe(
       'archived'
@@ -259,6 +284,57 @@ describe('authored map schemas', () => {
         yOffset: 0
       })
     ).toThrow();
+
+    const listItem = StaticEntityListItemSchema.parse({
+      archetype: {
+        assetVersionId: 'watchtower-v1',
+        category: 'landmark',
+        id: 'watchtower',
+        name: 'Watchtower',
+        status: 'active'
+      },
+      entity: {
+        archetypeId: 'watchtower',
+        createdAt: now,
+        id: 'watchtower-1',
+        label: null,
+        mapId: 'map-1',
+        position: {
+          x: 10,
+          z: 20
+        },
+        rotation: {
+          yaw: 45
+        },
+        scale: 1,
+        state: 'active',
+        updatedAt: now,
+        yOffset: 0
+      }
+    });
+
+    expect(listItem.archetype.assetVersionId).toBe('watchtower-v1');
+    expect(
+      ListStaticEntitiesOutput.parse([listItem])[0]?.entity.id
+    ).toBe('watchtower-1');
+    expect(
+      CreateStaticEntityOutput.parse({
+        entity: listItem.entity,
+        mapRevision: 5
+      }).mapRevision
+    ).toBe(5);
+    expect(
+      UpdateStaticEntityOutput.parse({
+        entity: listItem.entity,
+        mapRevision: 6
+      }).mapRevision
+    ).toBe(6);
+    expect(
+      DeleteStaticEntityOutput.parse({
+        entity: listItem.entity,
+        mapRevision: 7
+      }).mapRevision
+    ).toBe(7);
   });
 
   test('validates terrain mutation outputs with dirty bounds', () => {

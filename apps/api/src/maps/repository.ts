@@ -19,9 +19,12 @@ import type {
   SourcePolygonParams,
   SourcePolygonStatus,
   StaticEntity,
+  StaticEntityArchetypeSummary,
+  StaticEntityListItem,
   WorldBounds,
   WorldPoint
 } from 'carrier-contracts';
+import { slugify } from 'carrier-contracts';
 
 import {
   HEIGHT_LAYER,
@@ -235,8 +238,12 @@ type ReviewAssetVersionInput = Omit<
   'originalFile' | 'runtimeFile' | 'status'
 >;
 
-type CreateStaticEntityInput = Omit<StaticEntity, 'createdAt' | 'updatedAt'> & {
+type CreateStaticEntityInput = Omit<
+  StaticEntity,
+  'createdAt' | 'updatedAt' | 'id'
+> & {
   expectedRevision: number;
+  id?: string;
 };
 
 type UpdateStaticEntityInput = {
@@ -429,6 +436,17 @@ const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
 
 const toCanonicalChunkCoordinate = (chunk: number, chunkCount: number) =>
   ((chunk % chunkCount) + chunkCount) % chunkCount;
+
+const rotateWorldOffset = (x: number, z: number, yawDegrees: number) => {
+  const yawRadians = (yawDegrees * Math.PI) / 180;
+  const cosine = Math.cos(yawRadians);
+  const sine = Math.sin(yawRadians);
+
+  return {
+    x: x * cosine - z * sine,
+    z: x * sine + z * cosine
+  };
+};
 
 const chunkRowToRecord = (row: ChunkRow) => ({
   ...row,
@@ -634,6 +652,16 @@ const archetypeRowToModel = (row: ArchetypeRow): Archetype => ({
   updatedAt: row.updatedAt
 });
 
+const archetypeToStaticEntitySummary = (
+  archetype: Archetype
+): StaticEntityArchetypeSummary => ({
+  assetVersionId: archetype.assetVersionId,
+  category: archetype.category,
+  id: archetype.id,
+  name: archetype.name,
+  status: archetype.status
+});
+
 const staticEntityRowToModel = (row: StaticEntityRow): StaticEntity => ({
   archetypeId: row.archetypeId,
   createdAt: row.createdAt,
@@ -652,6 +680,30 @@ const staticEntityRowToModel = (row: StaticEntityRow): StaticEntity => ({
   updatedAt: row.updatedAt,
   yOffset: row.yOffset
 });
+
+const getStaticEntityFootprintBounds = (
+  entity: StaticEntity,
+  assetVersion: Pick<AssetVersion, 'footprint'>
+): WorldBounds => {
+  const halfWidth = assetVersion.footprint.widthMeters * entity.scale * 0.5;
+  const halfDepth = assetVersion.footprint.depthMeters * entity.scale * 0.5;
+  const corners = [
+    rotateWorldOffset(-halfWidth, -halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(halfWidth, -halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(halfWidth, halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(-halfWidth, halfDepth, entity.rotation.yaw)
+  ].map(corner => ({
+    x: entity.position.x + corner.x,
+    z: entity.position.z + corner.z
+  }));
+
+  return {
+    maxX: Math.max(...corners.map(corner => corner.x)),
+    maxZ: Math.max(...corners.map(corner => corner.z)),
+    minX: Math.min(...corners.map(corner => corner.x)),
+    minZ: Math.min(...corners.map(corner => corner.z))
+  };
+};
 
 const assetVersionHasChanges = (
   current: AssetVersion,
@@ -1100,6 +1152,19 @@ export class MapRepository {
     return row;
   }
 
+  private getPlaceableArchetypeOrThrow(id: string) {
+    const archetype = archetypeRowToModel(this.getArchetypeRowOrThrow(id));
+
+    if (archetype.status !== 'active') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Archetype ${id} is not active and cannot be placed`
+      );
+    }
+
+    return archetype;
+  }
+
   private listStaticEntityRows(mapId: string): StaticEntityRow[] {
     return this.db
       .query<StaticEntityRow, [string]>(
@@ -1138,30 +1203,90 @@ export class MapRepository {
     return row;
   }
 
+  private nextStaticEntityId(mapId: string, archetypeId: string) {
+    const baseId = slugify(archetypeId) || 'entity';
+    const existingIds = new Set(
+      this.listStaticEntityRows(mapId).map(staticEntity => staticEntity.id)
+    );
+    let suffix = 1;
+    let candidate = `${baseId}-${suffix}`;
+
+    while (existingIds.has(candidate)) {
+      suffix += 1;
+      candidate = `${baseId}-${suffix}`;
+    }
+
+    return candidate;
+  }
+
+  private listResolvedStaticEntities(mapId: string) {
+    const entities = this.listStaticEntityRows(mapId).map(staticEntityRowToModel);
+
+    if (entities.length === 0) {
+      return {
+        archetypesById: new Map<string, Archetype>(),
+        assetVersionsById: new Map<string, AssetVersion>(),
+        entities
+      };
+    }
+
+    const referencedArchetypes = this.listReferencedArchetypes(mapId);
+    const archetypesById = new Map(
+      referencedArchetypes.map(archetype => [archetype.id, archetype])
+    );
+    const assetVersionsById = new Map<string, AssetVersion>();
+
+    for (const archetype of referencedArchetypes) {
+      if (!assetVersionsById.has(archetype.assetVersionId)) {
+        assetVersionsById.set(
+          archetype.assetVersionId,
+          assetVersionRowToModel(
+            this.getAssetVersionRowOrThrow(archetype.assetVersionId)
+          )
+        );
+      }
+    }
+
+    return {
+      archetypesById,
+      assetVersionsById,
+      entities
+    };
+  }
+
   private listStaticEntitiesForChunk(
     mapRow: MapRow,
     chunkX: number,
     chunkZ: number
   ) {
-    const chunkWorldSize = mapRow.chunkSizeTiles * mapRow.metersPerTile;
-    const minX = chunkX * chunkWorldSize;
-    const minZ = chunkZ * chunkWorldSize;
-    const maxX = minX + chunkWorldSize;
-    const maxZ = minZ + chunkWorldSize;
+    const chunkBounds = ensureChunkBounds(chunkX, chunkZ, mapRow.chunkSizeTiles, mapRow.metersPerTile);
+    const { archetypesById, assetVersionsById, entities } =
+      this.listResolvedStaticEntities(mapRow.id);
 
-    return this.db
-      .query<StaticEntityRow, [string, number, number, number, number]>(
-        `
-        SELECT ${STATIC_ENTITY_COLUMNS}
-        FROM map_static_entities
-        WHERE map_id = ?
-          AND position_x >= ? AND position_x < ?
-          AND position_z >= ? AND position_z < ?
-        ORDER BY created_at ASC, id ASC
-      `
-      )
-      .all(mapRow.id, minX, maxX, minZ, maxZ)
-      .map(staticEntityRowToModel);
+    return entities.filter(entity => {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      const assetVersion = assetVersionsById.get(archetype.assetVersionId);
+
+      if (!assetVersion) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Asset version ${archetype.assetVersionId} was not found for archetype ${archetype.id}`
+        );
+      }
+
+      return bboxesIntersect(
+        chunkBounds,
+        getStaticEntityFootprintBounds(entity, assetVersion)
+      );
+    });
   }
 
   private bumpMapRevisions(
@@ -2503,6 +2628,9 @@ export class MapRepository {
 
   createStaticEntity(input: CreateStaticEntityInput) {
     return this.performStaticEntityMutation(input, (mapRow, now) => {
+      this.getPlaceableArchetypeOrThrow(input.archetypeId);
+      const entityId = input.id ?? this.nextStaticEntityId(mapRow.id, input.archetypeId);
+
       try {
         this.db
           .prepare(
@@ -2514,7 +2642,7 @@ export class MapRepository {
           `
           )
           .run(
-            input.id,
+            entityId,
             mapRow.id,
             input.label ?? null,
             input.archetypeId,
@@ -2532,7 +2660,7 @@ export class MapRepository {
       }
 
       return staticEntityRowToModel(
-        this.getStaticEntityRowOrThrow(mapRow.id, input.id)
+        this.getStaticEntityRowOrThrow(mapRow.id, entityId)
       );
     });
   }
@@ -2550,6 +2678,7 @@ export class MapRepository {
         yOffset: input.yOffset ?? current.yOffset,
         yaw: input.rotation?.yaw ?? current.yaw
       };
+      this.getPlaceableArchetypeOrThrow(next.archetypeId);
 
       try {
         this.db
@@ -2613,6 +2742,28 @@ export class MapRepository {
   listStaticEntities(mapId: string) {
     this.getMapRowOrThrow(mapId);
     return this.listStaticEntityRows(mapId).map(staticEntityRowToModel);
+  }
+
+  listStaticEntityItems(mapId: string): StaticEntityListItem[] {
+    this.getMapRowOrThrow(mapId);
+
+    const { archetypesById, entities } = this.listResolvedStaticEntities(mapId);
+
+    return entities.map(entity => {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      return {
+        archetype: archetypeToStaticEntitySummary(archetype),
+        entity
+      };
+    });
   }
 
   updateMap(id: string, input: { name?: string | null }) {

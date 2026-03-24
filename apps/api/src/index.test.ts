@@ -308,6 +308,153 @@ describe('API server map routes', () => {
     ).toEqual([updated]);
   });
 
+  test('supports static entity CRUD and overlap-aware chunk reads through the public contract', async () => {
+    const repository = getMapRepository();
+    const map = repository.createMap({
+      kind: 'infinite-vector',
+      name: 'Static entity API map',
+      seed: 'static-entity-seed'
+    });
+    const readyAsset = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 20,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 20,
+        widthMeters: 20
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'watchtower-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/watchtower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/watchtower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: readyAsset.id,
+      category: 'landmark',
+      id: 'watchtower',
+      name: 'Watchtower',
+      status: 'active',
+      tags: ['stone']
+    });
+
+    const client = await createTestClient();
+    const created = await client.maps.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 0,
+      label: null,
+      mapId: map.id,
+      position: {
+        x: 315,
+        z: 20
+      },
+      rotation: {
+        yaw: 45
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0.5
+    });
+    expect(created.mapRevision).toBe(1);
+    expect(created.entity.id).toBe('watchtower-1');
+
+    expect(await client.maps.listStaticEntities({ mapId: map.id })).toEqual([
+      {
+        archetype: {
+          assetVersionId: readyAsset.id,
+          category: 'landmark',
+          id: archetype.id,
+          name: 'Watchtower',
+          status: 'active'
+        },
+        entity: created.entity
+      }
+    ]);
+
+    const chunkZero = await request('GET', `/api/maps/${map.id}/chunks/0/0`);
+    const chunkOne = await request('GET', `/api/maps/${map.id}/chunks/1/0`);
+    expect(
+      (
+        chunkZero.json as { staticEntities: Array<{ id: string }> }
+      ).staticEntities.map(entity => entity.id)
+    ).toEqual(['watchtower-1']);
+    expect(
+      (
+        chunkOne.json as { staticEntities: Array<{ id: string }> }
+      ).staticEntities.map(entity => entity.id)
+    ).toEqual(['watchtower-1']);
+
+    const binaryChunk = await decodeMapChunkBinary(
+      await client.maps.getChunkBinary({
+        chunkX: 1,
+        chunkZ: 0,
+        mapId: map.id
+      })
+    );
+    expect(binaryChunk.staticEntities.map(entity => entity.id)).toEqual([
+      'watchtower-1'
+    ]);
+
+    const createdWithOverride = await client.maps.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 1,
+      id: 'watchtower-custom',
+      label: 'Custom tower',
+      mapId: map.id,
+      position: {
+        x: 32,
+        z: 32
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+    expect(createdWithOverride.entity.id).toBe('watchtower-custom');
+
+    await expect(
+      client.maps.updateStaticEntity({
+        expectedRevision: 1,
+        id: 'watchtower-custom',
+        mapId: map.id,
+        state: 'disabled'
+      })
+    ).rejects.toThrow('Expected revision 1 but found 2');
+
+    const updated = await client.maps.updateStaticEntity({
+      expectedRevision: 2,
+      id: 'watchtower-custom',
+      mapId: map.id,
+      state: 'disabled'
+    });
+    expect(updated.mapRevision).toBe(3);
+    expect(updated.entity.state).toBe('disabled');
+
+    const deleted = await client.maps.deleteStaticEntity({
+      expectedRevision: 3,
+      id: 'watchtower-custom',
+      mapId: map.id
+    });
+    expect(deleted.mapRevision).toBe(4);
+    expect(deleted.entity.id).toBe('watchtower-custom');
+  });
+
   test('supports infinite-vector authored routes through the public API', async () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'infinite-vector',

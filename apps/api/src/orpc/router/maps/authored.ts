@@ -7,10 +7,14 @@ import {
   CreateArchetypeRoute,
   CreateControlPointInput,
   CreateControlPointRoute,
+  CreateStaticEntityInput,
+  CreateStaticEntityRoute,
   CreateSourcePolygonInput,
   CreateSourcePolygonRoute,
   DeleteControlPointInput,
   DeleteControlPointRoute,
+  DeleteStaticEntityInput,
+  DeleteStaticEntityRoute,
   DeleteSourcePolygonInput,
   DeleteSourcePolygonRoute,
   GetArchetypeInput,
@@ -29,6 +33,8 @@ import {
   ListDerivedIslandsRoute,
   ListReferencedArchetypesInput,
   ListReferencedArchetypesRoute,
+  ListStaticEntitiesInput,
+  ListStaticEntitiesRoute,
   ListSourcePolygonsInput,
   ListSourcePolygonsRoute,
   UpdateArchetypeInput,
@@ -39,6 +45,8 @@ import {
   UpdateControlPointRoute,
   UpdateDerivedIslandInput,
   UpdateDerivedIslandRoute,
+  UpdateStaticEntityInput,
+  UpdateStaticEntityRoute,
   UpdateSourcePolygonInput,
   UpdateSourcePolygonRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
@@ -173,6 +181,62 @@ const listReferencedArchetypes = os
     }
   });
 
+const createStaticEntity = os
+  .route(CreateStaticEntityRoute)
+  .input(CreateStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().createStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listStaticEntities = os
+  .route(ListStaticEntitiesRoute)
+  .input(ListStaticEntitiesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listStaticEntityItems(input.mapId);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const updateStaticEntity = os
+  .route(UpdateStaticEntityRoute)
+  .input(UpdateStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().updateStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const deleteStaticEntity = os
+  .route(DeleteStaticEntityRoute)
+  .input(DeleteStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().deleteStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
 const createSourcePolygon = os
   .route(CreateSourcePolygonRoute)
   .input(CreateSourcePolygonInput)
@@ -299,8 +363,10 @@ export const authored = {
   applyBoolean,
   createArchetype,
   createControlPoint,
+  createStaticEntity,
   createSourcePolygon,
   deleteControlPoint,
+  deleteStaticEntity,
   deleteSourcePolygon,
   getArchetype,
   getAssetVersion,
@@ -310,10 +376,12 @@ export const authored = {
   listControlPoints,
   listDerivedIslands,
   listReferencedArchetypes,
+  listStaticEntities,
   listSourcePolygons,
   updateArchetype,
   updateAssetVersionReview,
   updateControlPoint,
   updateDerivedIsland,
+  updateStaticEntity,
   updateSourcePolygon
 };
