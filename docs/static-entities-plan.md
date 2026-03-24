@@ -457,6 +457,8 @@ Acceptance:
 
 ### Phase 7: Gameplay client rendering
 
+Status: complete on 2026-03-24.
+
 Goal: render API-backed static entities in the gameplay client.
 
 Changes:

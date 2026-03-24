@@ -1,7 +1,5 @@
-import { type RefObject, useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type RefObject } from 'react';
 
-import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
-import { useFrame } from '@react-three/fiber';
 import {
   BufferAttribute,
   BufferGeometry,
@@ -21,20 +19,22 @@ import {
   PlaneGeometry,
   Raycaster,
   Vector2,
-  Vector3
+  Vector3,
+  type AmbientLight,
+  type DirectionalLight,
+  type Intersection,
+  type PerspectiveCamera
 } from 'three';
-import type {
-  AmbientLight,
-  DirectionalLight,
-  Intersection,
-  PerspectiveCamera
-} from 'three';
+import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
+
+import type { MapMetadata } from 'carrier-contracts/types';
 
 import {
-  clampZoom,
   TILE,
   TILE_POOL_SIZE,
   TREE_POOL_SIZE,
+  clampZoom,
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
 import {
@@ -42,10 +42,8 @@ import {
   useSceneConfigValue
 } from '@/hooks/use-scene-controls';
 
-import type {
-  ZarchInputState,
-  ZarchRuntimeState
-} from './use-zarch-runtime';
+import type { ZarchInputState, ZarchRuntimeState } from './use-zarch-runtime';
+import { wrapWorldCoordinate } from './zarch-minimap';
 import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
@@ -53,7 +51,7 @@ import {
   emitTapParticlePreset,
   simulateParticleSystem
 } from './zarch-particles';
-import { wrapWorldCoordinate } from './zarch-minimap';
+import { ZarchStaticEntities } from './zarch-static-entities';
 
 type TileMesh = Mesh<BufferGeometry, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
@@ -73,6 +71,7 @@ type ScenePools = {
 
 type ZarchSceneProps = {
   inputRef: RefObject<ZarchInputState>;
+  map: MapMetadata;
   runtimeRef: RefObject<ZarchRuntimeState>;
   terrain: ZarchTerrain;
 };
@@ -277,15 +276,16 @@ const setTreeBrightness = (group: Group, brightness: number) => {
   group.children.forEach(child => {
     const mesh = child as Mesh;
     const material = mesh.material as MeshLambertMaterial;
-    TREE_BASE_COLOR
-      .setHex(mesh.userData.baseColor as number)
-      .multiplyScalar(brightness);
+    TREE_BASE_COLOR.setHex(mesh.userData.baseColor as number).multiplyScalar(
+      brightness
+    );
     material.color.copy(TREE_BASE_COLOR);
   });
 };
 
 export const ZarchScene = ({
   inputRef,
+  map,
   runtimeRef,
   terrain
 }: ZarchSceneProps) => {
@@ -444,7 +444,10 @@ export const ZarchScene = ({
     runtime.camX += runtime.velX * dt;
     runtime.camZ += runtime.velZ * dt;
     if (terrain.widthTiles !== null && terrain.wrapX) {
-      runtime.camX = wrapWorldCoordinate(runtime.camX, terrain.widthTiles * TILE);
+      runtime.camX = wrapWorldCoordinate(
+        runtime.camX,
+        terrain.widthTiles * TILE
+      );
     } else if (terrain.widthTiles !== null) {
       runtime.camX = MathUtils.clamp(
         runtime.camX,
@@ -453,7 +456,10 @@ export const ZarchScene = ({
       );
     }
     if (terrain.heightTiles !== null && terrain.wrapZ) {
-      runtime.camZ = wrapWorldCoordinate(runtime.camZ, terrain.heightTiles * TILE);
+      runtime.camZ = wrapWorldCoordinate(
+        runtime.camZ,
+        terrain.heightTiles * TILE
+      );
     } else if (terrain.heightTiles !== null) {
       runtime.camZ = MathUtils.clamp(
         runtime.camZ,
@@ -683,7 +689,8 @@ export const ZarchScene = ({
 
     for (let index = 0; index < particleSystem.count; index += 1) {
       const size = particleSystem.size[index];
-      const aspect = PARTICLE_ASPECT_BY_KIND[particleSystem.kind[index] ?? 0] ?? 1;
+      const aspect =
+        PARTICLE_ASPECT_BY_KIND[particleSystem.kind[index] ?? 0] ?? 1;
       const surfaceHeight = particleSurface.getHeightAt(
         particleSystem.x[index],
         particleSystem.z[index]
@@ -722,7 +729,10 @@ export const ZarchScene = ({
       particleShadowDummy.rotation.set(-Math.PI / 2, 0, 0);
       particleShadowDummy.scale.set(shadowScale, shadowDepth, 1);
       particleShadowDummy.updateMatrix();
-      pools.particleShadowMesh.setMatrixAt(shadowCount, particleShadowDummy.matrix);
+      pools.particleShadowMesh.setMatrixAt(
+        shadowCount,
+        particleShadowDummy.matrix
+      );
       PARTICLE_COLOR.setRGB(0, 0, 0);
       pools.particleShadowMesh.setColorAt(shadowCount, PARTICLE_COLOR);
       shadowCount += 1;
@@ -756,7 +766,9 @@ export const ZarchScene = ({
         position={[0, 0, 0]}
         ref={cameraRef}
       />
-      <group ref={worldRef} />
+      <group ref={worldRef}>
+        <ZarchStaticEntities map={map} runtimeRef={runtimeRef} />
+      </group>
       <ambientLight intensity={ambientIntensity} ref={ambientRef} />
       <directionalLight
         castShadow

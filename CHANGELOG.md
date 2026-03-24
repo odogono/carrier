@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Low-poly GLB test fixtures for tank, truck, and building assets under `test-assets/`
 - Static entity Phase 6 admin editor workflow: place-entity mode, archetype catalog picker, entity outliner, single-entity inspector, bulk state/scale apply, duplication, delete confirmation, and canvas footprint/facing/rotate overlays
 - Static entity editor helper coverage for overlay math, snapping, duplicate label generation, catalog/outliner filtering, grounding diagnostics, and editor snapshot entity state
+- Static entity Phase 7 gameplay rendering in the client: referenced-archetype resolution, asset-version metadata reads, lazy runtime GLB loading, grounded placement rendering, and instancing-ready asset caching
 
 ### Changed
 
@@ -31,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity Phase 3 is now complete in the implementation plan, with admin review tooling and archetype-promotion support landed in the repo
 - Static entity Phase 4 is now complete in the implementation plan, with archetype catalog reads/updates and referenced-subset resolution landed in the repo
 - Static entity Phase 5 is now complete in the implementation plan, with public CRUD/list routes, active-archetype placement enforcement, overlap-aware chunk reads, and revision-bearing mutation responses landed in the repo
+- Static entity Phase 7 is now complete in the implementation plan, with gameplay-side archetype resolution, per-asset runtime caching, active-only placement rendering, and optional instancing support landed in the repo
 - Admin map editor data loading now hydrates map static-entity placements, referenced archetypes, active placeable archetypes, and asset-version metadata for entity overlays and diagnostics
 - Admin map editor interaction state now tracks entity selection and draft edits alongside polygon/control-point workflows while keeping terrain and entity selections mutually exclusive
 

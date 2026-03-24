@@ -22,6 +22,8 @@ const apiUrl =
   process.env.API_URL ||
   'http://localhost/api';
 
+export { apiUrl };
+
 const link = new OpenAPILink<ClientContext>(contract, {
   fetch: (request, init) =>
     globalThis.fetch(request, {

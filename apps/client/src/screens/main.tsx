@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Provider as JotaiProvider } from 'jotai';
-import { Leva } from 'leva';
 import { BasicShadowMap } from 'three';
 import { Canvas } from '@react-three/fiber';
 
-import { createLog } from 'odgn-ts-helpers/log';
-
 import { isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
+import { Provider as JotaiProvider } from 'jotai';
+import { Leva } from 'leva';
+import { createLog } from 'odgn-ts-helpers/log';
 
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
@@ -37,8 +36,8 @@ export const getInitialCameraState = (map: MapMetadata) => {
   }
 
   return {
-    camX: (map.extent.widthTiles * TILE) * 0.5,
-    camZ: (map.extent.heightTiles * TILE) * 0.5
+    camX: map.extent.widthTiles * TILE * 0.5,
+    camZ: map.extent.heightTiles * TILE * 0.5
   };
 };
 
@@ -129,6 +128,7 @@ const MainInner = () => {
         >
           <ZarchScene
             inputRef={inputRef}
+            map={map}
             runtimeRef={runtimeRef}
             terrain={terrain}
           />
