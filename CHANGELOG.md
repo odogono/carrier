@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity Phase 6 admin editor workflow: place-entity mode, archetype catalog picker, entity outliner, single-entity inspector, bulk state/scale apply, duplication, delete confirmation, and canvas footprint/facing/rotate overlays
 - Static entity editor helper coverage for overlay math, snapping, duplicate label generation, catalog/outliner filtering, grounding diagnostics, and editor snapshot entity state
 - Static entity Phase 7 gameplay rendering in the client: referenced-archetype resolution, asset-version metadata reads, lazy runtime GLB loading, grounded placement rendering, and instancing-ready asset caching
+- Static entity Phase 8 export snapshot support: exported map slices now snapshot intersecting static entities, persist deterministic referenced-archetype manifests with SHA-256 compatibility hashes, and expose export summary/detail metadata for future import validation
 
 ### Changed
 
@@ -35,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity Phase 7 is now complete in the implementation plan, with gameplay-side archetype resolution, per-asset runtime caching, active-only placement rendering, and optional instancing support landed in the repo
 - Admin map editor data loading now hydrates map static-entity placements, referenced archetypes, active placeable archetypes, and asset-version metadata for entity overlays and diagnostics
 - Admin map editor interaction state now tracks entity selection and draft edits alongside polygon/control-point workflows while keeping terrain and entity selections mutually exclusive
+- Exported map metadata now returns static-entity manifest summaries in list responses and full manifest detail on export/detail reads, and the admin map detail page surfaces the snapshot counts and manifest hash
 
 ## [0.4.0] - 2026-03-22
 

@@ -480,6 +480,8 @@ Acceptance:
 
 ### Phase 8: Export/import support
 
+Status: complete on 2026-03-25.
+
 Goal: make map exports stable against catalog drift.
 
 Changes:

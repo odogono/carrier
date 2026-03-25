@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
@@ -14,17 +14,23 @@ import type {
   MapChunk,
   MapGenerator,
   MapMetadata,
+  MapMetadataSummary,
   MapOverview,
   SourcePolygon,
   SourcePolygonParams,
   SourcePolygonStatus,
   StaticEntity,
+  StaticEntityExportManifest,
+  StaticEntityExportManifestEntry,
   StaticEntityArchetypeSummary,
   StaticEntityListItem,
   WorldBounds,
   WorldPoint
 } from 'carrier-contracts';
-import { slugify } from 'carrier-contracts';
+import {
+  normalizeStaticEntityExportManifest,
+  slugify
+} from 'carrier-contracts';
 
 import {
   HEIGHT_LAYER,
@@ -74,6 +80,10 @@ type MapRow = {
   name: string | null;
   revision: number;
   seed: string;
+  staticEntityExportArchetypeCount: number | null;
+  staticEntityExportEntityCount: number | null;
+  staticEntityExportManifestHash: string | null;
+  staticEntityExportManifestJson: string | null;
   sourceMapId: string | null;
   sourceRevision: number | null;
   terrainRevision: number;
@@ -307,6 +317,10 @@ const MAP_ROW_COLUMNS = `
   name,
   revision,
   seed,
+  static_entity_export_archetype_count AS staticEntityExportArchetypeCount,
+  static_entity_export_entity_count AS staticEntityExportEntityCount,
+  static_entity_export_manifest_hash AS staticEntityExportManifestHash,
+  static_entity_export_manifest_json AS staticEntityExportManifestJson,
   source_map_id AS sourceMapId,
   source_revision AS sourceRevision,
   terrain_revision AS terrainRevision,
@@ -453,7 +467,44 @@ const chunkRowToRecord = (row: ChunkRow) => ({
   heights: decodeFloat32Heights(row.heights)
 });
 
-const mapRowToMetadata = (row: MapRow): MapMetadata => {
+const getStaticEntityExportDetail = (
+  row: Pick<
+    MapRow,
+    | 'staticEntityExportArchetypeCount'
+    | 'staticEntityExportEntityCount'
+    | 'staticEntityExportManifestHash'
+    | 'staticEntityExportManifestJson'
+  >,
+  options: { includeManifest: boolean }
+) => {
+  if (
+    row.staticEntityExportArchetypeCount === null ||
+    row.staticEntityExportEntityCount === null ||
+    row.staticEntityExportManifestHash === null
+  ) {
+    return undefined;
+  }
+
+  const summary = {
+    archetypeCount: row.staticEntityExportArchetypeCount,
+    entityCount: row.staticEntityExportEntityCount,
+    fullManifestHash: row.staticEntityExportManifestHash
+  };
+
+  if (!options.includeManifest || row.staticEntityExportManifestJson === null) {
+    return summary;
+  }
+
+  return {
+    ...summary,
+    manifest: JSON.parse(row.staticEntityExportManifestJson) as StaticEntityExportManifest
+  };
+};
+
+const mapRowToMetadata = (
+  row: MapRow,
+  options: { includeExportManifest: boolean }
+): MapMetadata => {
   const resolution = {
     chunkSizeTiles: row.chunkSizeTiles,
     metersPerTile: row.metersPerTile
@@ -474,6 +525,9 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
             minZ: row.exportBoundsMinZ
           },
           exportedAt: row.exportedAt,
+          staticEntities: getStaticEntityExportDetail(row, {
+            includeManifest: options.includeExportManifest
+          }),
           sourceMapId: row.sourceMapId,
           sourceRevision: row.sourceRevision
         }
@@ -524,6 +578,11 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
     updatedAt: row.updatedAt
   };
 };
+
+const mapRowToSummaryMetadata = (row: MapRow): MapMetadataSummary =>
+  mapRowToMetadata(row, {
+    includeExportManifest: false
+  });
 
 const rowToBounds = (
   row:
@@ -1254,6 +1313,137 @@ export class MapRepository {
     };
   }
 
+  private getStaticEntityExportManifestEntry(
+    archetype: Archetype,
+    assetVersion: AssetVersion
+  ): StaticEntityExportManifestEntry {
+    if (assetVersion.runtimeFile === null) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset version ${assetVersion.id} is missing a runtime file for exported manifest snapshotting`
+      );
+    }
+
+    return {
+      archetype: {
+        assetVersionId: archetype.assetVersionId,
+        category: archetype.category,
+        id: archetype.id,
+        name: archetype.name,
+        status: archetype.status,
+        tags: archetype.tags
+      },
+      assetVersion: {
+        collisionBox: assetVersion.collisionBox,
+        collisionClass: assetVersion.collisionClass,
+        footprint: assetVersion.footprint,
+        groundingPolicy: assetVersion.groundingPolicy,
+        id: assetVersion.id,
+        instancingEligible: assetVersion.instancingEligible,
+        maxHeightDeltaMeters: assetVersion.maxHeightDeltaMeters,
+        runtimeFile: assetVersion.runtimeFile
+      }
+    };
+  }
+
+  private snapshotStaticEntitiesForExport(
+    sourceMapId: string,
+    exportMapId: string,
+    bounds: WorldBounds,
+    now: string
+  ) {
+    const { archetypesById, assetVersionsById, entities } =
+      this.listResolvedStaticEntities(sourceMapId);
+    const insertStaticEntity = this.db.prepare(`
+      INSERT INTO map_static_entities (
+        id, map_id, label, archetype_id, position_x, position_z,
+        yaw, scale, y_offset, state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const manifestEntriesByArchetypeId = new Map<
+      string,
+      StaticEntityExportManifestEntry
+    >();
+    let entityCount = 0;
+
+    for (const entity of entities) {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      const assetVersion = assetVersionsById.get(archetype.assetVersionId);
+
+      if (!assetVersion) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Asset version ${archetype.assetVersionId} was not found for archetype ${archetype.id}`
+        );
+      }
+
+      if (
+        !bboxesIntersect(bounds, getStaticEntityFootprintBounds(entity, assetVersion))
+      ) {
+        continue;
+      }
+
+      insertStaticEntity.run(
+        entity.id,
+        exportMapId,
+        entity.label ?? null,
+        entity.archetypeId,
+        entity.position.x - bounds.minX,
+        entity.position.z - bounds.minZ,
+        entity.rotation.yaw,
+        entity.scale,
+        entity.yOffset,
+        entity.state,
+        now,
+        now
+      );
+      entityCount += 1;
+
+      if (!manifestEntriesByArchetypeId.has(archetype.id)) {
+        manifestEntriesByArchetypeId.set(
+          archetype.id,
+          this.getStaticEntityExportManifestEntry(archetype, assetVersion)
+        );
+      }
+    }
+
+    const manifest = normalizeStaticEntityExportManifest([
+      ...manifestEntriesByArchetypeId.values()
+    ]);
+    const manifestJson = JSON.stringify(manifest);
+    const fullManifestHash = createHash('sha256')
+      .update(manifestJson)
+      .digest('hex');
+
+    this.db
+      .prepare(
+        `
+        UPDATE maps
+        SET
+          static_entity_export_manifest_json = ?,
+          static_entity_export_manifest_hash = ?,
+          static_entity_export_entity_count = ?,
+          static_entity_export_archetype_count = ?
+        WHERE id = ?
+      `
+      )
+      .run(
+        manifestJson,
+        fullManifestHash,
+        entityCount,
+        manifest.length,
+        exportMapId
+      );
+  }
+
   private listStaticEntitiesForChunk(
     mapRow: MapRow,
     chunkX: number,
@@ -1312,7 +1502,9 @@ export class MapRepository {
   }
 
   private loadVectorTerrainState(mapRow: MapRow) {
-    const map = mapRowToMetadata(mapRow);
+    const map = mapRowToMetadata(mapRow, {
+      includeExportManifest: false
+    });
     const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(
       sourcePolygonRowToModel
     );
@@ -1907,6 +2099,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed: sourceRow.seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: sourceRow.id,
         sourceRevision: sourceRow.revision,
         terrainRevision: 0,
@@ -2022,8 +2218,11 @@ export class MapRepository {
       }
 
       this.snapshotDerivedIslandsForExport(sourceRow.id, id, input.bounds, now);
+      this.snapshotStaticEntitiesForExport(sourceRow.id, id, input.bounds, now);
 
-      return mapRowToMetadata(row);
+      return mapRowToMetadata(this.getMapRowOrThrow(id), {
+        includeExportManifest: true
+      });
     });
   }
 
@@ -2155,6 +2354,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: null,
         sourceRevision: null,
         terrainRevision: 0,
@@ -2181,6 +2384,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: null,
         sourceRevision: null,
         terrainRevision: 0,
@@ -2231,7 +2438,9 @@ export class MapRepository {
         row.updatedAt
       );
 
-    return mapRowToMetadata(row);
+    return mapRowToMetadata(row, {
+      includeExportManifest: false
+    });
   }
 
   createMapExport(input: CreateMapExportInput): MapMetadata {
@@ -2251,7 +2460,11 @@ export class MapRepository {
 
   getMap(id: string) {
     const row = this.findMapRow(id);
-    return row ? mapRowToMetadata(row) : null;
+    return row
+      ? mapRowToMetadata(row, {
+          includeExportManifest: true
+        })
+      : null;
   }
 
   createAssetVersion(input: CreateAssetVersionInput) {
@@ -2785,7 +2998,7 @@ export class MapRepository {
       `
       )
       .all()
-      .map(mapRowToMetadata);
+      .map(mapRowToSummaryMetadata);
   }
 
   findExport(id: string) {
@@ -2800,7 +3013,9 @@ export class MapRepository {
       return null;
     }
 
-    return mapRowToMetadata(row);
+    return mapRowToMetadata(row, {
+      includeExportManifest: true
+    });
   }
 
   listExports(mapId: string) {
@@ -2816,7 +3031,7 @@ export class MapRepository {
       `
       )
       .all(mapId)
-      .map(mapRowToMetadata);
+      .map(mapRowToSummaryMetadata);
   }
 
   listSourcePolygons(mapId: string, status?: SourcePolygonStatus) {
@@ -3473,6 +3688,10 @@ export class MapRepository {
         export_bounds_min_z REAL,
         export_bounds_max_x REAL,
         export_bounds_max_z REAL,
+        static_entity_export_manifest_json TEXT,
+        static_entity_export_manifest_hash TEXT,
+        static_entity_export_entity_count INTEGER,
+        static_entity_export_archetype_count INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (source_map_id) REFERENCES maps(id) ON DELETE SET NULL
@@ -3629,6 +3848,18 @@ export class MapRepository {
     this.ensureColumnExists('maps', 'export_bounds_min_z', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_x', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_z', 'REAL');
+    this.ensureColumnExists('maps', 'static_entity_export_manifest_json', 'TEXT');
+    this.ensureColumnExists('maps', 'static_entity_export_manifest_hash', 'TEXT');
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_entity_count',
+      'INTEGER'
+    );
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_archetype_count',
+      'INTEGER'
+    );
 
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_maps_source_map

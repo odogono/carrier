@@ -1,9 +1,13 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { contract } from 'carrier-contracts/contract';
-import { decodeMapChunkBinary } from 'carrier-contracts/types';
+import {
+  decodeMapChunkBinary,
+  stringifyStaticEntityExportManifest
+} from 'carrier-contracts/types';
 
 import { resetAssetPipeline } from '@/maps/assets';
 import { getMapRepository, resetMapRepository } from '@/maps/repository';
@@ -673,6 +677,78 @@ describe('API server map routes', () => {
       1
     );
 
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 20,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 20,
+        widthMeters: 20
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'export-watchtower-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/export-watchtower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/export-watchtower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'landmark',
+      id: 'export-watchtower',
+      name: 'Export Watchtower',
+      status: 'active',
+      tags: ['stone', 'coastal']
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 1,
+      id: 'watchtower-center',
+      label: null,
+      mapId: created.id as string,
+      position: {
+        x: 100,
+        z: 100
+      },
+      rotation: {
+        yaw: 15
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 2,
+      id: 'watchtower-edge',
+      label: 'Edge tower',
+      mapId: created.id as string,
+      position: {
+        x: 325,
+        z: 110
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'disabled',
+      yOffset: 0.5
+    });
+
     const exportResponse = await request(
       'POST',
       `/api/maps/${created.id as string}/exports`,
@@ -684,7 +760,7 @@ describe('API server map routes', () => {
           minZ: 0
         },
         chunkSizeTiles: 16,
-        expectedRevision: 1,
+        expectedRevision: 3,
         kind: 'finite-vector-slice',
         mapId: created.id,
         metersPerTile: 10,
@@ -696,6 +772,28 @@ describe('API server map routes', () => {
     expect((exported.export as Record<string, unknown>).sourceMapId).toBe(
       created.id
     );
+    const exportStaticEntities = (exported.export as Record<string, unknown>)
+      .staticEntities as Record<string, unknown>;
+    expect(exportStaticEntities.entityCount).toBe(2);
+    expect(exportStaticEntities.archetypeCount).toBe(1);
+    expect(
+      (
+        exportStaticEntities.manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
+    expect(exportStaticEntities.fullManifestHash).toBe(
+      createHash('sha256')
+        .update(
+          stringifyStaticEntityExportManifest(
+            exportStaticEntities.manifest as Parameters<
+              typeof stringifyStaticEntityExportManifest
+            >[0]
+          )
+        )
+        .digest('hex')
+    );
 
     const listedExportsResponse = await request(
       'GET',
@@ -706,6 +804,18 @@ describe('API server map routes', () => {
     >;
     expect(listedExports).toHaveLength(1);
     expect(listedExports[0]?.id).toBe(exported.id);
+    expect(
+      (
+        ((listedExports[0]?.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>)?.manifest
+      )
+    ).toBeUndefined();
+    expect(
+      (
+        (listedExports[0]?.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>
+      )?.entityCount
+    ).toBe(2);
 
     const fetchedExportResponse = await request(
       'GET',
@@ -714,7 +824,30 @@ describe('API server map routes', () => {
     const fetchedExport = fetchedExportResponse.json as Record<string, unknown>;
     expect(
       (fetchedExport.export as Record<string, unknown>).sourceRevision
-    ).toBe(1);
+    ).toBe(3);
+    expect(
+      (
+        ((fetchedExport.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>).manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
+
+    const fetchedMapResponse = await request(
+      'GET',
+      `/api/maps/${exported.id as string}`
+    );
+    expect(
+      (
+        (((fetchedMapResponse.json as Record<string, unknown>).export as Record<
+          string,
+          unknown
+        >).staticEntities as Record<string, unknown>).manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
 
     const chunk = await decodeMapChunkBinary(
       await (
@@ -727,6 +860,22 @@ describe('API server map routes', () => {
     );
     expect(chunk.mapId).toBe(exported.id as string);
     expect(chunk.tileWidth).toBe(16);
+    expect(chunk.staticEntities.map(entity => entity.id)).toEqual([
+      'watchtower-center'
+    ]);
+
+    const edgeChunk = await decodeMapChunkBinary(
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
+        chunkX: 1,
+        chunkZ: 0,
+        mapId: exported.id as string
+      })
+    );
+    expect(edgeChunk.staticEntities.map(entity => entity.id)).toContain(
+      'watchtower-edge'
+    );
 
     const outOfBoundsChunkResponse = await request(
       'GET',

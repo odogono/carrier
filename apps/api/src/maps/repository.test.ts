@@ -1,5 +1,9 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
-import { isFiniteMap } from 'carrier-contracts/types';
+import {
+  isFiniteMap,
+  stringifyStaticEntityExportManifest
+} from 'carrier-contracts/types';
 
 import { MapRepository, MapRepositoryError } from './repository';
 
@@ -793,6 +797,258 @@ describe('map repository', () => {
       expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(
         beforeExportChunk?.heights
       );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('snapshots overlapping static entities and manifest hashes into exports', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Static export world',
+        seed: 'static-export-seed'
+      });
+      const watchtowerAsset = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 24,
+          heightMeters: 32,
+          widthMeters: 24
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 24,
+          widthMeters: 24
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'watchtower-v1',
+        instancingEligible: true,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/watchtower.glb',
+          sizeBytes: 256
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/watchtower-v1.glb',
+          sizeBytes: 128
+        },
+        status: 'ready'
+      });
+      const windmillAsset = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 20,
+          heightMeters: 28,
+          widthMeters: 20
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 20,
+          widthMeters: 20
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'windmill-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/windmill.glb',
+          sizeBytes: 200
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/windmill-v1.glb',
+          sizeBytes: 150
+        },
+        status: 'ready'
+      });
+      const watchtower = repository.createArchetype({
+        assetVersionId: watchtowerAsset.id,
+        category: 'landmark',
+        id: 'watchtower',
+        name: 'Watchtower',
+        status: 'active',
+        tags: ['stone', 'coastal']
+      });
+      const windmill = repository.createArchetype({
+        assetVersionId: windmillAsset.id,
+        category: 'industrial',
+        id: 'windmill',
+        name: 'Windmill',
+        status: 'active',
+        tags: ['farm']
+      });
+
+      repository.createStaticEntity({
+        archetypeId: windmill.id,
+        expectedRevision: 0,
+        id: 'windmill-edge',
+        label: 'Edge windmill',
+        mapId: created.id,
+        position: {
+          x: 405,
+          z: 90
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: watchtower.id,
+        expectedRevision: 1,
+        id: 'watchtower-center',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 100,
+          z: 100
+        },
+        rotation: {
+          yaw: 45
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0.5
+      });
+      repository.createStaticEntity({
+        archetypeId: watchtower.id,
+        expectedRevision: 2,
+        id: 'watchtower-outside',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 450,
+          z: 90
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'disabled',
+        yOffset: 0
+      });
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 400,
+          maxZ: 360,
+          minX: 80,
+          minZ: 40
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 3,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Static Slice'
+      });
+
+      expect(exported.export?.staticEntities?.entityCount).toBe(2);
+      expect(exported.export?.staticEntities?.archetypeCount).toBe(2);
+      expect(exported.export?.staticEntities?.manifest.map(entry => entry.archetype.id)).toEqual([
+        'watchtower',
+        'windmill'
+      ]);
+
+      const manifest = exported.export?.staticEntities?.manifest ?? [];
+      const expectedHash = createHash('sha256')
+        .update(stringifyStaticEntityExportManifest(manifest))
+        .digest('hex');
+      expect(exported.export?.staticEntities?.fullManifestHash).toBe(
+        expectedHash
+      );
+
+      const exportedEntities = repository.listStaticEntities(exported.id);
+      expect(
+        exportedEntities.map(entity => entity.id).sort((left, right) =>
+          left.localeCompare(right)
+        )
+      ).toEqual(['watchtower-center', 'windmill-edge']);
+      expect(
+        exportedEntities.find(entity => entity.id === 'watchtower-center')
+      ).toMatchObject({
+        position: {
+          x: 20,
+          z: 60
+        }
+      });
+      expect(
+        exportedEntities.find(entity => entity.id === 'windmill-edge')
+      ).toMatchObject({
+        position: {
+          x: 325,
+          z: 50
+        }
+      });
+
+      expect(
+        repository.getMapChunk(exported.id, 0, 0)?.staticEntities.map(
+          entity => entity.id
+        )
+      ).toEqual(['watchtower-center']);
+      expect(
+        repository.getMapChunk(exported.id, 1, 0)?.staticEntities.map(
+          entity => entity.id
+        )
+      ).toContain('windmill-edge');
+
+      const listedExport = repository.listExports(created.id)[0];
+      expect(listedExport?.export?.staticEntities?.manifest).toBeUndefined();
+      expect(listedExport?.export?.staticEntities?.entityCount).toBe(2);
+
+      expect(
+        repository.findExport(exported.id)?.export?.staticEntities?.manifest
+      ).toEqual(manifest);
+      expect(repository.getMap(exported.id)?.export?.staticEntities?.manifest).toEqual(
+        manifest
+      );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('stores a stable empty static-entity manifest hash for exports without entities', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Empty export world',
+        seed: 'empty-export-seed'
+      });
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 0,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Empty Slice'
+      });
+
+      expect(exported.export?.staticEntities).toEqual({
+        archetypeCount: 0,
+        entityCount: 0,
+        fullManifestHash: createHash('sha256').update('[]').digest('hex'),
+        manifest: []
+      });
+      expect(
+        repository.listExports(created.id)[0]?.export?.staticEntities?.manifest
+      ).toBeUndefined();
     } finally {
       repository.close();
     }
