@@ -10,6 +10,7 @@ import type {
 export type EditorTool =
   | 'pan'
   | 'select'
+  | 'place-entity'
   | 'draw-polygon'
   | 'edit-vertices'
   | 'place-control-point';
@@ -361,3 +362,5 @@ export const getPolygonEdgeInsertPosition = (
     z: start.z + dz * t
   };
 };
+
+export * from './static-entities';

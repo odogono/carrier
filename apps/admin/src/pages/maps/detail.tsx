@@ -410,6 +410,26 @@ export function MapDetailPage() {
                   {map.export.bounds.maxX},{map.export.bounds.maxZ}
                 </dd>
               </div>
+              {map.export.staticEntities && (
+                <>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Static Entities</dt>
+                    <dd>{map.export.staticEntities.entityCount}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">
+                      Referenced Archetypes
+                    </dt>
+                    <dd>{map.export.staticEntities.archetypeCount}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Manifest Hash</dt>
+                    <dd className="max-w-[260px] break-all font-mono text-xs">
+                      {map.export.staticEntities.fullManifestHash}
+                    </dd>
+                  </div>
+                </>
+              )}
             </dl>
           </CardContent>
         </Card>

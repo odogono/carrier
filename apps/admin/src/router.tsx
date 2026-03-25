@@ -1,4 +1,6 @@
 import { Layout } from '@/components/layout';
+import { ArchetypesPage } from '@/pages/archetypes';
+import { AssetsPage } from '@/pages/assets';
 import { DashboardPage } from '@/pages/dashboard';
 import { CreateMapPage } from '@/pages/maps/create';
 import { MapDetailPage } from '@/pages/maps/detail';
@@ -31,6 +33,18 @@ const mapsRoute = createRoute({
   path: '/maps'
 });
 
+const assetsRoute = createRoute({
+  component: AssetsPage,
+  getParentRoute: () => rootRoute,
+  path: '/assets'
+});
+
+const archetypesRoute = createRoute({
+  component: ArchetypesPage,
+  getParentRoute: () => rootRoute,
+  path: '/archetypes'
+});
+
 const createMapRoute = createRoute({
   component: CreateMapPage,
   getParentRoute: () => rootRoute,
@@ -51,6 +65,8 @@ const mapEditorRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
+  assetsRoute,
+  archetypesRoute,
   mapsRoute,
   createMapRoute,
   mapEditorRoute,

@@ -1,0 +1,13 @@
+{
+  "name": "carrier-preview",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "carrier-contracts": "workspace:*",
+    "three": "^0.183.2"
+  }
+}

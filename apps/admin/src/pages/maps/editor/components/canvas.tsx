@@ -1,16 +1,19 @@
 import type {
+  AssetVersion,
   ControlPoint,
   MapMetadata,
+  StaticEntity,
   WorldPoint
 } from 'carrier-contracts/types';
 import { Home, Minus, Plus } from 'lucide-react';
-import type {
-  KeyboardEvent,
-  MouseEvent,
-  PointerEvent,
-  Ref,
-  RefObject,
-  WheelEvent
+import {
+  useMemo,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type Ref,
+  type RefObject,
+  type WheelEvent
 } from 'react';
 
 import { MapStage } from '@/components/map-viewer/map-stage';
@@ -21,6 +24,9 @@ import { cn } from '@/lib/utils';
 
 import {
   canSavePolygonDraft,
+  type StaticEntityGroundingDiagnostics,
+  getStaticEntityFacingIndicator,
+  getStaticEntityOverlayGeometry,
   getPolygonEdgeInsertPosition,
   type EditorTool
 } from '../helpers';
@@ -32,6 +38,12 @@ import type {
   SourcePolygonLike
 } from '../helpers/types';
 
+type StaticEntityCanvasItem = {
+  assetVersion: Pick<AssetVersion, 'footprint'> | null;
+  diagnostics: StaticEntityGroundingDiagnostics;
+  entity: StaticEntity;
+};
+
 type EditorCanvasProps = {
   chunks: ReturnType<typeof import('@/hooks/use-map-chunks').useMapChunks>;
   commitDrawPolygon: () => void;
@@ -39,6 +51,7 @@ type EditorCanvasProps = {
   controlPointDraft: ControlPointDraft | null;
   controlPoints: ControlPoint[];
   dragState: CanvasDragState;
+  entityItems: StaticEntityCanvasItem[];
   fitToView: () => void;
   highlightedIslandPolygonIds: Set<string>;
   interactionRef: RefObject<SVGSVGElement | null>;
@@ -59,6 +72,18 @@ type EditorCanvasProps = {
     event: PointerEvent<SVGCircleElement>,
     point: ControlPoint
   ) => void;
+  onStaticEntityClick: (
+    event: MouseEvent<SVGElement>,
+    entity: StaticEntity
+  ) => void;
+  onStaticEntityPointerDown: (
+    event: PointerEvent<SVGElement>,
+    entity: StaticEntity
+  ) => void;
+  onStaticEntityRotatePointerDown: (
+    event: PointerEvent<SVGCircleElement>,
+    entity: StaticEntity
+  ) => void;
   onPolygonClick: (
     event: MouseEvent<SVGPolygonElement>,
     polygon: SourcePolygonLike
@@ -72,6 +97,7 @@ type EditorCanvasProps = {
   overlayPolygons: SourcePolygonLike[];
   polygonDraft: PolygonDraft | null;
   selectedControlPointId: string | null;
+  selectedEntityIds: string[];
   selectedPolygonIds: string[];
   selectionSummary: string;
   setDragState: React.Dispatch<React.SetStateAction<CanvasDragState>>;
@@ -102,6 +128,7 @@ export const EditorCanvas = ({
   controlPointDraft,
   controlPoints,
   dragState,
+  entityItems,
   fitToView,
   highlightedIslandPolygonIds,
   interactionRef,
@@ -116,6 +143,9 @@ export const EditorCanvas = ({
   onCanvasPointerUp,
   onControlPointClick,
   onControlPointPointerDown,
+  onStaticEntityClick,
+  onStaticEntityPointerDown,
+  onStaticEntityRotatePointerDown,
   onPolygonClick,
   onPolygonPointerDown,
   onWheel,
@@ -123,6 +153,7 @@ export const EditorCanvas = ({
   overlayPolygons,
   polygonDraft,
   selectedControlPointId,
+  selectedEntityIds,
   selectedPolygonIds,
   selectionSummary,
   setDragState,
@@ -136,7 +167,8 @@ export const EditorCanvas = ({
   zoomIn,
   zoomOut
 }: EditorCanvasProps) => {
-  const selectedPolygonSet = new Set(selectedPolygonIds);
+  const selectedPolygonSet = useMemo(() => new Set(selectedPolygonIds), [selectedPolygonIds]);
+  const selectedEntitySet = useMemo(() => new Set(selectedEntityIds), [selectedEntityIds]);
   const zoomPercent = Math.round(viewport.zoom * 100);
   const showEditVertices =
     polygonDraft?.kind === 'edit' &&
@@ -152,6 +184,7 @@ export const EditorCanvas = ({
       : (polygonDraft?.vertices ?? []);
   const marqueeBounds = dragState?.kind === 'marquee' ? dragState.bounds : null;
   const multiSelectActive = selectedPolygonIds.length > 1;
+  const entityMultiSelectActive = selectedEntityIds.length > 1;
   const draftVertexCount = polygonDraft?.vertices.length ?? 0;
 
   return (
@@ -263,6 +296,146 @@ export const EditorCanvas = ({
                     viewBox={`0 0 ${size.width} ${size.height}`}
                     width={size.width}
                   >
+                    {entityItems.map(item => {
+                      const selected = selectedEntitySet.has(item.entity.id);
+                      const overlay = item.assetVersion
+                        ? getStaticEntityOverlayGeometry({
+                            assetVersion: item.assetVersion,
+                            entity: item.entity
+                          })
+                        : null;
+                      const facingPoint = getStaticEntityFacingIndicator({
+                        entity: item.entity,
+                        lengthMeters:
+                          (item.assetVersion?.footprint.depthMeters ?? 10) * 0.5 + 4
+                      });
+                      const anchor = toScreenPoint(item.entity.position);
+                      const facingScreen = toScreenPoint(facingPoint);
+                      const handleScreen = overlay
+                        ? toScreenPoint(overlay.handle)
+                        : null;
+                      const footprintPoints = overlay
+                        ? overlay.corners
+                            .map(point => {
+                              const screen = toScreenPoint(point);
+                              return `${screen.x},${screen.z}`;
+                            })
+                            .join(' ')
+                        : '';
+                      const disabled = item.entity.state === 'disabled';
+                      const warning = item.diagnostics.status === 'warning';
+                      const stroke = disabled
+                        ? '#94a3b8'
+                        : selected
+                          ? entityMultiSelectActive
+                            ? '#60a5fa'
+                            : warning
+                              ? '#f59e0b'
+                              : '#34d399'
+                          : warning
+                            ? '#f59e0b'
+                            : '#cbd5f5';
+                      const fill = disabled
+                        ? 'rgba(148,163,184,0.12)'
+                        : selected
+                          ? entityMultiSelectActive
+                            ? 'rgba(96,165,250,0.18)'
+                            : 'rgba(52,211,153,0.18)'
+                          : warning
+                            ? 'rgba(245,158,11,0.14)'
+                            : 'rgba(148,163,184,0.08)';
+
+                      return (
+                        <g key={item.entity.id}>
+                          {overlay ? (
+                            <polygon
+                              data-testid="editor-static-entity"
+                              fill={fill}
+                              onClick={event => {
+                                STOP_PROPAGATION(event);
+                                onStaticEntityClick(
+                                  event as unknown as MouseEvent<SVGElement>,
+                                  item.entity
+                                );
+                              }}
+                              onPointerDown={event =>
+                                onStaticEntityPointerDown(
+                                  event as unknown as PointerEvent<SVGElement>,
+                                  item.entity
+                                )
+                              }
+                              points={footprintPoints}
+                              stroke={stroke}
+                              strokeDasharray={disabled ? '10 6' : undefined}
+                              strokeWidth={selected ? 3 : 2}
+                            />
+                          ) : null}
+                          <line
+                            pointerEvents="none"
+                            stroke={stroke}
+                            strokeWidth={2}
+                            x1={anchor.x}
+                            x2={facingScreen.x}
+                            y1={anchor.z}
+                            y2={facingScreen.z}
+                          />
+                          <circle
+                            cx={anchor.x}
+                            cy={anchor.z}
+                            fill={selected ? '#ffffff' : stroke}
+                            onClick={event => {
+                              STOP_PROPAGATION(event);
+                              onStaticEntityClick(
+                                event as unknown as MouseEvent<SVGElement>,
+                                item.entity
+                              );
+                            }}
+                            onPointerDown={event =>
+                              onStaticEntityPointerDown(
+                                event as unknown as PointerEvent<SVGElement>,
+                                item.entity
+                              )
+                            }
+                            r={selected ? 7 : 5}
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                          {selected &&
+                          selectedEntityIds.length === 1 &&
+                          handleScreen &&
+                          tool === 'select' ? (
+                            <>
+                              <line
+                                pointerEvents="none"
+                                stroke={stroke}
+                                strokeDasharray="6 4"
+                                strokeWidth={2}
+                                x1={facingScreen.x}
+                                x2={handleScreen.x}
+                                y1={facingScreen.z}
+                                y2={handleScreen.z}
+                              />
+                              <circle
+                                cx={handleScreen.x}
+                                cy={handleScreen.z}
+                                data-testid="editor-static-entity-rotate-handle"
+                                fill="#0f172a"
+                                onPointerDown={event =>
+                                  onStaticEntityRotatePointerDown(
+                                    event,
+                                    item.entity
+                                  )
+                                }
+                                r={6}
+                                stroke={stroke}
+                                strokeWidth={2}
+                              />
+                            </>
+                          ) : null}
+                        </g>
+                      );
+                    })}
+
                     {overlayPolygons.map(polygon => {
                       const points = polygon.vertices
                         .map(vertex => {

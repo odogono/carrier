@@ -970,7 +970,11 @@ export const useMapEditorActions = ({
   );
 
   const confirmDelete = useCallback(async () => {
-    if (!deleteTarget || editorRevision === null) {
+    if (
+      !deleteTarget ||
+      deleteTarget.kind === 'static-entity' ||
+      editorRevision === null
+    ) {
       return;
     }
 

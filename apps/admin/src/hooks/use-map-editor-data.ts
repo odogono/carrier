@@ -1,15 +1,17 @@
 import {
+  type AssetVersion,
   isInfiniteMap,
   type ControlPoint,
   type MapMetadata,
+  type StaticEntityListItem,
   type SourcePolygon,
   type WorldBounds
 } from 'carrier-contracts/types';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { client } from '@/lib/api-client';
 import { chunkIntersectsDirtyBounds } from '@/pages/maps/editor/helpers';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export const mapEditorKeys = {
   controlPoints: (mapId: string) =>
@@ -18,7 +20,13 @@ export const mapEditorKeys = {
     ['maps', mapId, 'editor', 'derived-islands'] as const,
   map: (mapId: string) => ['maps', mapId] as const,
   overview: (mapId: string) => ['maps', mapId, 'editor', 'overview'] as const,
-  polygons: (mapId: string) => ['maps', mapId, 'editor', 'polygons'] as const
+  polygons: (mapId: string) => ['maps', mapId, 'editor', 'polygons'] as const,
+  staticEntities: (mapId: string) =>
+    ['maps', mapId, 'editor', 'static-entities'] as const,
+  referencedArchetypes: (mapId: string) =>
+    ['maps', mapId, 'editor', 'referenced-archetypes'] as const,
+  activeArchetypes: () => ['maps', 'archetypes', 'active'] as const,
+  assetVersion: (id: string) => ['maps', 'asset-versions', id] as const
 };
 
 const parseChunkQueryKey = (queryKey: readonly unknown[]) => {
@@ -136,6 +144,58 @@ export const useMapEditorData = (mapId: string) => {
     queryKey: mapEditorKeys.derivedIslands(mapId)
   });
 
+  const staticEntitiesQuery = useQuery({
+    enabled: authoredEnabled,
+    queryFn: () => client.maps.listStaticEntities({ mapId }),
+    queryKey: mapEditorKeys.staticEntities(mapId)
+  });
+
+  const referencedArchetypesQuery = useQuery({
+    enabled: authoredEnabled,
+    queryFn: () => client.maps.listReferencedArchetypes({ mapId }),
+    queryKey: mapEditorKeys.referencedArchetypes(mapId)
+  });
+
+  const activeArchetypesQuery = useQuery({
+    enabled: authoredEnabled,
+    queryFn: () => client.maps.listArchetypes({ status: 'active' }),
+    queryKey: mapEditorKeys.activeArchetypes()
+  });
+
+  const assetVersionIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...(referencedArchetypesQuery.data ?? []),
+            ...(activeArchetypesQuery.data ?? [])
+          ].map(archetype => archetype.assetVersionId)
+        )
+      ),
+    [activeArchetypesQuery.data, referencedArchetypesQuery.data]
+  );
+
+  const assetVersionQueries = useQueries({
+    queries: authoredEnabled
+      ? assetVersionIds.map(assetVersionId => ({
+          queryFn: () => client.maps.getAssetVersion({ id: assetVersionId }),
+          queryKey: mapEditorKeys.assetVersion(assetVersionId),
+          staleTime: 60_000
+        }))
+      : []
+  });
+
+  const assetVersionsById = useMemo(
+    () =>
+      assetVersionQueries.reduce<Map<string, AssetVersion>>((map, query) => {
+        if (query.data) {
+          map.set(query.data.id, query.data);
+        }
+        return map;
+      }, new Map()),
+    [assetVersionQueries]
+  );
+
   const invalidateMapAndAuthoredQueries = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: mapEditorKeys.map(mapId) }),
@@ -150,6 +210,12 @@ export const useMapEditorData = (mapId: string) => {
       }),
       queryClient.invalidateQueries({
         queryKey: mapEditorKeys.derivedIslands(mapId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.staticEntities(mapId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.referencedArchetypes(mapId)
       })
     ]);
   }, [mapId, queryClient]);
@@ -196,6 +262,70 @@ export const useMapEditorData = (mapId: string) => {
     [invalidateMapAndAuthoredQueries, map, mapId, queryClient]
   );
 
+  const invalidateStaticEntityMutation = useCallback(async () => {
+    await invalidateMapAndAuthoredQueries();
+    await queryClient.invalidateQueries({
+      predicate: query => {
+        const key = parseChunkQueryKey(query.queryKey);
+        return key?.mapId === mapId;
+      }
+    });
+  }, [invalidateMapAndAuthoredQueries, mapId, queryClient]);
+
+  const replaceStaticEntityItems = useCallback(
+    (replacements: StaticEntityListItem[]) => {
+      if (replacements.length === 0) {
+        return;
+      }
+
+      queryClient.setQueryData<StaticEntityListItem[] | undefined>(
+        mapEditorKeys.staticEntities(mapId),
+        current => {
+          if (!current) {
+            return current;
+          }
+
+          const replacementsById = new Map(
+            replacements.map(item => [item.entity.id, item])
+          );
+          return current.map(
+            item => replacementsById.get(item.entity.id) ?? item
+          );
+        }
+      );
+    },
+    [mapId, queryClient]
+  );
+
+  const removeStaticEntityItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) {
+        return;
+      }
+
+      const idsSet = new Set(ids);
+      queryClient.setQueryData<StaticEntityListItem[] | undefined>(
+        mapEditorKeys.staticEntities(mapId),
+        current => current?.filter(item => !idsSet.has(item.entity.id))
+      );
+    },
+    [mapId, queryClient]
+  );
+
+  const appendStaticEntityItems = useCallback(
+    (items: StaticEntityListItem[]) => {
+      if (items.length === 0) {
+        return;
+      }
+
+      queryClient.setQueryData<StaticEntityListItem[] | undefined>(
+        mapEditorKeys.staticEntities(mapId),
+        current => [...(current ?? []), ...items]
+      );
+    },
+    [mapId, queryClient]
+  );
+
   const reloadAll = useCallback(async (): Promise<MapMetadata | null> => {
     const nextMap = await queryClient.fetchQuery({
       queryFn: () => client.maps.find({ id: mapId }),
@@ -220,6 +350,18 @@ export const useMapEditorData = (mapId: string) => {
         queryClient.fetchQuery({
           queryFn: () => client.maps.listDerivedIslands({ mapId }),
           queryKey: mapEditorKeys.derivedIslands(mapId)
+        }),
+        queryClient.fetchQuery({
+          queryFn: () => client.maps.listStaticEntities({ mapId }),
+          queryKey: mapEditorKeys.staticEntities(mapId)
+        }),
+        queryClient.fetchQuery({
+          queryFn: () => client.maps.listReferencedArchetypes({ mapId }),
+          queryKey: mapEditorKeys.referencedArchetypes(mapId)
+        }),
+        queryClient.fetchQuery({
+          queryFn: () => client.maps.listArchetypes({ status: 'active' }),
+          queryKey: mapEditorKeys.activeArchetypes()
         })
       ]);
     }
@@ -228,10 +370,18 @@ export const useMapEditorData = (mapId: string) => {
   }, [mapId, queryClient]);
 
   return {
+    activeArchetypesQuery,
+    appendStaticEntityItems,
+    assetVersionsById,
+    staticEntitiesQuery,
+    referencedArchetypesQuery,
+    replaceStaticEntityItems,
+    removeStaticEntityItems,
     controlPointsQuery,
     derivedIslandsQuery,
     invalidateIslandMetadataQueries,
     invalidateMapAndAuthoredQueries,
+    invalidateStaticEntityMutation,
     invalidateTerrainMutation,
     map,
     mapQuery,

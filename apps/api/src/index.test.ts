@@ -1,27 +1,26 @@
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { contract } from 'carrier-contracts/contract';
-import { decodeMapChunkBinary } from 'carrier-contracts/types';
+import {
+  decodeMapChunkBinary,
+  stringifyStaticEntityExportManifest
+} from 'carrier-contracts/types';
 
+import { resetAssetPipeline } from '@/maps/assets';
+import { getMapRepository, resetMapRepository } from '@/maps/repository';
 import { createORPCClient } from '@orpc/client';
 import { type ContractRouterClient } from '@orpc/contract';
 import type { JsonifiedClient } from '@orpc/openapi-client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
 
-import { resetMapRepository } from '@/maps/repository';
-
 import { createServer } from './index';
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const request = async (
-  method: string,
-  path: string,
-  body?: unknown
-) => {
+const request = async (method: string, path: string, body?: unknown) => {
   const { app } = await createServer();
   const response = await app.handle(
     new Request(`http://localhost${path}`, {
@@ -35,6 +34,11 @@ const request = async (
     json: await response.json(),
     response
   };
+};
+
+const requestRaw = async (request: Request) => {
+  const { app } = await createServer();
+  return app.handle(request);
 };
 
 const createTestClient = async () => {
@@ -57,13 +61,35 @@ const createTestClient = async () => {
 describe('API server map routes', () => {
   beforeEach(() => {
     process.env.API_DB_PATH = ':memory:';
+    process.env.API_ASSET_STORAGE_ROOT = mkdtempSync('/tmp/carrier-assets-');
     resetMapRepository();
+    resetAssetPipeline();
   });
 
   afterEach(() => {
+    resetAssetPipeline();
     resetMapRepository();
+    delete process.env.API_ASSET_STORAGE_ROOT;
     delete process.env.API_DB_PATH;
   });
+
+  const waitForAssetStatus = async (id: string, expectedStatuses: string[]) => {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await request('GET', `/api/maps/assets/${id}`);
+      const assetVersion = response.json as Record<string, unknown>;
+      const status = assetVersion.status;
+
+      if (typeof status === 'string' && expectedStatuses.includes(status)) {
+        return assetVersion;
+      }
+
+      await Bun.sleep(10);
+    }
+
+    throw new Error(
+      `Timed out waiting for asset ${id} to reach ${expectedStatuses.join(', ')}`
+    );
+  };
 
   test('supports create/list/find/getChunk/delete through the public contract', async () => {
     const createdResponse = await request('POST', '/api/maps', {
@@ -85,7 +111,10 @@ describe('API server map routes', () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]?.id).toBe(created.id);
 
-    const fetchedResponse = await request('GET', `/api/maps/${created.id as string}`);
+    const fetchedResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}`
+    );
     const fetched = fetchedResponse.json as Record<string, unknown>;
     expect(fetched.seed).toBe('contract-seed');
 
@@ -122,7 +151,10 @@ describe('API server map routes', () => {
 
     expect(created.generator).toBe('island-clusters');
 
-    const fetchedResponse = await request('GET', `/api/maps/${created.id as string}`);
+    const fetchedResponse = await request(
+      'GET',
+      `/api/maps/${created.id as string}`
+    );
     const fetched = fetchedResponse.json as Record<string, unknown>;
     expect(fetched.generator).toBe('island-clusters');
 
@@ -189,6 +221,242 @@ describe('API server map routes', () => {
     expect(chunk.heights).toBeInstanceOf(Float32Array);
     expect(chunk.heights.length).toBe(33 * 33);
     expect(chunk.materials?.length).toBe(32 * 32);
+    expect(chunk.staticEntities).toEqual([]);
+  });
+
+  test('supports archetype catalog reads and updates through the public contract', async () => {
+    const repository = getMapRepository();
+    const map = repository.createMap({
+      kind: 'infinite-vector',
+      name: 'Archetype map',
+      seed: 'archetype-seed'
+    });
+    const readyAsset = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 10,
+        heightMeters: 12,
+        widthMeters: 8
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 10,
+        widthMeters: 8
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'tower-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/tower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/tower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: readyAsset.id,
+      category: 'landmark',
+      id: 'tower',
+      name: 'Tower',
+      status: 'active',
+      tags: ['stone']
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 0,
+      id: 'tower-1',
+      label: null,
+      mapId: map.id,
+      position: {
+        x: 5,
+        z: 5
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+
+    const client = await createTestClient();
+
+    expect(await client.maps.listArchetypes({})).toEqual([archetype]);
+    expect(await client.maps.getArchetype({ id: archetype.id })).toEqual(
+      archetype
+    );
+
+    const updated = await client.maps.updateArchetype({
+      category: 'building',
+      id: archetype.id,
+      name: 'Tower Keep',
+      status: 'deprecated',
+      tags: ['stone', 'legacy']
+    });
+    expect(updated.status).toBe('deprecated');
+    expect(updated.assetVersionId).toBe(readyAsset.id);
+
+    expect(await client.maps.listArchetypes({ status: 'deprecated' })).toEqual([
+      updated
+    ]);
+    expect(
+      await client.maps.listReferencedArchetypes({
+        mapId: map.id
+      })
+    ).toEqual([updated]);
+  });
+
+  test('supports static entity CRUD and overlap-aware chunk reads through the public contract', async () => {
+    const repository = getMapRepository();
+    const map = repository.createMap({
+      kind: 'infinite-vector',
+      name: 'Static entity API map',
+      seed: 'static-entity-seed'
+    });
+    const readyAsset = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 20,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 20,
+        widthMeters: 20
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'watchtower-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/watchtower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/watchtower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: readyAsset.id,
+      category: 'landmark',
+      id: 'watchtower',
+      name: 'Watchtower',
+      status: 'active',
+      tags: ['stone']
+    });
+
+    const client = await createTestClient();
+    const created = await client.maps.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 0,
+      label: null,
+      mapId: map.id,
+      position: {
+        x: 315,
+        z: 20
+      },
+      rotation: {
+        yaw: 45
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0.5
+    });
+    expect(created.mapRevision).toBe(1);
+    expect(created.entity.id).toBe('watchtower-1');
+
+    expect(await client.maps.listStaticEntities({ mapId: map.id })).toEqual([
+      {
+        archetype: {
+          assetVersionId: readyAsset.id,
+          category: 'landmark',
+          id: archetype.id,
+          name: 'Watchtower',
+          status: 'active'
+        },
+        entity: created.entity
+      }
+    ]);
+
+    const chunkZero = await request('GET', `/api/maps/${map.id}/chunks/0/0`);
+    const chunkOne = await request('GET', `/api/maps/${map.id}/chunks/1/0`);
+    expect(
+      (
+        chunkZero.json as { staticEntities: Array<{ id: string }> }
+      ).staticEntities.map(entity => entity.id)
+    ).toEqual(['watchtower-1']);
+    expect(
+      (
+        chunkOne.json as { staticEntities: Array<{ id: string }> }
+      ).staticEntities.map(entity => entity.id)
+    ).toEqual(['watchtower-1']);
+
+    const binaryChunk = await decodeMapChunkBinary(
+      await client.maps.getChunkBinary({
+        chunkX: 1,
+        chunkZ: 0,
+        mapId: map.id
+      })
+    );
+    expect(binaryChunk.staticEntities.map(entity => entity.id)).toEqual([
+      'watchtower-1'
+    ]);
+
+    const createdWithOverride = await client.maps.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 1,
+      id: 'watchtower-custom',
+      label: 'Custom tower',
+      mapId: map.id,
+      position: {
+        x: 32,
+        z: 32
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+    expect(createdWithOverride.entity.id).toBe('watchtower-custom');
+
+    await expect(
+      client.maps.updateStaticEntity({
+        expectedRevision: 1,
+        id: 'watchtower-custom',
+        mapId: map.id,
+        state: 'disabled'
+      })
+    ).rejects.toThrow('Expected revision 1 but found 2');
+
+    const updated = await client.maps.updateStaticEntity({
+      expectedRevision: 2,
+      id: 'watchtower-custom',
+      mapId: map.id,
+      state: 'disabled'
+    });
+    expect(updated.mapRevision).toBe(3);
+    expect(updated.entity.state).toBe('disabled');
+
+    const deleted = await client.maps.deleteStaticEntity({
+      expectedRevision: 3,
+      id: 'watchtower-custom',
+      mapId: map.id
+    });
+    expect(deleted.mapRevision).toBe(4);
+    expect(deleted.entity.id).toBe('watchtower-custom');
   });
 
   test('supports infinite-vector authored routes through the public API', async () => {
@@ -295,7 +563,64 @@ describe('API server map routes', () => {
       }
     );
     const islandUpdate = islandUpdateResponse.json as Record<string, unknown>;
-    expect((islandUpdate.island as Record<string, unknown>).name).toBe('Main Island');
+    expect((islandUpdate.island as Record<string, unknown>).name).toBe(
+      'Main Island'
+    );
+
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 16,
+        heightMeters: 20,
+        widthMeters: 16
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 16,
+        widthMeters: 16
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'lighthouse-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/lighthouse.glb',
+        sizeBytes: 123
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/lighthouse.glb',
+        sizeBytes: 456
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'landmark',
+      id: 'lighthouse',
+      name: 'Lighthouse',
+      status: 'active',
+      tags: []
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 3,
+      id: 'lighthouse-1',
+      label: 'Harbor lighthouse',
+      mapId: created.id as string,
+      position: {
+        x: 100,
+        z: 100
+      },
+      rotation: {
+        yaw: 15
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
 
     const chunkResponse = await request(
       'GET',
@@ -303,6 +628,22 @@ describe('API server map routes', () => {
     );
     const chunk = chunkResponse.json as Record<string, unknown>;
     expect((chunk.heights as unknown[]).length).toBe(33 * 33);
+    expect(chunk.staticEntities as unknown[]).toHaveLength(1);
+    expect(
+      (chunk.staticEntities as Array<Record<string, unknown>>)[0]?.id
+    ).toBe('lighthouse-1');
+
+    const binaryChunk = await decodeMapChunkBinary(
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
+        chunkX: 0,
+        chunkZ: 0,
+        mapId: created.id as string
+      })
+    );
+    expect(binaryChunk.staticEntities).toHaveLength(1);
+    expect(binaryChunk.staticEntities[0]?.rotation.yaw).toBe(15);
   });
 
   test('supports exported slice routes through the public API', async () => {
@@ -332,7 +673,81 @@ describe('API server map routes', () => {
         ]
       }
     );
-    expect((polygonResponse.json as Record<string, unknown>).mapRevision).toBe(1);
+    expect((polygonResponse.json as Record<string, unknown>).mapRevision).toBe(
+      1
+    );
+
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 20,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 20,
+        widthMeters: 20
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'export-watchtower-v1',
+      instancingEligible: true,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/export-watchtower.glb',
+        sizeBytes: 256
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/export-watchtower-v1.glb',
+        sizeBytes: 128
+      },
+      status: 'ready'
+    });
+    const archetype = repository.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'landmark',
+      id: 'export-watchtower',
+      name: 'Export Watchtower',
+      status: 'active',
+      tags: ['stone', 'coastal']
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 1,
+      id: 'watchtower-center',
+      label: null,
+      mapId: created.id as string,
+      position: {
+        x: 100,
+        z: 100
+      },
+      rotation: {
+        yaw: 15
+      },
+      scale: 1,
+      state: 'active',
+      yOffset: 0
+    });
+    repository.createStaticEntity({
+      archetypeId: archetype.id,
+      expectedRevision: 2,
+      id: 'watchtower-edge',
+      label: 'Edge tower',
+      mapId: created.id as string,
+      position: {
+        x: 325,
+        z: 110
+      },
+      rotation: {
+        yaw: 0
+      },
+      scale: 1,
+      state: 'disabled',
+      yOffset: 0.5
+    });
 
     const exportResponse = await request(
       'POST',
@@ -345,7 +760,7 @@ describe('API server map routes', () => {
           minZ: 0
         },
         chunkSizeTiles: 16,
-        expectedRevision: 1,
+        expectedRevision: 3,
         kind: 'finite-vector-slice',
         mapId: created.id,
         metersPerTile: 10,
@@ -354,25 +769,90 @@ describe('API server map routes', () => {
     );
     const exported = exportResponse.json as Record<string, unknown>;
     expect(exported.kind).toBe('finite-vector-slice');
-    expect((exported.export as Record<string, unknown>).sourceMapId).toBe(created.id);
+    expect((exported.export as Record<string, unknown>).sourceMapId).toBe(
+      created.id
+    );
+    const exportStaticEntities = (exported.export as Record<string, unknown>)
+      .staticEntities as Record<string, unknown>;
+    expect(exportStaticEntities.entityCount).toBe(2);
+    expect(exportStaticEntities.archetypeCount).toBe(1);
+    expect(
+      (
+        exportStaticEntities.manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
+    expect(exportStaticEntities.fullManifestHash).toBe(
+      createHash('sha256')
+        .update(
+          stringifyStaticEntityExportManifest(
+            exportStaticEntities.manifest as Parameters<
+              typeof stringifyStaticEntityExportManifest
+            >[0]
+          )
+        )
+        .digest('hex')
+    );
 
     const listedExportsResponse = await request(
       'GET',
       `/api/maps/${created.id as string}/exports`
     );
-    const listedExports = listedExportsResponse.json as Array<Record<string, unknown>>;
+    const listedExports = listedExportsResponse.json as Array<
+      Record<string, unknown>
+    >;
     expect(listedExports).toHaveLength(1);
     expect(listedExports[0]?.id).toBe(exported.id);
+    expect(
+      (
+        ((listedExports[0]?.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>)?.manifest
+      )
+    ).toBeUndefined();
+    expect(
+      (
+        (listedExports[0]?.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>
+      )?.entityCount
+    ).toBe(2);
 
     const fetchedExportResponse = await request(
       'GET',
       `/api/maps/exports/${exported.id as string}`
     );
     const fetchedExport = fetchedExportResponse.json as Record<string, unknown>;
-    expect((fetchedExport.export as Record<string, unknown>).sourceRevision).toBe(1);
+    expect(
+      (fetchedExport.export as Record<string, unknown>).sourceRevision
+    ).toBe(3);
+    expect(
+      (
+        ((fetchedExport.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>).manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
+
+    const fetchedMapResponse = await request(
+      'GET',
+      `/api/maps/${exported.id as string}`
+    );
+    expect(
+      (
+        (((fetchedMapResponse.json as Record<string, unknown>).export as Record<
+          string,
+          unknown
+        >).staticEntities as Record<string, unknown>).manifest as Array<{
+          archetype: { id: string };
+        }>
+      ).map(entry => entry.archetype.id)
+    ).toEqual(['export-watchtower']);
 
     const chunk = await decodeMapChunkBinary(
-      await (await createTestClient()).maps.getChunkBinary({
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
         chunkX: 0,
         chunkZ: 0,
         mapId: exported.id as string
@@ -380,12 +860,194 @@ describe('API server map routes', () => {
     );
     expect(chunk.mapId).toBe(exported.id as string);
     expect(chunk.tileWidth).toBe(16);
+    expect(chunk.staticEntities.map(entity => entity.id)).toEqual([
+      'watchtower-center'
+    ]);
+
+    const edgeChunk = await decodeMapChunkBinary(
+      await (
+        await createTestClient()
+      ).maps.getChunkBinary({
+        chunkX: 1,
+        chunkZ: 0,
+        mapId: exported.id as string
+      })
+    );
+    expect(edgeChunk.staticEntities.map(entity => entity.id)).toContain(
+      'watchtower-edge'
+    );
 
     const outOfBoundsChunkResponse = await request(
       'GET',
       `/api/maps/${exported.id as string}/chunks/2/0`
     );
     expect(outOfBoundsChunkResponse.response.status).toBe(404);
+  });
+
+  test('processes uploaded GLBs into reviewable runtime assets', async () => {
+    const header = new Uint8Array([
+      0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
+    ]);
+    const payload = new Uint8Array([
+      ...header,
+      0x4a,
+      0x53,
+      0x4f,
+      0x4e,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x7b,
+      0x7d,
+      0x20,
+      0x20
+    ]);
+    const formData = new FormData();
+    formData.set(
+      'file',
+      new File([payload], 'watchtower.glb', {
+        type: 'model/gltf-binary'
+      })
+    );
+
+    const uploadResponse = await requestRaw(
+      new Request('http://localhost/api/maps/assets', {
+        body: formData,
+        method: 'POST'
+      })
+    );
+    expect(uploadResponse.status).toBe(201);
+    const uploaded = (await uploadResponse.json()) as Record<string, unknown>;
+    expect(uploaded.status).toBe('uploaded');
+
+    const finalAsset = await waitForAssetStatus(uploaded.id as string, [
+      'review'
+    ]);
+    expect(finalAsset.runtimeFile).toEqual({
+      contentType: 'model/gltf-binary',
+      path: `runtime/${uploaded.id as string}.glb`,
+      sizeBytes: payload.byteLength
+    });
+    expect(finalAsset.diagnostics).toEqual([
+      'Candidate metadata auto-derived from uploaded asset',
+      'Normalization pipeline completed'
+    ]);
+
+    const runtimeResponse = await requestRaw(
+      new Request(
+        `http://localhost/api/maps/assets/${uploaded.id as string}/runtime`
+      )
+    );
+    expect(runtimeResponse.status).toBe(200);
+    expect(new Uint8Array(await runtimeResponse.arrayBuffer())).toEqual(
+      payload
+    );
+  });
+
+  test('marks invalid uploads as failed with diagnostics', async () => {
+    const formData = new FormData();
+    formData.set(
+      'file',
+      new File([new TextEncoder().encode('not-a-glb')], 'broken.glb', {
+        type: 'model/gltf-binary'
+      })
+    );
+
+    const uploadResponse = await requestRaw(
+      new Request('http://localhost/api/maps/assets', {
+        body: formData,
+        method: 'POST'
+      })
+    );
+    expect(uploadResponse.status).toBe(201);
+    const uploaded = (await uploadResponse.json()) as Record<string, unknown>;
+
+    const finalAsset = await waitForAssetStatus(uploaded.id as string, [
+      'failed'
+    ]);
+    expect(finalAsset.runtimeFile).toBeNull();
+    expect(finalAsset.diagnostics).toEqual([
+      'Candidate metadata auto-derived from uploaded asset',
+      'Uploaded asset is too small to be a valid GLB'
+    ]);
+  });
+
+  test('supports review approval and archetype creation for uploaded assets', async () => {
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 18,
+        heightMeters: 20,
+        widthMeters: 18
+      },
+      collisionClass: 'building-solid',
+      diagnostics: ['Candidate metadata auto-derived from uploaded asset'],
+      footprint: {
+        depthMeters: 18,
+        widthMeters: 18
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'refinery-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1.5,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/refinery.glb',
+        sizeBytes: 512
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/refinery-v1.glb',
+        sizeBytes: 512
+      },
+      status: 'review'
+    });
+
+    const client = await createTestClient();
+    const listed = await client.maps.listAssetVersions({});
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(assetVersion.id);
+
+    const reviewed = await client.maps.updateAssetVersionReview({
+      collisionBox: {
+        depthMeters: 16,
+        heightMeters: 24,
+        widthMeters: 20
+      },
+      diagnostics: ['Candidate metadata auto-derived from uploaded asset', 'Admin adjusted footprint'],
+      footprint: {
+        depthMeters: 16,
+        widthMeters: 20
+      },
+      id: assetVersion.id,
+      instancingEligible: true,
+      maxHeightDeltaMeters: 0.75
+    });
+    expect(reviewed.footprint.widthMeters).toBe(20);
+    expect(reviewed.instancingEligible).toBe(true);
+
+    const ready = await client.maps.approveAssetVersion({
+      id: assetVersion.id
+    });
+    expect(ready.status).toBe('ready');
+
+    const archetype = await client.maps.createArchetype({
+      assetVersionId: assetVersion.id,
+      category: 'industrial',
+      id: 'refinery',
+      name: 'Refinery',
+      status: 'active',
+      tags: ['fuel', 'steel']
+    });
+    expect(archetype.assetVersionId).toBe(assetVersion.id);
+
+    await expect(
+      client.maps.updateAssetVersionReview({
+        id: assetVersion.id,
+        maxHeightDeltaMeters: 1
+      })
+    ).rejects.toThrow('Asset version refinery-v1 is not in review');
   });
 
   test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {
@@ -405,11 +1067,15 @@ describe('API server map routes', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe(
       'http://localhost:5179'
     );
-    expect(response.headers.get('access-control-allow-methods')).toContain('PATCH');
+    expect(response.headers.get('access-control-allow-methods')).toContain(
+      'PATCH'
+    );
   });
 
   test('package exports resolve to real source files', async () => {
-    const packageJson = await Bun.file(resolve(apiRoot, 'package.json')).json() as {
+    const packageJson = (await Bun.file(
+      resolve(apiRoot, 'package.json')
+    ).json()) as {
       exports?: Record<string, string>;
     };
 

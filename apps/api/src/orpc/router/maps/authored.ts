@@ -1,31 +1,57 @@
 import {
+  ApproveAssetVersionInput,
+  ApproveAssetVersionRoute,
   ApplyBooleanInput,
   ApplyBooleanRoute,
+  CreateArchetypeInput,
+  CreateArchetypeRoute,
   CreateControlPointInput,
   CreateControlPointRoute,
+  CreateStaticEntityInput,
+  CreateStaticEntityRoute,
   CreateSourcePolygonInput,
   CreateSourcePolygonRoute,
   DeleteControlPointInput,
   DeleteControlPointRoute,
+  DeleteStaticEntityInput,
+  DeleteStaticEntityRoute,
   DeleteSourcePolygonInput,
   DeleteSourcePolygonRoute,
+  GetArchetypeInput,
+  GetArchetypeRoute,
+  GetAssetVersionInput,
+  GetAssetVersionRoute,
   GetOverviewInput,
   GetOverviewRoute,
+  ListArchetypesInput,
+  ListArchetypesRoute,
+  ListAssetVersionsInput,
+  ListAssetVersionsRoute,
   ListControlPointsInput,
   ListControlPointsRoute,
   ListDerivedIslandsInput,
   ListDerivedIslandsRoute,
+  ListReferencedArchetypesInput,
+  ListReferencedArchetypesRoute,
+  ListStaticEntitiesInput,
+  ListStaticEntitiesRoute,
   ListSourcePolygonsInput,
   ListSourcePolygonsRoute,
+  UpdateArchetypeInput,
+  UpdateArchetypeRoute,
+  UpdateAssetVersionReviewInput,
+  UpdateAssetVersionReviewRoute,
   UpdateControlPointInput,
   UpdateControlPointRoute,
   UpdateDerivedIslandInput,
   UpdateDerivedIslandRoute,
+  UpdateStaticEntityInput,
+  UpdateStaticEntityRoute,
   UpdateSourcePolygonInput,
   UpdateSourcePolygonRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
 
-import { os } from '@orpc/server';
+import { ORPCError, os } from '@orpc/server';
 
 import { getMapRepository } from '@/maps/repository';
 
@@ -37,6 +63,175 @@ const listSourcePolygons = os
   .handler(async ({ input }) => {
     try {
       return getMapRepository().listSourcePolygons(input.mapId, input.status);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listAssetVersions = os
+  .route(ListAssetVersionsRoute)
+  .input(ListAssetVersionsInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listAssetVersions(input.status);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const getAssetVersion = os
+  .route(GetAssetVersionRoute)
+  .input(GetAssetVersionInput)
+  .handler(async ({ input }) => {
+    try {
+      const assetVersion = getMapRepository().getAssetVersion(input.id);
+      if (!assetVersion) {
+        throw new ORPCError('NOT_FOUND', {
+          message: `Asset version ${input.id} was not found`
+        });
+      }
+
+      return assetVersion;
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const updateAssetVersionReview = os
+  .route(UpdateAssetVersionReviewRoute)
+  .input(UpdateAssetVersionReviewInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().reviewAssetVersion(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const approveAssetVersion = os
+  .route(ApproveAssetVersionRoute)
+  .input(ApproveAssetVersionInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().approveAssetVersion(input.id);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const createArchetype = os
+  .route(CreateArchetypeRoute)
+  .input(CreateArchetypeInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().createArchetype(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listArchetypes = os
+  .route(ListArchetypesRoute)
+  .input(ListArchetypesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listArchetypes(input.status);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const getArchetype = os
+  .route(GetArchetypeRoute)
+  .input(GetArchetypeInput)
+  .handler(async ({ input }) => {
+    try {
+      const archetype = getMapRepository().getArchetype(input.id);
+      if (!archetype) {
+        throw new ORPCError('NOT_FOUND', {
+          message: `Archetype ${input.id} was not found`
+        });
+      }
+
+      return archetype;
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const updateArchetype = os
+  .route(UpdateArchetypeRoute)
+  .input(UpdateArchetypeInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().updateArchetype(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listReferencedArchetypes = os
+  .route(ListReferencedArchetypesRoute)
+  .input(ListReferencedArchetypesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listReferencedArchetypes(input.mapId);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const createStaticEntity = os
+  .route(CreateStaticEntityRoute)
+  .input(CreateStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().createStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listStaticEntities = os
+  .route(ListStaticEntitiesRoute)
+  .input(ListStaticEntitiesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listStaticEntityItems(input.mapId);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const updateStaticEntity = os
+  .route(UpdateStaticEntityRoute)
+  .input(UpdateStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().updateStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const deleteStaticEntity = os
+  .route(DeleteStaticEntityRoute)
+  .input(DeleteStaticEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const result = getMapRepository().deleteStaticEntity(input);
+      return {
+        entity: result.result,
+        mapRevision: result.mapRevision
+      };
     } catch (error) {
       return asOrpcError(error);
     }
@@ -164,16 +359,29 @@ const getOverview = os
   });
 
 export const authored = {
+  approveAssetVersion,
   applyBoolean,
+  createArchetype,
   createControlPoint,
+  createStaticEntity,
   createSourcePolygon,
   deleteControlPoint,
+  deleteStaticEntity,
   deleteSourcePolygon,
+  getArchetype,
+  getAssetVersion,
   getOverview,
+  listArchetypes,
+  listAssetVersions,
   listControlPoints,
   listDerivedIslands,
+  listReferencedArchetypes,
+  listStaticEntities,
   listSourcePolygons,
+  updateArchetype,
+  updateAssetVersionReview,
   updateControlPoint,
   updateDerivedIsland,
+  updateStaticEntity,
   updateSourcePolygon
 };

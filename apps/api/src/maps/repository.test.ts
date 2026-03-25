@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
-
-import { isFiniteMap } from 'carrier-contracts/types';
+import {
+  isFiniteMap,
+  stringifyStaticEntityExportManifest
+} from 'carrier-contracts/types';
 
 import { MapRepository, MapRepositoryError } from './repository';
 
@@ -21,6 +24,16 @@ const getChunkCount = (repository: MapRepository) =>
   repository.db
     .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM map_chunks')
     .get()?.count ?? 0;
+
+const hasTable = (repository: MapRepository, name: string) =>
+  Boolean(
+    repository.db
+      .query<
+        { name: string },
+        [string]
+      >(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get(name)
+  );
 
 describe('map repository', () => {
   test('keeps wrapped-classic behavior while exposing revision metadata', () => {
@@ -212,8 +225,13 @@ describe('map repository', () => {
         minX: -18,
         minZ: -18
       });
-      expect(xorResult.retiredPolygonIds).toEqual([left.polygon.id, right.polygon.id]);
-      expect(repository.listSourcePolygons(created.id, 'active')).toHaveLength(2);
+      expect(xorResult.retiredPolygonIds).toEqual([
+        left.polygon.id,
+        right.polygon.id
+      ]);
+      expect(repository.listSourcePolygons(created.id, 'active')).toHaveLength(
+        2
+      );
       expect(repository.listSourcePolygons(created.id)).toHaveLength(4);
 
       const rejectMap = repository.createMap({
@@ -245,8 +263,437 @@ describe('map repository', () => {
       ).toThrow(MapRepositoryError);
 
       expect(rejectMap.id).toBeTruthy();
-      expect(repository.listSourcePolygons(rejectMap.id, 'active')).toHaveLength(2);
+      expect(
+        repository.listSourcePolygons(rejectMap.id, 'active')
+      ).toHaveLength(2);
       expect(repository.getMap(rejectMap.id)?.revision).toBe(2);
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('bootstraps static entity tables and enforces catalog constraints', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      expect(hasTable(repository, 'asset_versions')).toBe(true);
+      expect(hasTable(repository, 'archetypes')).toBe(true);
+      expect(hasTable(repository, 'map_static_entities')).toBe(true);
+
+      const assetVersion = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 16,
+          heightMeters: 22,
+          widthMeters: 18
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 16,
+          widthMeters: 18
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'warehouse-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1.5,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/warehouse.glb',
+          sizeBytes: 1000
+        },
+        runtimeFile: null,
+        status: 'uploaded'
+      });
+      expect(repository.listAssetVersions()).toEqual([assetVersion]);
+      expect(repository.getAssetVersion(assetVersion.id)).toEqual(assetVersion);
+
+      const updatedAssetVersion = repository.updateAssetVersion({
+        diagnostics: ['normalized'],
+        id: assetVersion.id,
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/warehouse-v1.glb',
+          sizeBytes: 1200
+        },
+        status: 'review'
+      });
+      expect(updatedAssetVersion.status).toBe('review');
+      expect(updatedAssetVersion.runtimeFile?.path).toBe(
+        'runtime/warehouse-v1.glb'
+      );
+
+      const reviewedAssetVersion = repository.reviewAssetVersion({
+        collisionBox: {
+          depthMeters: 14,
+          heightMeters: 24,
+          widthMeters: 19
+        },
+        diagnostics: ['normalized', 'reviewed by admin'],
+        footprint: {
+          depthMeters: 14,
+          widthMeters: 19
+        },
+        id: assetVersion.id,
+        instancingEligible: true,
+        maxHeightDeltaMeters: 1.25
+      });
+      expect(reviewedAssetVersion.footprint.widthMeters).toBe(19);
+      expect(reviewedAssetVersion.instancingEligible).toBe(true);
+
+      expect(() =>
+        repository.createArchetype({
+          assetVersionId: assetVersion.id,
+          category: 'industrial',
+          id: 'warehouse-before-ready',
+          name: 'Warehouse Before Ready',
+          status: 'active',
+          tags: []
+        })
+      ).toThrow(MapRepositoryError);
+
+      const readyAssetVersion = repository.approveAssetVersion(assetVersion.id);
+      expect(readyAssetVersion.status).toBe('ready');
+
+      expect(() =>
+        repository.reviewAssetVersion({
+          id: assetVersion.id,
+          maxHeightDeltaMeters: 2
+        })
+      ).toThrow(MapRepositoryError);
+
+      expect(() =>
+        repository.updateAssetVersion({
+          id: assetVersion.id,
+          maxHeightDeltaMeters: 2
+        })
+      ).toThrow(MapRepositoryError);
+
+      const archetype = repository.createArchetype({
+        assetVersionId: assetVersion.id,
+        category: 'industrial',
+        id: 'warehouse',
+        name: 'Warehouse',
+        status: 'active',
+        tags: ['cargo']
+      });
+      expect(repository.listArchetypes()).toEqual([archetype]);
+      expect(repository.listArchetypes('active')).toEqual([archetype]);
+      expect(repository.getArchetype(archetype.id)).toEqual(archetype);
+
+      const updatedArchetype = repository.updateArchetype({
+        category: 'building',
+        id: archetype.id,
+        name: 'Warehouse Depot',
+        status: 'deprecated',
+        tags: ['cargo', 'legacy']
+      });
+      expect(updatedArchetype.name).toBe('Warehouse Depot');
+      expect(updatedArchetype.category).toBe('building');
+      expect(updatedArchetype.status).toBe('deprecated');
+      expect(updatedArchetype.tags).toEqual(['cargo', 'legacy']);
+      expect(
+        new Date(updatedArchetype.updatedAt).getTime()
+      ).toBeGreaterThanOrEqual(new Date(archetype.updatedAt).getTime());
+      expect(repository.listArchetypes('deprecated')).toEqual([
+        updatedArchetype
+      ]);
+
+      expect(() =>
+        repository.updateArchetype({
+          id: 'missing-archetype',
+          name: 'Missing'
+        })
+      ).toThrow(MapRepositoryError);
+
+      expect(() =>
+        repository.createArchetype({
+          assetVersionId: assetVersion.id,
+          category: 'industrial',
+          id: 'warehouse-copy',
+          name: 'Warehouse Copy',
+          status: 'active',
+          tags: []
+        })
+      ).toThrow(MapRepositoryError);
+
+      expect(() =>
+        repository.createArchetype({
+          assetVersionId: 'missing-asset-version',
+          category: 'industrial',
+          id: 'bad-archetype',
+          name: 'Broken',
+          status: 'active',
+          tags: []
+        })
+      ).toThrow(MapRepositoryError);
+
+      const map = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Referenced subset map',
+        seed: 'subset-seed'
+      });
+
+      expect(repository.listReferencedArchetypes(map.id)).toEqual([]);
+
+      const activeArchetype = repository.updateArchetype({
+        id: archetype.id,
+        status: 'active'
+      });
+
+      repository.createStaticEntity({
+        archetypeId: activeArchetype.id,
+        expectedRevision: 0,
+        id: 'warehouse-1',
+        label: null,
+        mapId: map.id,
+        position: {
+          x: 0,
+          z: 0
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+
+      const archivedArchetype = repository.updateArchetype({
+        id: activeArchetype.id,
+        status: 'archived'
+      });
+
+      expect(repository.listReferencedArchetypes(map.id)).toEqual([
+        archivedArchetype
+      ]);
+      expect(() => repository.listReferencedArchetypes('missing-map')).toThrow(
+        MapRepositoryError
+      );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('tracks static entity mutations in map revision and chunk payloads', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const map = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Static entity world',
+        seed: 'entity-seed'
+      });
+      const assetVersion = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 20,
+          heightMeters: 30,
+          widthMeters: 20
+        },
+        collisionClass: 'building-solid',
+        diagnostics: ['review pending'],
+        footprint: {
+          depthMeters: 20,
+          widthMeters: 20
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'watchtower-v1',
+        instancingEligible: true,
+        maxHeightDeltaMeters: 2,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/watchtower.glb',
+          sizeBytes: 1234
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/watchtower.glb',
+          sizeBytes: 2345
+        },
+        status: 'ready'
+      });
+      const archetype = repository.createArchetype({
+        assetVersionId: assetVersion.id,
+        category: 'landmark',
+        id: 'watchtower',
+        name: 'Watchtower',
+        status: 'active',
+        tags: ['stone']
+      });
+
+      const created = repository.createStaticEntity({
+        archetypeId: archetype.id,
+        expectedRevision: 0,
+        label: null,
+        mapId: map.id,
+        position: {
+          x: 315,
+          z: 20
+        },
+        rotation: {
+          yaw: 45
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0.5
+      });
+      expect(created.mapRevision).toBe(1);
+      expect(created.result.id).toBe('watchtower-1');
+
+      const chunk = repository.getMapChunk(map.id, 0, 0);
+      expect(chunk?.staticEntities).toHaveLength(1);
+      expect(chunk?.staticEntities[0]?.id).toBe('watchtower-1');
+      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(1);
+
+      const binaryChunk = repository.getMapChunkBinary(map.id, 0, 0);
+      expect(binaryChunk?.staticEntities).toHaveLength(1);
+      expect(binaryChunk?.staticEntities[0]?.rotation.yaw).toBe(45);
+
+      const createdWithGeneratedSuffix = repository.createStaticEntity({
+        archetypeId: archetype.id,
+        expectedRevision: 1,
+        label: 'South tower',
+        mapId: map.id,
+        position: {
+          x: 32,
+          z: 48
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      expect(createdWithGeneratedSuffix.result.id).toBe('watchtower-2');
+
+      expect(repository.listStaticEntityItems(map.id)).toEqual([
+        {
+          archetype: {
+            assetVersionId: assetVersion.id,
+            category: 'landmark',
+            id: archetype.id,
+            name: 'Watchtower',
+            status: 'active'
+          },
+          entity: created.result
+        },
+        {
+          archetype: {
+            assetVersionId: assetVersion.id,
+            category: 'landmark',
+            id: archetype.id,
+            name: 'Watchtower',
+            status: 'active'
+          },
+          entity: createdWithGeneratedSuffix.result
+        }
+      ]);
+
+      const updated = repository.updateStaticEntity({
+        expectedRevision: 2,
+        id: 'watchtower-1',
+        mapId: map.id,
+        position: {
+          x: 360,
+          z: 15
+        },
+        rotation: {
+          yaw: 90
+        },
+        state: 'disabled'
+      });
+      expect(updated.mapRevision).toBe(3);
+      expect(updated.result.state).toBe('disabled');
+
+      expect(repository.getMapChunk(map.id, 0, 0)?.staticEntities).toHaveLength(
+        1
+      );
+      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(
+        1
+      );
+
+      expect(() =>
+        repository.createStaticEntity({
+          archetypeId: 'missing-archetype',
+          expectedRevision: 3,
+          id: 'broken',
+          label: null,
+          mapId: map.id,
+          position: {
+            x: 0,
+            z: 0
+          },
+          rotation: {
+            yaw: 0
+          },
+          scale: 1,
+          state: 'active',
+          yOffset: 0
+        })
+      ).toThrow(MapRepositoryError);
+
+      expect(() =>
+        repository.createStaticEntity({
+          archetypeId: archetype.id,
+          expectedRevision: 3,
+          id: 'watchtower-2',
+          label: 'Duplicate',
+          mapId: map.id,
+          position: {
+            x: 0,
+            z: 0
+          },
+          rotation: {
+            yaw: 0
+          },
+          scale: 1,
+          state: 'active',
+          yOffset: 0
+        })
+      ).toThrow(MapRepositoryError);
+
+      repository.updateArchetype({
+        id: archetype.id,
+        status: 'archived'
+      });
+      expect(repository.listStaticEntityItems(map.id)[0]?.archetype.status).toBe(
+        'archived'
+      );
+      expect(() =>
+        repository.createStaticEntity({
+          archetypeId: archetype.id,
+          expectedRevision: 3,
+          label: null,
+          mapId: map.id,
+          position: {
+            x: 64,
+            z: 64
+          },
+          rotation: {
+            yaw: 0
+          },
+          scale: 1,
+          state: 'active',
+          yOffset: 0
+        })
+      ).toThrow(MapRepositoryError);
+      expect(() =>
+        repository.updateStaticEntity({
+          expectedRevision: 3,
+          id: 'watchtower-1',
+          mapId: map.id,
+          state: 'active'
+        })
+      ).toThrow(MapRepositoryError);
+
+      const deleted = repository.deleteStaticEntity({
+        expectedRevision: 3,
+        id: 'watchtower-1',
+        mapId: map.id
+      });
+      expect(deleted.mapRevision).toBe(4);
+      expect(repository.listStaticEntities(map.id)).toHaveLength(1);
+      expect(repository.getMap(map.id)?.revision).toBe(4);
     } finally {
       repository.close();
     }
@@ -307,9 +754,10 @@ describe('map repository', () => {
 
       const snapshotCount =
         repository.db
-          .query<{ count: number }, [string]>(
-            'SELECT COUNT(*) AS count FROM map_derived_islands WHERE map_id = ?'
-          )
+          .query<
+            { count: number },
+            [string]
+          >('SELECT COUNT(*) AS count FROM map_derived_islands WHERE map_id = ?')
           .get(exported.id)?.count ?? 0;
       expect(snapshotCount).toBeGreaterThan(0);
 
@@ -340,9 +788,267 @@ describe('map repository', () => {
         z: 160
       });
 
-      expect(repository.findExport(exported.id)?.export?.sourceRevision).toBe(1);
-      expect(repository.getMapChunk(exported.id, 0, 0)?.heights).toEqual(exportedChunk?.heights);
-      expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(beforeExportChunk?.heights);
+      expect(repository.findExport(exported.id)?.export?.sourceRevision).toBe(
+        1
+      );
+      expect(repository.getMapChunk(exported.id, 0, 0)?.heights).toEqual(
+        exportedChunk?.heights
+      );
+      expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(
+        beforeExportChunk?.heights
+      );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('snapshots overlapping static entities and manifest hashes into exports', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Static export world',
+        seed: 'static-export-seed'
+      });
+      const watchtowerAsset = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 24,
+          heightMeters: 32,
+          widthMeters: 24
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 24,
+          widthMeters: 24
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'watchtower-v1',
+        instancingEligible: true,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/watchtower.glb',
+          sizeBytes: 256
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/watchtower-v1.glb',
+          sizeBytes: 128
+        },
+        status: 'ready'
+      });
+      const windmillAsset = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 20,
+          heightMeters: 28,
+          widthMeters: 20
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 20,
+          widthMeters: 20
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'windmill-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/windmill.glb',
+          sizeBytes: 200
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/windmill-v1.glb',
+          sizeBytes: 150
+        },
+        status: 'ready'
+      });
+      const watchtower = repository.createArchetype({
+        assetVersionId: watchtowerAsset.id,
+        category: 'landmark',
+        id: 'watchtower',
+        name: 'Watchtower',
+        status: 'active',
+        tags: ['stone', 'coastal']
+      });
+      const windmill = repository.createArchetype({
+        assetVersionId: windmillAsset.id,
+        category: 'industrial',
+        id: 'windmill',
+        name: 'Windmill',
+        status: 'active',
+        tags: ['farm']
+      });
+
+      repository.createStaticEntity({
+        archetypeId: windmill.id,
+        expectedRevision: 0,
+        id: 'windmill-edge',
+        label: 'Edge windmill',
+        mapId: created.id,
+        position: {
+          x: 405,
+          z: 90
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: watchtower.id,
+        expectedRevision: 1,
+        id: 'watchtower-center',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 100,
+          z: 100
+        },
+        rotation: {
+          yaw: 45
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0.5
+      });
+      repository.createStaticEntity({
+        archetypeId: watchtower.id,
+        expectedRevision: 2,
+        id: 'watchtower-outside',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 450,
+          z: 90
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'disabled',
+        yOffset: 0
+      });
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 400,
+          maxZ: 360,
+          minX: 80,
+          minZ: 40
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 3,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Static Slice'
+      });
+
+      expect(exported.export?.staticEntities?.entityCount).toBe(2);
+      expect(exported.export?.staticEntities?.archetypeCount).toBe(2);
+      expect(exported.export?.staticEntities?.manifest.map(entry => entry.archetype.id)).toEqual([
+        'watchtower',
+        'windmill'
+      ]);
+
+      const manifest = exported.export?.staticEntities?.manifest ?? [];
+      const expectedHash = createHash('sha256')
+        .update(stringifyStaticEntityExportManifest(manifest))
+        .digest('hex');
+      expect(exported.export?.staticEntities?.fullManifestHash).toBe(
+        expectedHash
+      );
+
+      const exportedEntities = repository.listStaticEntities(exported.id);
+      expect(
+        exportedEntities.map(entity => entity.id).sort((left, right) =>
+          left.localeCompare(right)
+        )
+      ).toEqual(['watchtower-center', 'windmill-edge']);
+      expect(
+        exportedEntities.find(entity => entity.id === 'watchtower-center')
+      ).toMatchObject({
+        position: {
+          x: 20,
+          z: 60
+        }
+      });
+      expect(
+        exportedEntities.find(entity => entity.id === 'windmill-edge')
+      ).toMatchObject({
+        position: {
+          x: 325,
+          z: 50
+        }
+      });
+
+      expect(
+        repository.getMapChunk(exported.id, 0, 0)?.staticEntities.map(
+          entity => entity.id
+        )
+      ).toEqual(['watchtower-center']);
+      expect(
+        repository.getMapChunk(exported.id, 1, 0)?.staticEntities.map(
+          entity => entity.id
+        )
+      ).toContain('windmill-edge');
+
+      const listedExport = repository.listExports(created.id)[0];
+      expect(listedExport?.export?.staticEntities?.manifest).toBeUndefined();
+      expect(listedExport?.export?.staticEntities?.entityCount).toBe(2);
+
+      expect(
+        repository.findExport(exported.id)?.export?.staticEntities?.manifest
+      ).toEqual(manifest);
+      expect(repository.getMap(exported.id)?.export?.staticEntities?.manifest).toEqual(
+        manifest
+      );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('stores a stable empty static-entity manifest hash for exports without entities', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Empty export world',
+        seed: 'empty-export-seed'
+      });
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 0,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Empty Slice'
+      });
+
+      expect(exported.export?.staticEntities).toEqual({
+        archetypeCount: 0,
+        entityCount: 0,
+        fullManifestHash: createHash('sha256').update('[]').digest('hex'),
+        manifest: []
+      });
+      expect(
+        repository.listExports(created.id)[0]?.export?.staticEntities?.manifest
+      ).toBeUndefined();
     } finally {
       repository.close();
     }
@@ -404,8 +1110,12 @@ describe('map repository', () => {
 
       const splitIslands = repository.listDerivedIslands(created.id);
       expect(splitIslands).toHaveLength(2);
-      expect(splitIslands.some(island => island.id === largeIsland?.id)).toBe(true);
-      expect(splitIslands.some(island => island.id === smallIsland?.id)).toBe(false);
+      expect(splitIslands.some(island => island.id === largeIsland?.id)).toBe(
+        true
+      );
+      expect(splitIslands.some(island => island.id === smallIsland?.id)).toBe(
+        false
+      );
 
       const lineage = repository.listDerivedIslandLineage(created.id);
       expect(lineage.some(row => row.operation === 'merge')).toBe(true);
@@ -457,7 +1167,9 @@ describe('map repository', () => {
       expect(negative?.chunkX).toBe(-1);
 
       for (let row = 0; row < 33; row += 1) {
-        expect(chunkA?.heights[row * 33 + 32]).toBe(adjacent?.heights[row * 33]);
+        expect(chunkA?.heights[row * 33 + 32]).toBe(
+          adjacent?.heights[row * 33]
+        );
       }
     } finally {
       repository.close();

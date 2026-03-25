@@ -1,6 +1,7 @@
 import {
   getSurfaceMaterialById,
   type MapChunkMetadata,
+  type StaticEntity,
   type MapSurfaceMaterial
 } from './index';
 
@@ -14,6 +15,7 @@ type RuntimeChunkMetadata = Omit<MapChunkMetadata, 'materials'>;
 type BinaryMapChunkInput = Omit<MapChunkMetadata, 'materials'> & {
   heights: unknown;
   materials?: unknown;
+  staticEntitiesJson?: unknown;
 };
 
 export type RuntimeMapChunk = RuntimeChunkMetadata & {
@@ -48,6 +50,32 @@ const normalizeMetadata = (
   tileHeight: asNumber(chunk.tileHeight),
   tileWidth: asNumber(chunk.tileWidth)
 });
+
+const decodeStaticEntities = (
+  staticEntities: StaticEntity[] | undefined,
+  staticEntitiesJson: unknown
+) => {
+  if (typeof staticEntitiesJson === 'string') {
+    return JSON.parse(staticEntitiesJson) as StaticEntity[];
+  }
+
+  if (Array.isArray(staticEntities)) {
+    return staticEntities.map(entity => ({
+      ...entity,
+      position: {
+        x: Number(entity.position.x),
+        z: Number(entity.position.z)
+      },
+      rotation: {
+        yaw: Number(entity.rotation.yaw)
+      },
+      scale: Number(entity.scale),
+      yOffset: Number(entity.yOffset)
+    }));
+  }
+
+  return [];
+};
 
 export const decodeUint16HeightsBlob = async (
   blob: Blob,
@@ -89,6 +117,10 @@ export const decodeMapChunkBinary = async (
     ...chunk,
     heights: heightsBlob
   });
+  const staticEntities = decodeStaticEntities(
+    chunk.staticEntities,
+    chunk.staticEntitiesJson
+  );
 
   return {
     ...metadata,
@@ -100,6 +132,7 @@ export const decodeMapChunkBinary = async (
             metadata.layers.height.step
           )
         : await decodeFloat32HeightsBlob(heightsBlob),
+    staticEntities,
     materials: materialsBlob ? await decodeMaterialBlob(materialsBlob) : undefined
   };
 };

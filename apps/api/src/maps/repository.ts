@@ -1,9 +1,11 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import type {
   ApplyBooleanOutput,
+  Archetype,
+  AssetVersion,
   BooleanOperation,
   ControlPoint,
   CreateMapExportInput,
@@ -12,12 +14,22 @@ import type {
   MapChunk,
   MapGenerator,
   MapMetadata,
+  MapMetadataSummary,
   MapOverview,
   SourcePolygon,
   SourcePolygonParams,
   SourcePolygonStatus,
+  StaticEntity,
+  StaticEntityExportManifest,
+  StaticEntityExportManifestEntry,
+  StaticEntityArchetypeSummary,
+  StaticEntityListItem,
   WorldBounds,
   WorldPoint
+} from 'carrier-contracts';
+import {
+  normalizeStaticEntityExportManifest,
+  slugify
 } from 'carrier-contracts';
 
 import {
@@ -68,6 +80,10 @@ type MapRow = {
   name: string | null;
   revision: number;
   seed: string;
+  staticEntityExportArchetypeCount: number | null;
+  staticEntityExportEntityCount: number | null;
+  staticEntityExportManifestHash: string | null;
+  staticEntityExportManifestJson: string | null;
   sourceMapId: string | null;
   sourceRevision: number | null;
   terrainRevision: number;
@@ -135,6 +151,49 @@ type DerivedIslandRow = {
   updatedAt: string;
 };
 
+type AssetVersionRow = {
+  collisionBoxJson: string;
+  collisionClass: string;
+  createdAt: string;
+  diagnosticsJson: string;
+  footprintJson: string;
+  groundingPolicy: string;
+  id: string;
+  instancingEligible: number;
+  mapPreviewCategory: string | null;
+  maxHeightDeltaMeters: number;
+  originalFileJson: string;
+  runtimeFileJson: string | null;
+  status: string;
+  updatedAt: string;
+};
+
+type ArchetypeRow = {
+  assetVersionId: string;
+  category: string;
+  createdAt: string;
+  id: string;
+  name: string;
+  status: string;
+  tagsJson: string;
+  updatedAt: string;
+};
+
+type StaticEntityRow = {
+  archetypeId: string;
+  createdAt: string;
+  id: string;
+  label: string | null;
+  mapId: string;
+  positionX: number;
+  positionZ: number;
+  scale: number;
+  state: string;
+  updatedAt: string;
+  yOffset: number;
+  yaw: number;
+};
+
 type DerivedIslandGeometryRecord = DerivedIsland & {
   geometry: WorldPoint[];
 };
@@ -150,6 +209,69 @@ type LineageRow = {
 
 type MutateTerrainOptions = {
   expectedRevision: number;
+  mapId: string;
+};
+
+type MutateStaticEntityOptions = {
+  expectedRevision: number;
+  mapId: string;
+};
+
+type CreateAssetVersionInput = Omit<AssetVersion, 'createdAt' | 'updatedAt'>;
+
+type UpdateAssetVersionInput = {
+  id: string;
+  collisionBox?: AssetVersion['collisionBox'];
+  collisionClass?: AssetVersion['collisionClass'];
+  diagnostics?: AssetVersion['diagnostics'];
+  footprint?: AssetVersion['footprint'];
+  groundingPolicy?: AssetVersion['groundingPolicy'];
+  instancingEligible?: AssetVersion['instancingEligible'];
+  maxHeightDeltaMeters?: AssetVersion['maxHeightDeltaMeters'];
+  originalFile?: AssetVersion['originalFile'];
+  runtimeFile?: AssetVersion['runtimeFile'];
+  status?: AssetVersion['status'];
+};
+
+type CreateArchetypeInput = Omit<Archetype, 'createdAt' | 'updatedAt'>;
+
+type UpdateArchetypeInput = {
+  category?: Archetype['category'];
+  id: string;
+  name?: string;
+  status?: Archetype['status'];
+  tags?: Archetype['tags'];
+};
+
+type ReviewAssetVersionInput = Omit<
+  UpdateAssetVersionInput,
+  'originalFile' | 'runtimeFile' | 'status'
+>;
+
+type CreateStaticEntityInput = Omit<
+  StaticEntity,
+  'createdAt' | 'updatedAt' | 'id'
+> & {
+  expectedRevision: number;
+  id?: string;
+};
+
+type UpdateStaticEntityInput = {
+  expectedRevision: number;
+  mapId: string;
+  id: string;
+  archetypeId?: string;
+  label?: string | null;
+  position?: StaticEntity['position'];
+  rotation?: StaticEntity['rotation'];
+  scale?: number;
+  state?: StaticEntity['state'];
+  yOffset?: number;
+};
+
+type DeleteStaticEntityInput = {
+  expectedRevision: number;
+  id: string;
   mapId: string;
 };
 
@@ -195,6 +317,10 @@ const MAP_ROW_COLUMNS = `
   name,
   revision,
   seed,
+  static_entity_export_archetype_count AS staticEntityExportArchetypeCount,
+  static_entity_export_entity_count AS staticEntityExportEntityCount,
+  static_entity_export_manifest_hash AS staticEntityExportManifestHash,
+  static_entity_export_manifest_json AS staticEntityExportManifestJson,
   source_map_id AS sourceMapId,
   source_revision AS sourceRevision,
   terrain_revision AS terrainRevision,
@@ -249,6 +375,49 @@ const DERIVED_ISLAND_COLUMNS = `
   updated_at AS updatedAt
 `;
 
+const ASSET_VERSION_COLUMNS = `
+  collision_box_json AS collisionBoxJson,
+  collision_class AS collisionClass,
+  created_at AS createdAt,
+  diagnostics_json AS diagnosticsJson,
+  footprint_json AS footprintJson,
+  grounding_policy AS groundingPolicy,
+  id,
+  instancing_eligible AS instancingEligible,
+  map_preview_category AS mapPreviewCategory,
+  max_height_delta_meters AS maxHeightDeltaMeters,
+  original_file_json AS originalFileJson,
+  runtime_file_json AS runtimeFileJson,
+  status,
+  updated_at AS updatedAt
+`;
+
+const ARCHETYPE_COLUMNS = `
+  asset_version_id AS assetVersionId,
+  category,
+  created_at AS createdAt,
+  id,
+  name,
+  status,
+  tags_json AS tagsJson,
+  updated_at AS updatedAt
+`;
+
+const STATIC_ENTITY_COLUMNS = `
+  archetype_id AS archetypeId,
+  created_at AS createdAt,
+  id,
+  label,
+  map_id AS mapId,
+  position_x AS positionX,
+  position_z AS positionZ,
+  scale,
+  state,
+  updated_at AS updatedAt,
+  y_offset AS yOffset,
+  yaw
+`;
+
 const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
   const tiles = meters / metersPerTile;
 
@@ -261,7 +430,10 @@ const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
   return tiles;
 };
 
-const deriveTileCoordinateFromMeters = (meters: number, metersPerTile: number) => {
+const deriveTileCoordinateFromMeters = (
+  meters: number,
+  metersPerTile: number
+) => {
   const tiles = meters / metersPerTile;
 
   if (!Number.isInteger(tiles)) {
@@ -279,12 +451,60 @@ const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
 const toCanonicalChunkCoordinate = (chunk: number, chunkCount: number) =>
   ((chunk % chunkCount) + chunkCount) % chunkCount;
 
+const rotateWorldOffset = (x: number, z: number, yawDegrees: number) => {
+  const yawRadians = (yawDegrees * Math.PI) / 180;
+  const cosine = Math.cos(yawRadians);
+  const sine = Math.sin(yawRadians);
+
+  return {
+    x: x * cosine - z * sine,
+    z: x * sine + z * cosine
+  };
+};
+
 const chunkRowToRecord = (row: ChunkRow) => ({
   ...row,
   heights: decodeFloat32Heights(row.heights)
 });
 
-const mapRowToMetadata = (row: MapRow): MapMetadata => {
+const getStaticEntityExportDetail = (
+  row: Pick<
+    MapRow,
+    | 'staticEntityExportArchetypeCount'
+    | 'staticEntityExportEntityCount'
+    | 'staticEntityExportManifestHash'
+    | 'staticEntityExportManifestJson'
+  >,
+  options: { includeManifest: boolean }
+) => {
+  if (
+    row.staticEntityExportArchetypeCount === null ||
+    row.staticEntityExportEntityCount === null ||
+    row.staticEntityExportManifestHash === null
+  ) {
+    return undefined;
+  }
+
+  const summary = {
+    archetypeCount: row.staticEntityExportArchetypeCount,
+    entityCount: row.staticEntityExportEntityCount,
+    fullManifestHash: row.staticEntityExportManifestHash
+  };
+
+  if (!options.includeManifest || row.staticEntityExportManifestJson === null) {
+    return summary;
+  }
+
+  return {
+    ...summary,
+    manifest: JSON.parse(row.staticEntityExportManifestJson) as StaticEntityExportManifest
+  };
+};
+
+const mapRowToMetadata = (
+  row: MapRow,
+  options: { includeExportManifest: boolean }
+): MapMetadata => {
   const resolution = {
     chunkSizeTiles: row.chunkSizeTiles,
     metersPerTile: row.metersPerTile
@@ -305,12 +525,19 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
             minZ: row.exportBoundsMinZ
           },
           exportedAt: row.exportedAt,
+          staticEntities: getStaticEntityExportDetail(row, {
+            includeManifest: options.includeExportManifest
+          }),
           sourceMapId: row.sourceMapId,
           sourceRevision: row.sourceRevision
         }
       : undefined;
 
-  if (row.extentKind === 'finite' && row.widthTiles !== null && row.heightTiles !== null) {
+  if (
+    row.extentKind === 'finite' &&
+    row.widthTiles !== null &&
+    row.heightTiles !== null
+  ) {
     return {
       createdAt: row.createdAt,
       extent: {
@@ -323,7 +550,10 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
         wrapZ: row.wrapZ === 1
       },
       export: exportMetadata,
-      generator: row.kind === 'wrapped-classic' ? (row.generator as MapMetadata['generator']) : undefined,
+      generator:
+        row.kind === 'wrapped-classic'
+          ? (row.generator as MapMetadata['generator'])
+          : undefined,
       id: row.id,
       kind: row.kind as MapMetadata['kind'],
       name: row.name,
@@ -349,6 +579,11 @@ const mapRowToMetadata = (row: MapRow): MapMetadata => {
   };
 };
 
+const mapRowToSummaryMetadata = (row: MapRow): MapMetadataSummary =>
+  mapRowToMetadata(row, {
+    includeExportManifest: false
+  });
+
 const rowToBounds = (
   row:
     | Pick<SourcePolygonRow, 'bboxMinX' | 'bboxMinZ' | 'bboxMaxX' | 'bboxMaxZ'>
@@ -368,6 +603,22 @@ const worldBoundsToPolygon = (bounds: WorldBounds): WorldPoint[] => [
 ];
 
 const parseJson = <Value>(value: string) => JSON.parse(value) as Value;
+
+const normalizeSqliteError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return error;
+  }
+
+  if (error.message.includes('UNIQUE constraint failed')) {
+    return new MapRepositoryError('CONFLICT', error.message);
+  }
+
+  if (error.message.includes('FOREIGN KEY constraint failed')) {
+    return new MapRepositoryError('BAD_REQUEST', error.message);
+  }
+
+  return error;
+};
 
 const sourcePolygonRowToModel = (row: SourcePolygonRow): SourcePolygon => ({
   bbox: rowToBounds(row),
@@ -394,7 +645,9 @@ const controlPointRowToModel = (row: ControlPointRow): ControlPoint => ({
   z: row.z
 });
 
-const derivedIslandRowToModel = (row: DerivedIslandRow): DerivedIslandGeometryRecord => {
+const derivedIslandRowToModel = (
+  row: DerivedIslandRow
+): DerivedIslandGeometryRecord => {
   const geometry = parseJson<WorldPoint[]>(row.geometryJson);
 
   return {
@@ -413,7 +666,9 @@ const derivedIslandRowToModel = (row: DerivedIslandRow): DerivedIslandGeometryRe
   };
 };
 
-const toPublicDerivedIsland = (island: DerivedIslandGeometryRecord): DerivedIsland => ({
+const toPublicDerivedIsland = (
+  island: DerivedIslandGeometryRecord
+): DerivedIsland => ({
   areaMeters2: island.areaMeters2,
   bbox: island.bbox,
   centroid: island.centroid,
@@ -426,6 +681,117 @@ const toPublicDerivedIsland = (island: DerivedIslandGeometryRecord): DerivedIsla
   sourcePolygonIds: island.sourcePolygonIds,
   updatedAt: island.updatedAt
 });
+
+const assetVersionRowToModel = (row: AssetVersionRow): AssetVersion => ({
+  collisionBox: parseJson<AssetVersion['collisionBox']>(row.collisionBoxJson),
+  collisionClass: row.collisionClass,
+  createdAt: row.createdAt,
+  diagnostics: parseJson<AssetVersion['diagnostics']>(row.diagnosticsJson),
+  footprint: parseJson<AssetVersion['footprint']>(row.footprintJson),
+  groundingPolicy: row.groundingPolicy,
+  id: row.id,
+  instancingEligible: row.instancingEligible === 1,
+  maxHeightDeltaMeters: row.maxHeightDeltaMeters,
+  originalFile: parseJson<AssetVersion['originalFile']>(row.originalFileJson),
+  runtimeFile: row.runtimeFileJson
+    ? parseJson<AssetVersion['runtimeFile']>(row.runtimeFileJson)
+    : null,
+  status: row.status as AssetVersion['status'],
+  updatedAt: row.updatedAt
+});
+
+const archetypeRowToModel = (row: ArchetypeRow): Archetype => ({
+  assetVersionId: row.assetVersionId,
+  category: row.category as Archetype['category'],
+  createdAt: row.createdAt,
+  id: row.id,
+  name: row.name,
+  status: row.status as Archetype['status'],
+  tags: parseJson<Archetype['tags']>(row.tagsJson),
+  updatedAt: row.updatedAt
+});
+
+const archetypeToStaticEntitySummary = (
+  archetype: Archetype
+): StaticEntityArchetypeSummary => ({
+  assetVersionId: archetype.assetVersionId,
+  category: archetype.category,
+  id: archetype.id,
+  name: archetype.name,
+  status: archetype.status
+});
+
+const staticEntityRowToModel = (row: StaticEntityRow): StaticEntity => ({
+  archetypeId: row.archetypeId,
+  createdAt: row.createdAt,
+  id: row.id,
+  label: row.label,
+  mapId: row.mapId,
+  position: {
+    x: row.positionX,
+    z: row.positionZ
+  },
+  rotation: {
+    yaw: row.yaw
+  },
+  scale: row.scale,
+  state: row.state as StaticEntity['state'],
+  updatedAt: row.updatedAt,
+  yOffset: row.yOffset
+});
+
+const getStaticEntityFootprintBounds = (
+  entity: StaticEntity,
+  assetVersion: Pick<AssetVersion, 'footprint'>
+): WorldBounds => {
+  const halfWidth = assetVersion.footprint.widthMeters * entity.scale * 0.5;
+  const halfDepth = assetVersion.footprint.depthMeters * entity.scale * 0.5;
+  const corners = [
+    rotateWorldOffset(-halfWidth, -halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(halfWidth, -halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(halfWidth, halfDepth, entity.rotation.yaw),
+    rotateWorldOffset(-halfWidth, halfDepth, entity.rotation.yaw)
+  ].map(corner => ({
+    x: entity.position.x + corner.x,
+    z: entity.position.z + corner.z
+  }));
+
+  return {
+    maxX: Math.max(...corners.map(corner => corner.x)),
+    maxZ: Math.max(...corners.map(corner => corner.z)),
+    minX: Math.min(...corners.map(corner => corner.x)),
+    minZ: Math.min(...corners.map(corner => corner.z))
+  };
+};
+
+const assetVersionHasChanges = (
+  current: AssetVersion,
+  next: AssetVersion
+) =>
+  JSON.stringify({
+    collisionBox: current.collisionBox,
+    collisionClass: current.collisionClass,
+    diagnostics: current.diagnostics,
+    footprint: current.footprint,
+    groundingPolicy: current.groundingPolicy,
+    instancingEligible: current.instancingEligible,
+    maxHeightDeltaMeters: current.maxHeightDeltaMeters,
+    originalFile: current.originalFile,
+    runtimeFile: current.runtimeFile,
+    status: current.status
+  }) !==
+  JSON.stringify({
+    collisionBox: next.collisionBox,
+    collisionClass: next.collisionClass,
+    diagnostics: next.diagnostics,
+    footprint: next.footprint,
+    groundingPolicy: next.groundingPolicy,
+    instancingEligible: next.instancingEligible,
+    maxHeightDeltaMeters: next.maxHeightDeltaMeters,
+    originalFile: next.originalFile,
+    runtimeFile: next.runtimeFile,
+    status: next.status
+  });
 
 const ensurePolygonVertices = (vertices: readonly WorldPoint[]) => {
   const canonical = canonicalizeVertices(vertices);
@@ -461,7 +827,9 @@ export class MapRepository {
 
   constructor(options: MapRepositoryOptions = {}) {
     this.db = new Database(
-      ensureDatabasePath(options.dbPath ?? process.env.API_DB_PATH ?? '.data/carrier.sqlite')
+      ensureDatabasePath(
+        options.dbPath ?? process.env.API_DB_PATH ?? '.data/carrier.sqlite'
+      )
     );
     this.migrate();
   }
@@ -485,11 +853,13 @@ export class MapRepository {
 
   private findMapRow(id: string) {
     return this.db
-      .query<MapRow, [string]>(`
+      .query<MapRow, [string]>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         WHERE id = ?
-      `)
+      `
+      )
       .get(id);
   }
 
@@ -519,8 +889,15 @@ export class MapRepository {
   private ensureExportedMapRow(id: string) {
     const row = this.getMapRowOrThrow(id);
 
-    if (row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
-      throw new MapRepositoryError('BAD_REQUEST', `Map ${id} is not an exported slice`);
+    if (
+      row.sourceMapId === null ||
+      row.sourceRevision === null ||
+      row.exportedAt === null
+    ) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Map ${id} is not an exported slice`
+      );
     }
 
     return row;
@@ -535,9 +912,14 @@ export class MapRepository {
     }
   }
 
-  private getChunkRow(mapId: string, chunkX: number, chunkZ: number): ChunkRow | null {
+  private getChunkRow(
+    mapId: string,
+    chunkX: number,
+    chunkZ: number
+  ): ChunkRow | null {
     return this.db
-      .query<ChunkRow, [string, number, number]>(`
+      .query<ChunkRow, [string, number, number]>(
+        `
         SELECT
           chunk_x AS chunkX,
           chunk_z AS chunkZ,
@@ -551,7 +933,8 @@ export class MapRepository {
           tile_width AS tileWidth
         FROM map_chunks
         WHERE map_id = ? AND chunk_x = ? AND chunk_z = ?
-      `)
+      `
+      )
       .get(mapId, chunkX, chunkZ);
   }
 
@@ -581,8 +964,14 @@ export class MapRepository {
       return this.getChunkRow(row.id, requestedChunkX, requestedChunkZ);
     }
 
-    const canonicalChunkX = toCanonicalChunkCoordinate(requestedChunkX, chunkCountX);
-    const canonicalChunkZ = toCanonicalChunkCoordinate(requestedChunkZ, chunkCountZ);
+    const canonicalChunkX = toCanonicalChunkCoordinate(
+      requestedChunkX,
+      chunkCountX
+    );
+    const canonicalChunkZ = toCanonicalChunkCoordinate(
+      requestedChunkZ,
+      chunkCountZ
+    );
 
     return this.getChunkRow(row.id, canonicalChunkX, canonicalChunkZ);
   }
@@ -593,20 +982,24 @@ export class MapRepository {
   ): SourcePolygonRow[] {
     return status
       ? this.db
-          .query<SourcePolygonRow, [string, string]>(`
+          .query<SourcePolygonRow, [string, string]>(
+            `
             SELECT ${SOURCE_POLYGON_COLUMNS}
             FROM map_source_polygons
             WHERE map_id = ? AND status = ?
             ORDER BY created_at ASC, id ASC
-          `)
+          `
+          )
           .all(mapId, status)
       : this.db
-          .query<SourcePolygonRow, [string]>(`
+          .query<SourcePolygonRow, [string]>(
+            `
             SELECT ${SOURCE_POLYGON_COLUMNS}
             FROM map_source_polygons
             WHERE map_id = ?
             ORDER BY created_at ASC, id ASC
-          `)
+          `
+          )
           .all(mapId);
   }
 
@@ -615,11 +1008,13 @@ export class MapRepository {
     id: string
   ): SourcePolygonRow | null {
     return this.db
-      .query<SourcePolygonRow, [string, string]>(`
+      .query<SourcePolygonRow, [string, string]>(
+        `
         SELECT ${SOURCE_POLYGON_COLUMNS}
         FROM map_source_polygons
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -642,22 +1037,26 @@ export class MapRepository {
 
   private listControlPointRows(mapId: string): ControlPointRow[] {
     return this.db
-      .query<ControlPointRow, [string]>(`
+      .query<ControlPointRow, [string]>(
+        `
         SELECT ${CONTROL_POINT_COLUMNS}
         FROM map_control_points
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
   private getControlPointRow(mapId: string, id: string) {
     return this.db
-      .query<ControlPointRow, [string, string]>(`
+      .query<ControlPointRow, [string, string]>(
+        `
         SELECT ${CONTROL_POINT_COLUMNS}
         FROM map_control_points
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -676,22 +1075,26 @@ export class MapRepository {
 
   private listDerivedIslandRows(mapId: string): DerivedIslandRow[] {
     return this.db
-      .query<DerivedIslandRow, [string]>(`
+      .query<DerivedIslandRow, [string]>(
+        `
         SELECT ${DERIVED_ISLAND_COLUMNS}
         FROM map_derived_islands
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
   private getDerivedIslandRow(mapId: string, id: string) {
     return this.db
-      .query<DerivedIslandRow, [string, string]>(`
+      .query<DerivedIslandRow, [string, string]>(
+        `
         SELECT ${DERIVED_ISLAND_COLUMNS}
         FROM map_derived_islands
         WHERE map_id = ? AND id = ?
-      `)
+      `
+      )
       .get(mapId, id);
   }
 
@@ -708,6 +1111,374 @@ export class MapRepository {
     return row;
   }
 
+  private listAssetVersionRows(
+    status?: AssetVersion['status']
+  ): AssetVersionRow[] {
+    return status
+      ? this.db
+          .query<AssetVersionRow, [string]>(
+            `
+            SELECT ${ASSET_VERSION_COLUMNS}
+            FROM asset_versions
+            WHERE status = ?
+            ORDER BY created_at ASC, id ASC
+          `
+          )
+          .all(status)
+      : this.db
+          .query<AssetVersionRow, []>(
+            `
+            SELECT ${ASSET_VERSION_COLUMNS}
+            FROM asset_versions
+            ORDER BY created_at ASC, id ASC
+          `
+          )
+          .all();
+  }
+
+  private getAssetVersionRow(id: string) {
+    return this.db
+      .query<AssetVersionRow, [string]>(
+        `
+        SELECT ${ASSET_VERSION_COLUMNS}
+        FROM asset_versions
+        WHERE id = ?
+      `
+      )
+      .get(id);
+  }
+
+  private getAssetVersionRowOrThrow(id: string) {
+    const row = this.getAssetVersionRow(id);
+
+    if (!row) {
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Asset version ${id} was not found`
+      );
+    }
+
+    return row;
+  }
+
+  private listArchetypeRows(status?: Archetype['status']): ArchetypeRow[] {
+    if (status) {
+      return this.db
+        .query<ArchetypeRow, [string]>(
+          `
+          SELECT ${ARCHETYPE_COLUMNS}
+          FROM archetypes
+          WHERE status = ?
+          ORDER BY created_at ASC, id ASC
+        `
+        )
+        .all(status);
+    }
+
+    return this.db
+      .query<ArchetypeRow, []>(
+        `
+        SELECT ${ARCHETYPE_COLUMNS}
+        FROM archetypes
+        ORDER BY created_at ASC, id ASC
+      `
+      )
+      .all();
+  }
+
+  private getArchetypeRow(id: string) {
+    return this.db
+      .query<ArchetypeRow, [string]>(
+        `
+        SELECT ${ARCHETYPE_COLUMNS}
+        FROM archetypes
+        WHERE id = ?
+      `
+      )
+      .get(id);
+  }
+
+  private getArchetypeRowOrThrow(id: string) {
+    const row = this.getArchetypeRow(id);
+
+    if (!row) {
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Archetype ${id} was not found`
+      );
+    }
+
+    return row;
+  }
+
+  private getPlaceableArchetypeOrThrow(id: string) {
+    const archetype = archetypeRowToModel(this.getArchetypeRowOrThrow(id));
+
+    if (archetype.status !== 'active') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Archetype ${id} is not active and cannot be placed`
+      );
+    }
+
+    return archetype;
+  }
+
+  private listStaticEntityRows(mapId: string): StaticEntityRow[] {
+    return this.db
+      .query<StaticEntityRow, [string]>(
+        `
+        SELECT ${STATIC_ENTITY_COLUMNS}
+        FROM map_static_entities
+        WHERE map_id = ?
+        ORDER BY created_at ASC, id ASC
+      `
+      )
+      .all(mapId);
+  }
+
+  private getStaticEntityRow(mapId: string, id: string) {
+    return this.db
+      .query<StaticEntityRow, [string, string]>(
+        `
+        SELECT ${STATIC_ENTITY_COLUMNS}
+        FROM map_static_entities
+        WHERE map_id = ? AND id = ?
+      `
+      )
+      .get(mapId, id);
+  }
+
+  private getStaticEntityRowOrThrow(mapId: string, id: string) {
+    const row = this.getStaticEntityRow(mapId, id);
+
+    if (!row) {
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Static entity ${id} was not found for map ${mapId}`
+      );
+    }
+
+    return row;
+  }
+
+  private nextStaticEntityId(mapId: string, archetypeId: string) {
+    const baseId = slugify(archetypeId) || 'entity';
+    const existingIds = new Set(
+      this.listStaticEntityRows(mapId).map(staticEntity => staticEntity.id)
+    );
+    let suffix = 1;
+    let candidate = `${baseId}-${suffix}`;
+
+    while (existingIds.has(candidate)) {
+      suffix += 1;
+      candidate = `${baseId}-${suffix}`;
+    }
+
+    return candidate;
+  }
+
+  private listResolvedStaticEntities(mapId: string) {
+    const entities = this.listStaticEntityRows(mapId).map(staticEntityRowToModel);
+
+    if (entities.length === 0) {
+      return {
+        archetypesById: new Map<string, Archetype>(),
+        assetVersionsById: new Map<string, AssetVersion>(),
+        entities
+      };
+    }
+
+    const referencedArchetypes = this.listReferencedArchetypes(mapId);
+    const archetypesById = new Map(
+      referencedArchetypes.map(archetype => [archetype.id, archetype])
+    );
+    const assetVersionsById = new Map<string, AssetVersion>();
+
+    for (const archetype of referencedArchetypes) {
+      if (!assetVersionsById.has(archetype.assetVersionId)) {
+        assetVersionsById.set(
+          archetype.assetVersionId,
+          assetVersionRowToModel(
+            this.getAssetVersionRowOrThrow(archetype.assetVersionId)
+          )
+        );
+      }
+    }
+
+    return {
+      archetypesById,
+      assetVersionsById,
+      entities
+    };
+  }
+
+  private getStaticEntityExportManifestEntry(
+    archetype: Archetype,
+    assetVersion: AssetVersion
+  ): StaticEntityExportManifestEntry {
+    if (assetVersion.runtimeFile === null) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset version ${assetVersion.id} is missing a runtime file for exported manifest snapshotting`
+      );
+    }
+
+    return {
+      archetype: {
+        assetVersionId: archetype.assetVersionId,
+        category: archetype.category,
+        id: archetype.id,
+        name: archetype.name,
+        status: archetype.status,
+        tags: archetype.tags
+      },
+      assetVersion: {
+        collisionBox: assetVersion.collisionBox,
+        collisionClass: assetVersion.collisionClass,
+        footprint: assetVersion.footprint,
+        groundingPolicy: assetVersion.groundingPolicy,
+        id: assetVersion.id,
+        instancingEligible: assetVersion.instancingEligible,
+        maxHeightDeltaMeters: assetVersion.maxHeightDeltaMeters,
+        runtimeFile: assetVersion.runtimeFile
+      }
+    };
+  }
+
+  private snapshotStaticEntitiesForExport(
+    sourceMapId: string,
+    exportMapId: string,
+    bounds: WorldBounds,
+    now: string
+  ) {
+    const { archetypesById, assetVersionsById, entities } =
+      this.listResolvedStaticEntities(sourceMapId);
+    const insertStaticEntity = this.db.prepare(`
+      INSERT INTO map_static_entities (
+        id, map_id, label, archetype_id, position_x, position_z,
+        yaw, scale, y_offset, state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const manifestEntriesByArchetypeId = new Map<
+      string,
+      StaticEntityExportManifestEntry
+    >();
+    let entityCount = 0;
+
+    for (const entity of entities) {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      const assetVersion = assetVersionsById.get(archetype.assetVersionId);
+
+      if (!assetVersion) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Asset version ${archetype.assetVersionId} was not found for archetype ${archetype.id}`
+        );
+      }
+
+      if (
+        !bboxesIntersect(bounds, getStaticEntityFootprintBounds(entity, assetVersion))
+      ) {
+        continue;
+      }
+
+      insertStaticEntity.run(
+        entity.id,
+        exportMapId,
+        entity.label ?? null,
+        entity.archetypeId,
+        entity.position.x - bounds.minX,
+        entity.position.z - bounds.minZ,
+        entity.rotation.yaw,
+        entity.scale,
+        entity.yOffset,
+        entity.state,
+        now,
+        now
+      );
+      entityCount += 1;
+
+      if (!manifestEntriesByArchetypeId.has(archetype.id)) {
+        manifestEntriesByArchetypeId.set(
+          archetype.id,
+          this.getStaticEntityExportManifestEntry(archetype, assetVersion)
+        );
+      }
+    }
+
+    const manifest = normalizeStaticEntityExportManifest([
+      ...manifestEntriesByArchetypeId.values()
+    ]);
+    const manifestJson = JSON.stringify(manifest);
+    const fullManifestHash = createHash('sha256')
+      .update(manifestJson)
+      .digest('hex');
+
+    this.db
+      .prepare(
+        `
+        UPDATE maps
+        SET
+          static_entity_export_manifest_json = ?,
+          static_entity_export_manifest_hash = ?,
+          static_entity_export_entity_count = ?,
+          static_entity_export_archetype_count = ?
+        WHERE id = ?
+      `
+      )
+      .run(
+        manifestJson,
+        fullManifestHash,
+        entityCount,
+        manifest.length,
+        exportMapId
+      );
+  }
+
+  private listStaticEntitiesForChunk(
+    mapRow: MapRow,
+    chunkX: number,
+    chunkZ: number
+  ) {
+    const chunkBounds = ensureChunkBounds(chunkX, chunkZ, mapRow.chunkSizeTiles, mapRow.metersPerTile);
+    const { archetypesById, assetVersionsById, entities } =
+      this.listResolvedStaticEntities(mapRow.id);
+
+    return entities.filter(entity => {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      const assetVersion = assetVersionsById.get(archetype.assetVersionId);
+
+      if (!assetVersion) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Asset version ${archetype.assetVersionId} was not found for archetype ${archetype.id}`
+        );
+      }
+
+      return bboxesIntersect(
+        chunkBounds,
+        getStaticEntityFootprintBounds(entity, assetVersion)
+      );
+    });
+  }
+
   private bumpMapRevisions(
     mapId: string,
     options: { terrainAffecting: boolean }
@@ -715,24 +1486,34 @@ export class MapRepository {
     const now = new Date().toISOString();
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         UPDATE maps
         SET
           revision = revision + 1,
           terrain_revision = terrain_revision + ?,
           updated_at = ?
         WHERE id = ?
-      `)
+      `
+      )
       .run(options.terrainAffecting ? 1 : 0, now, mapId);
 
     return this.getMapRowOrThrow(mapId);
   }
 
   private loadVectorTerrainState(mapRow: MapRow) {
-    const map = mapRowToMetadata(mapRow);
-    const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapRow.id).map(controlPointRowToModel);
-    const derivedIslands = this.listDerivedIslandRows(mapRow.id).map(derivedIslandRowToModel);
+    const map = mapRowToMetadata(mapRow, {
+      includeExportManifest: false
+    });
+    const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapRow.id).map(
+      controlPointRowToModel
+    );
+    const derivedIslands = this.listDerivedIslandRows(mapRow.id).map(
+      derivedIslandRowToModel
+    );
 
     return {
       controlPoints,
@@ -754,13 +1535,15 @@ export class MapRepository {
     const bbox = computePolygonBbox(canonicalVertices);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT INTO map_source_polygons (
           id, map_id, status, vertices_json, params_json,
           bbox_min_x, bbox_min_z, bbox_max_x, bbox_max_z,
           created_at, updated_at, retired_at
         ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-      `)
+      `
+      )
       .run(
         id,
         mapId,
@@ -778,16 +1561,19 @@ export class MapRepository {
   }
 
   private rebuildDerivedIslands(mapId: string, now: string) {
-    const previous = this.listDerivedIslandRows(mapId).map(derivedIslandRowToModel);
-    const activePolygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
+    const previous = this.listDerivedIslandRows(mapId).map(
+      derivedIslandRowToModel
+    );
+    const activePolygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
     const resolved = resolveConnectedLandMasses(activePolygons);
     const overlaps = previous.map(previousIsland =>
       resolved.map((resolvedIsland, resolvedIndex) => ({
-        overlapArea:
-          intersectPolygons(previousIsland.geometry, resolvedIsland.vertices).reduce(
-            (sum, polygon) => sum + computePolygonArea(polygon),
-            0
-          ),
+        overlapArea: intersectPolygons(
+          previousIsland.geometry,
+          resolvedIsland.vertices
+        ).reduce((sum, polygon) => sum + computePolygonArea(polygon), 0),
         previousId: previousIsland.id,
         resolvedIndex
       }))
@@ -809,13 +1595,19 @@ export class MapRepository {
       }
 
       for (const candidate of candidates) {
-        const predecessors = predecessorIdsByResolved.get(candidate.resolvedIndex) ?? [];
+        const predecessors =
+          predecessorIdsByResolved.get(candidate.resolvedIndex) ?? [];
         predecessors.push(candidate.previousId);
         predecessorIdsByResolved.set(candidate.resolvedIndex, predecessors);
 
-        const bestPredecessor = bestPredecessorByResolved.get(candidate.resolvedIndex);
+        const bestPredecessor = bestPredecessorByResolved.get(
+          candidate.resolvedIndex
+        );
 
-        if (!bestPredecessor || candidate.overlapArea > bestPredecessor.overlapArea) {
+        if (
+          !bestPredecessor ||
+          candidate.overlapArea > bestPredecessor.overlapArea
+        ) {
           bestPredecessorByResolved.set(candidate.resolvedIndex, {
             overlapArea: candidate.overlapArea,
             previousId: candidate.previousId
@@ -828,7 +1620,10 @@ export class MapRepository {
       proposedIds[resolvedIndex] = candidate.previousId;
     });
 
-    const claimedByPrevious = new Map<string, Array<{ overlapArea: number; resolvedIndex: number }>>();
+    const claimedByPrevious = new Map<
+      string,
+      Array<{ overlapArea: number; resolvedIndex: number }>
+    >();
 
     overlaps.forEach(overlapGroup => {
       overlapGroup
@@ -860,7 +1655,9 @@ export class MapRepository {
     const previousById = new Map(previous.map(island => [island.id, island]));
     const nextIslands = resolved.map((resolvedIsland, index) => {
       const predecessorId = proposedIds[index];
-      const predecessor = predecessorId ? previousById.get(predecessorId) : undefined;
+      const predecessor = predecessorId
+        ? previousById.get(predecessorId)
+        : undefined;
       const geometry = resolvedIsland.vertices;
       const bbox = computePolygonBbox(geometry);
 
@@ -879,7 +1676,9 @@ export class MapRepository {
       };
     });
 
-    this.db.prepare('DELETE FROM map_derived_islands WHERE map_id = ?').run(mapId);
+    this.db
+      .prepare('DELETE FROM map_derived_islands WHERE map_id = ?')
+      .run(mapId);
 
     const insertDerivedIsland = this.db.prepare(`
       INSERT INTO map_derived_islands (
@@ -940,7 +1739,14 @@ export class MapRepository {
       const operation = parents.length > 1 ? 'merge' : 'update';
 
       parents.forEach(parentId => {
-        insertLineage.run(randomUUID(), mapId, operation, parentId, island.id, now);
+        insertLineage.run(
+          randomUUID(),
+          mapId,
+          operation,
+          parentId,
+          island.id,
+          now
+        );
       });
     });
 
@@ -954,15 +1760,24 @@ export class MapRepository {
 
       if (children.length > 1) {
         children.forEach(childId => {
-          insertLineage.run(randomUUID(), mapId, 'split', island.id, childId, now);
+          insertLineage.run(
+            randomUUID(),
+            mapId,
+            'split',
+            island.id,
+            childId,
+            now
+          );
         });
       }
     });
 
-    return nextIslands.map(island => toPublicDerivedIsland({
-      ...island,
-      centroid: computePolygonCentroid(island.geometry)
-    }));
+    return nextIslands.map(island =>
+      toPublicDerivedIsland({
+        ...island,
+        centroid: computePolygonCentroid(island.geometry)
+      })
+    );
   }
 
   private computeInvalidationExpansion(
@@ -990,15 +1805,26 @@ export class MapRepository {
     return maxDisplacement + maxInfluence;
   }
 
-  private getExpandedDirtyBounds(mapId: string, dirtyBounds: WorldBounds | null) {
+  private getExpandedDirtyBounds(
+    mapId: string,
+    dirtyBounds: WorldBounds | null
+  ) {
     if (!dirtyBounds) {
       return null;
     }
 
     const mapRow = this.getMapRowOrThrow(mapId);
-    const polygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapId).map(controlPointRowToModel);
-    const expansion = this.computeInvalidationExpansion(polygons, controlPoints, dirtyBounds);
+    const polygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapId).map(
+      controlPointRowToModel
+    );
+    const expansion = this.computeInvalidationExpansion(
+      polygons,
+      controlPoints,
+      dirtyBounds
+    );
     return expandWorldBounds(dirtyBounds, expansion);
   }
 
@@ -1017,19 +1843,24 @@ export class MapRepository {
     const maxChunkZ = Math.floor(expandedBounds.maxZ / chunkWorldSize);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         DELETE FROM map_chunks
         WHERE
           map_id = ? AND
           chunk_x BETWEEN ? AND ? AND
           chunk_z BETWEEN ? AND ?
-      `)
+      `
+      )
       .run(mapId, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
   }
 
   private performTerrainMutation<Value>(
     options: MutateTerrainOptions,
-    mutate: (mapRow: MapRow, now: string) => {
+    mutate: (
+      mapRow: MapRow,
+      now: string
+    ) => {
       dirtyBounds: WorldBounds | null;
       result: Value;
     }
@@ -1043,14 +1874,40 @@ export class MapRepository {
       const updatedMapRow = this.bumpMapRevisions(options.mapId, {
         terrainAffecting: true
       });
-      const expandedDirtyBounds = this.getExpandedDirtyBounds(options.mapId, dirtyBounds);
+      const expandedDirtyBounds = this.getExpandedDirtyBounds(
+        options.mapId,
+        dirtyBounds
+      );
 
       this.rebuildDerivedIslands(options.mapId, now);
       this.invalidateChunks(options.mapId, dirtyBounds);
-      clearCompiledVectorTerrainArtifact(options.mapId, previousTerrainRevision);
+      clearCompiledVectorTerrainArtifact(
+        options.mapId,
+        previousTerrainRevision
+      );
 
       return {
         dirtyBounds: expandedDirtyBounds,
+        mapRevision: updatedMapRow.revision,
+        result
+      };
+    });
+  }
+
+  private performStaticEntityMutation<Value>(
+    options: MutateStaticEntityOptions,
+    mutate: (mapRow: MapRow, now: string) => Value
+  ) {
+    return this.runInTransaction(() => {
+      const mapRow = this.getMapRowOrThrow(options.mapId);
+      this.assertExpectedRevision(mapRow, options.expectedRevision);
+      const now = new Date().toISOString();
+      const result = mutate(mapRow, now);
+      const updatedMapRow = this.bumpMapRevisions(options.mapId, {
+        terrainAffecting: false
+      });
+
+      return {
         mapRevision: updatedMapRow.revision,
         result
       };
@@ -1086,14 +1943,16 @@ export class MapRepository {
     const encodedHeights = encodeFloat32Heights(generated.heights);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT OR IGNORE INTO map_chunks (
           map_id, chunk_x, chunk_z,
           origin_tile_x, origin_tile_z,
           tile_width, tile_height,
           samples_wide, samples_high, heights
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
+      `
+      )
       .run(
         row.id,
         generated.chunkX,
@@ -1130,7 +1989,9 @@ export class MapRepository {
     now: string
   ) {
     const clipPolygon = worldBoundsToPolygon(bounds);
-    const islands = this.listDerivedIslandRows(sourceMapId).map(derivedIslandRowToModel);
+    const islands = this.listDerivedIslandRows(sourceMapId).map(
+      derivedIslandRowToModel
+    );
     const insertDerivedIsland = this.db.prepare(`
       INSERT INTO map_derived_islands (
         id, map_id, name, default_owner, default_faction,
@@ -1195,8 +2056,14 @@ export class MapRepository {
       try {
         const widthMeters = input.bounds.maxX - input.bounds.minX;
         const heightMeters = input.bounds.maxZ - input.bounds.minZ;
-        widthTiles = deriveTileCountFromMeters(widthMeters, input.metersPerTile);
-        heightTiles = deriveTileCountFromMeters(heightMeters, input.metersPerTile);
+        widthTiles = deriveTileCountFromMeters(
+          widthMeters,
+          input.metersPerTile
+        );
+        heightTiles = deriveTileCountFromMeters(
+          heightMeters,
+          input.metersPerTile
+        );
         sourceTileOffsetX = deriveTileCoordinateFromMeters(
           input.bounds.minX,
           input.metersPerTile
@@ -1232,6 +2099,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed: sourceRow.seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: sourceRow.id,
         sourceRevision: sourceRow.revision,
         terrainRevision: 0,
@@ -1241,7 +2112,9 @@ export class MapRepository {
         wrapZ: wrap ? 1 : 0
       };
 
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         INSERT INTO maps (
           id, name, kind, extent_kind,
           width_tiles, height_tiles, wrap_x, wrap_z,
@@ -1251,31 +2124,33 @@ export class MapRepository {
           export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
           created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        row.id,
-        row.name,
-        row.kind,
-        row.extentKind,
-        row.widthTiles,
-        row.heightTiles,
-        row.wrapX,
-        row.wrapZ,
-        row.metersPerTile,
-        row.chunkSizeTiles,
-        row.generator,
-        row.seed,
-        row.revision,
-        row.terrainRevision,
-        row.sourceMapId,
-        row.sourceRevision,
-        row.exportedAt,
-        row.exportBoundsMinX,
-        row.exportBoundsMinZ,
-        row.exportBoundsMaxX,
-        row.exportBoundsMaxZ,
-        row.createdAt,
-        row.updatedAt
-      );
+      `
+        )
+        .run(
+          row.id,
+          row.name,
+          row.kind,
+          row.extentKind,
+          row.widthTiles,
+          row.heightTiles,
+          row.wrapX,
+          row.wrapZ,
+          row.metersPerTile,
+          row.chunkSizeTiles,
+          row.generator,
+          row.seed,
+          row.revision,
+          row.terrainRevision,
+          row.sourceMapId,
+          row.sourceRevision,
+          row.exportedAt,
+          row.exportBoundsMinX,
+          row.exportBoundsMinZ,
+          row.exportBoundsMaxX,
+          row.exportBoundsMaxZ,
+          row.createdAt,
+          row.updatedAt
+        );
 
       const sourceTerrainState = this.loadVectorTerrainState(sourceRow);
       const artifact = getCompiledVectorTerrainArtifact({
@@ -1306,8 +2181,14 @@ export class MapRepository {
         for (let chunkX = 0; chunkX < chunkCountX; chunkX += 1) {
           const originTileX = chunkX * input.chunkSizeTiles;
           const originTileZ = chunkZ * input.chunkSizeTiles;
-          const tileWidth = Math.min(input.chunkSizeTiles, widthTiles - originTileX);
-          const tileHeight = Math.min(input.chunkSizeTiles, heightTiles - originTileZ);
+          const tileWidth = Math.min(
+            input.chunkSizeTiles,
+            widthTiles - originTileX
+          );
+          const tileHeight = Math.min(
+            input.chunkSizeTiles,
+            heightTiles - originTileZ
+          );
           const generated = generateVectorChunk(artifact, chunkX, chunkZ, {
             mapId: id,
             materialOriginTileX: sourceTileOffsetX + originTileX,
@@ -1337,8 +2218,11 @@ export class MapRepository {
       }
 
       this.snapshotDerivedIslandsForExport(sourceRow.id, id, input.bounds, now);
+      this.snapshotStaticEntitiesForExport(sourceRow.id, id, input.bounds, now);
 
-      return mapRowToMetadata(row);
+      return mapRowToMetadata(this.getMapRowOrThrow(id), {
+        includeExportManifest: true
+      });
     });
   }
 
@@ -1387,14 +2271,16 @@ export class MapRepository {
     const encodedHeights = encodeFloat32Heights(generated.heights);
 
     this.db
-      .prepare(`
+      .prepare(
+        `
         INSERT OR IGNORE INTO map_chunks (
           map_id, chunk_x, chunk_z,
           origin_tile_x, origin_tile_z,
           tile_width, tile_height,
           samples_wide, samples_high, heights
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
+      `
+      )
       .run(
         row.id,
         generated.chunkX,
@@ -1434,16 +2320,6 @@ export class MapRepository {
     return this.resolveStoredFiniteChunkRow(row, chunkX, chunkZ);
   }
 
-  private resolveChunkRow(mapId: string, chunkX: number, chunkZ: number) {
-    const row = this.findMapRow(mapId);
-
-    if (!row) {
-      return null;
-    }
-
-    return this.resolveChunkRowForMap(row, chunkX, chunkZ);
-  }
-
   createMap(input: CreateMapInput): MapMetadata {
     const now = new Date().toISOString();
     const defaults = getDefaultMapConfig();
@@ -1478,6 +2354,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: null,
         sourceRevision: null,
         terrainRevision: 0,
@@ -1504,6 +2384,10 @@ export class MapRepository {
         name: input.name ?? null,
         revision: 0,
         seed,
+        staticEntityExportArchetypeCount: null,
+        staticEntityExportEntityCount: null,
+        staticEntityExportManifestHash: null,
+        staticEntityExportManifestJson: null,
         sourceMapId: null,
         sourceRevision: null,
         terrainRevision: 0,
@@ -1514,7 +2398,9 @@ export class MapRepository {
       };
     }
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO maps (
         id, name, kind, extent_kind,
         width_tiles, height_tiles, wrap_x, wrap_z,
@@ -1524,33 +2410,37 @@ export class MapRepository {
         export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      row.id,
-      row.name,
-      row.kind,
-      row.extentKind,
-      row.widthTiles,
-      row.heightTiles,
-      row.wrapX,
-      row.wrapZ,
-      row.metersPerTile,
-      row.chunkSizeTiles,
-      row.generator,
-      row.seed,
-      row.revision,
-      row.terrainRevision,
-      row.sourceMapId,
-      row.sourceRevision,
-      row.exportedAt,
-      row.exportBoundsMinX,
-      row.exportBoundsMinZ,
-      row.exportBoundsMaxX,
-      row.exportBoundsMaxZ,
-      row.createdAt,
-      row.updatedAt
-    );
+    `
+      )
+      .run(
+        row.id,
+        row.name,
+        row.kind,
+        row.extentKind,
+        row.widthTiles,
+        row.heightTiles,
+        row.wrapX,
+        row.wrapZ,
+        row.metersPerTile,
+        row.chunkSizeTiles,
+        row.generator,
+        row.seed,
+        row.revision,
+        row.terrainRevision,
+        row.sourceMapId,
+        row.sourceRevision,
+        row.exportedAt,
+        row.exportBoundsMinX,
+        row.exportBoundsMinZ,
+        row.exportBoundsMaxX,
+        row.exportBoundsMaxZ,
+        row.createdAt,
+        row.updatedAt
+      );
 
-    return mapRowToMetadata(row);
+    return mapRowToMetadata(row, {
+      includeExportManifest: false
+    });
   }
 
   createMapExport(input: CreateMapExportInput): MapMetadata {
@@ -1570,12 +2460,315 @@ export class MapRepository {
 
   getMap(id: string) {
     const row = this.findMapRow(id);
-    return row ? mapRowToMetadata(row) : null;
+    return row
+      ? mapRowToMetadata(row, {
+          includeExportManifest: true
+        })
+      : null;
+  }
+
+  createAssetVersion(input: CreateAssetVersionInput) {
+    const now = new Date().toISOString();
+
+    try {
+      this.db
+        .prepare(
+          `
+          INSERT INTO asset_versions (
+            id, status, original_file_json, runtime_file_json,
+            diagnostics_json, footprint_json, collision_box_json,
+            collision_class, grounding_policy, max_height_delta_meters,
+            instancing_eligible, map_preview_category, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          input.id,
+          input.status,
+          JSON.stringify(input.originalFile),
+          input.runtimeFile ? JSON.stringify(input.runtimeFile) : null,
+          JSON.stringify(input.diagnostics),
+          JSON.stringify(input.footprint),
+          JSON.stringify(input.collisionBox),
+          input.collisionClass,
+          input.groundingPolicy,
+          input.maxHeightDeltaMeters,
+          input.instancingEligible ? 1 : 0,
+          null,
+          now,
+          now
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return assetVersionRowToModel(this.getAssetVersionRowOrThrow(input.id));
+  }
+
+  listAssetVersions(status?: AssetVersion['status']) {
+    return this.listAssetVersionRows(status).map(assetVersionRowToModel);
+  }
+
+  listAssetVersionIdsByPrefix(prefix: string) {
+    return this.db
+      .query<{ id: string }, [string]>(
+        `
+        SELECT id FROM asset_versions
+        WHERE id LIKE ?
+        ORDER BY id ASC
+      `
+      )
+      .all(`${prefix}%`)
+      .map(row => row.id);
+  }
+
+  getAssetVersion(id: string) {
+    const row = this.getAssetVersionRow(id);
+    return row ? assetVersionRowToModel(row) : null;
+  }
+
+  updateAssetVersion(
+    input: UpdateAssetVersionInput,
+    prefetched?: AssetVersion
+  ) {
+    const current =
+      prefetched ??
+      assetVersionRowToModel(this.getAssetVersionRowOrThrow(input.id));
+    const next: AssetVersion = {
+      ...current,
+      collisionBox: input.collisionBox ?? current.collisionBox,
+      collisionClass: input.collisionClass ?? current.collisionClass,
+      diagnostics: input.diagnostics ?? current.diagnostics,
+      footprint: input.footprint ?? current.footprint,
+      groundingPolicy: input.groundingPolicy ?? current.groundingPolicy,
+      instancingEligible:
+        input.instancingEligible ?? current.instancingEligible,
+      maxHeightDeltaMeters:
+        input.maxHeightDeltaMeters ?? current.maxHeightDeltaMeters,
+      originalFile: input.originalFile ?? current.originalFile,
+      runtimeFile:
+        input.runtimeFile === undefined
+          ? current.runtimeFile
+          : input.runtimeFile,
+      status: input.status ?? current.status,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (current.status === 'ready' && assetVersionHasChanges(current, next)) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset version ${input.id} is ready and immutable`
+      );
+    }
+
+    try {
+      this.db
+        .prepare(
+          `
+          UPDATE asset_versions
+          SET
+            status = ?,
+            original_file_json = ?,
+            runtime_file_json = ?,
+            diagnostics_json = ?,
+            footprint_json = ?,
+            collision_box_json = ?,
+            collision_class = ?,
+            grounding_policy = ?,
+            max_height_delta_meters = ?,
+            instancing_eligible = ?,
+            updated_at = ?
+          WHERE id = ?
+        `
+        )
+        .run(
+          next.status,
+          JSON.stringify(next.originalFile),
+          next.runtimeFile ? JSON.stringify(next.runtimeFile) : null,
+          JSON.stringify(next.diagnostics),
+          JSON.stringify(next.footprint),
+          JSON.stringify(next.collisionBox),
+          next.collisionClass,
+          next.groundingPolicy,
+          next.maxHeightDeltaMeters,
+          next.instancingEligible ? 1 : 0,
+          next.updatedAt,
+          input.id
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return next;
+  }
+
+  reviewAssetVersion(input: ReviewAssetVersionInput) {
+    const current = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.id)
+    );
+
+    if (current.status !== 'review') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${input.id} is not in review`
+      );
+    }
+
+    return this.updateAssetVersion(input, current);
+  }
+
+  approveAssetVersion(id: string) {
+    const current = assetVersionRowToModel(this.getAssetVersionRowOrThrow(id));
+
+    if (current.status !== 'review') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${id} must be in review before approval`
+      );
+    }
+
+    if (current.runtimeFile === null) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${id} is missing a runtime artifact`
+      );
+    }
+
+    return this.updateAssetVersion({ id, status: 'ready' }, current);
+  }
+
+  createArchetype(input: CreateArchetypeInput) {
+    const now = new Date().toISOString();
+    const assetVersion = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.assetVersionId)
+    );
+
+    if (assetVersion.status !== 'ready') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${input.assetVersionId} is not ready for archetype creation`
+      );
+    }
+
+    try {
+      this.db
+        .prepare(
+          `
+          INSERT INTO archetypes (
+            id, name, category, tags_json, asset_version_id,
+            status, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          input.id,
+          input.name,
+          input.category,
+          JSON.stringify(input.tags),
+          input.assetVersionId,
+          input.status,
+          now,
+          now
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
+  }
+
+  listArchetypes(status?: Archetype['status']) {
+    return this.listArchetypeRows(status).map(archetypeRowToModel);
+  }
+
+  getArchetype(id: string) {
+    const row = this.getArchetypeRow(id);
+
+    return row ? archetypeRowToModel(row) : null;
+  }
+
+  updateArchetype(input: UpdateArchetypeInput) {
+    const current = archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
+    const next = {
+      category: input.category ?? current.category,
+      name: input.name ?? current.name,
+      status: input.status ?? current.status,
+      tags: input.tags ?? current.tags
+    };
+    const now = new Date().toISOString();
+
+    try {
+      this.db
+        .prepare(
+          `
+          UPDATE archetypes
+          SET
+            name = ?,
+            category = ?,
+            tags_json = ?,
+            status = ?,
+            updated_at = ?
+          WHERE id = ?
+        `
+        )
+        .run(
+          next.name,
+          next.category,
+          JSON.stringify(next.tags),
+          next.status,
+          now,
+          input.id
+        );
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return archetypeRowToModel(this.getArchetypeRowOrThrow(input.id));
+  }
+
+  listReferencedArchetypes(mapId: string) {
+    if (!this.findMapRow(mapId)) {
+      throw new MapRepositoryError('NOT_FOUND', `Map ${mapId} was not found`);
+    }
+
+    return this.db
+      .query<ArchetypeRow, [string]>(
+        `
+        SELECT DISTINCT ${ARCHETYPE_COLUMNS}
+        FROM archetypes
+        WHERE id IN (
+          SELECT archetype_id FROM map_static_entities WHERE map_id = ?
+        )
+        ORDER BY created_at ASC, id ASC
+      `
+      )
+      .all(mapId)
+      .map(archetypeRowToModel);
   }
 
   getMapChunk(mapId: string, chunkX: number, chunkZ: number): MapChunk | null {
-    const row = this.resolveChunkRow(mapId, chunkX, chunkZ);
-    return row ? toMapChunkResponse(chunkRowToRecord(row)) : null;
+    const mapRow = this.findMapRow(mapId);
+
+    if (!mapRow) {
+      return null;
+    }
+
+    const row = this.resolveChunkRowForMap(mapRow, chunkX, chunkZ);
+
+    if (!row) {
+      return null;
+    }
+
+    const staticEntities = this.listStaticEntitiesForChunk(
+      mapRow,
+      row.chunkX,
+      row.chunkZ
+    );
+
+    return toMapChunkResponse({
+      ...chunkRowToRecord(row),
+      staticEntities
+    });
   }
 
   getMapChunkBinary(mapId: string, chunkX: number, chunkZ: number) {
@@ -1594,13 +2787,17 @@ export class MapRepository {
     const heights = decodeFloat32Heights(row.heights);
     const materialOriginTileX =
       mapRow.exportBoundsMinX !== null
-        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinX, mapRow.metersPerTile) +
-          row.originTileX
+        ? deriveTileCoordinateFromMeters(
+            mapRow.exportBoundsMinX,
+            mapRow.metersPerTile
+          ) + row.originTileX
         : row.originTileX;
     const materialOriginTileZ =
       mapRow.exportBoundsMinZ !== null
-        ? deriveTileCoordinateFromMeters(mapRow.exportBoundsMinZ, mapRow.metersPerTile) +
-          row.originTileZ
+        ? deriveTileCoordinateFromMeters(
+            mapRow.exportBoundsMinZ,
+            mapRow.metersPerTile
+          ) + row.originTileZ
         : row.originTileZ;
     const quantized = quantizeUint16Heights(heights);
     const materials = deriveChunkMaterialIds(
@@ -1612,6 +2809,11 @@ export class MapRepository {
       row.originTileZ,
       materialOriginTileX,
       materialOriginTileZ
+    );
+    const staticEntities = this.listStaticEntitiesForChunk(
+      mapRow,
+      row.chunkX,
+      row.chunkZ
     );
 
     return {
@@ -1631,9 +2833,150 @@ export class MapRepository {
       originTileZ: row.originTileZ,
       samplesHigh: row.samplesHigh,
       samplesWide: row.samplesWide,
+      staticEntities,
       tileHeight: row.tileHeight,
       tileWidth: row.tileWidth
     };
+  }
+
+  createStaticEntity(input: CreateStaticEntityInput) {
+    return this.performStaticEntityMutation(input, (mapRow, now) => {
+      this.getPlaceableArchetypeOrThrow(input.archetypeId);
+      const entityId = input.id ?? this.nextStaticEntityId(mapRow.id, input.archetypeId);
+
+      try {
+        this.db
+          .prepare(
+            `
+            INSERT INTO map_static_entities (
+              id, map_id, label, archetype_id, position_x, position_z,
+              yaw, scale, y_offset, state, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `
+          )
+          .run(
+            entityId,
+            mapRow.id,
+            input.label ?? null,
+            input.archetypeId,
+            input.position.x,
+            input.position.z,
+            input.rotation.yaw,
+            input.scale,
+            input.yOffset,
+            input.state,
+            now,
+            now
+          );
+      } catch (error) {
+        throw normalizeSqliteError(error);
+      }
+
+      return staticEntityRowToModel(
+        this.getStaticEntityRowOrThrow(mapRow.id, entityId)
+      );
+    });
+  }
+
+  updateStaticEntity(input: UpdateStaticEntityInput) {
+    return this.performStaticEntityMutation(input, (mapRow, now) => {
+      const current = this.getStaticEntityRowOrThrow(mapRow.id, input.id);
+      const next = {
+        archetypeId: input.archetypeId ?? current.archetypeId,
+        label: input.label === undefined ? current.label : input.label,
+        positionX: input.position?.x ?? current.positionX,
+        positionZ: input.position?.z ?? current.positionZ,
+        scale: input.scale ?? current.scale,
+        state: input.state ?? current.state,
+        yOffset: input.yOffset ?? current.yOffset,
+        yaw: input.rotation?.yaw ?? current.yaw
+      };
+      this.getPlaceableArchetypeOrThrow(next.archetypeId);
+
+      try {
+        this.db
+          .prepare(
+            `
+            UPDATE map_static_entities
+            SET
+              label = ?,
+              archetype_id = ?,
+              position_x = ?,
+              position_z = ?,
+              yaw = ?,
+              scale = ?,
+              y_offset = ?,
+              state = ?,
+              updated_at = ?
+            WHERE map_id = ? AND id = ?
+          `
+          )
+          .run(
+            next.label,
+            next.archetypeId,
+            next.positionX,
+            next.positionZ,
+            next.yaw,
+            next.scale,
+            next.yOffset,
+            next.state,
+            now,
+            mapRow.id,
+            input.id
+          );
+      } catch (error) {
+        throw normalizeSqliteError(error);
+      }
+
+      return staticEntityRowToModel(
+        this.getStaticEntityRowOrThrow(mapRow.id, input.id)
+      );
+    });
+  }
+
+  deleteStaticEntity(input: DeleteStaticEntityInput) {
+    return this.performStaticEntityMutation(input, mapRow => {
+      const current = staticEntityRowToModel(
+        this.getStaticEntityRowOrThrow(mapRow.id, input.id)
+      );
+      this.db
+        .prepare(
+          `
+          DELETE FROM map_static_entities
+          WHERE map_id = ? AND id = ?
+        `
+        )
+        .run(mapRow.id, input.id);
+
+      return current;
+    });
+  }
+
+  listStaticEntities(mapId: string) {
+    this.getMapRowOrThrow(mapId);
+    return this.listStaticEntityRows(mapId).map(staticEntityRowToModel);
+  }
+
+  listStaticEntityItems(mapId: string): StaticEntityListItem[] {
+    this.getMapRowOrThrow(mapId);
+
+    const { archetypesById, entities } = this.listResolvedStaticEntities(mapId);
+
+    return entities.map(entity => {
+      const archetype = archetypesById.get(entity.archetypeId);
+
+      if (!archetype) {
+        throw new MapRepositoryError(
+          'NOT_FOUND',
+          `Archetype ${entity.archetypeId} was not found for static entity ${entity.id}`
+        );
+      }
+
+      return {
+        archetype: archetypeToStaticEntitySummary(archetype),
+        entity
+      };
+    });
   }
 
   updateMap(id: string, input: { name?: string | null }) {
@@ -1647,42 +2990,55 @@ export class MapRepository {
 
   listMaps() {
     return this.db
-      .query<MapRow, []>(`
+      .query<MapRow, []>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         ORDER BY updated_at DESC, created_at DESC
-      `)
+      `
+      )
       .all()
-      .map(mapRowToMetadata);
+      .map(mapRowToSummaryMetadata);
   }
 
   findExport(id: string) {
     const row = this.findMapRow(id);
 
-    if (!row || row.sourceMapId === null || row.sourceRevision === null || row.exportedAt === null) {
+    if (
+      !row ||
+      row.sourceMapId === null ||
+      row.sourceRevision === null ||
+      row.exportedAt === null
+    ) {
       return null;
     }
 
-    return mapRowToMetadata(row);
+    return mapRowToMetadata(row, {
+      includeExportManifest: true
+    });
   }
 
   listExports(mapId: string) {
     this.ensureInfiniteVectorMapRow(mapId);
 
     return this.db
-      .query<MapRow, [string]>(`
+      .query<MapRow, [string]>(
+        `
         SELECT ${MAP_ROW_COLUMNS}
         FROM maps
         WHERE source_map_id = ?
         ORDER BY exported_at DESC, created_at DESC
-      `)
+      `
+      )
       .all(mapId)
-      .map(mapRowToMetadata);
+      .map(mapRowToSummaryMetadata);
   }
 
   listSourcePolygons(mapId: string, status?: SourcePolygonStatus) {
     this.ensureInfiniteVectorMapRow(mapId);
-    return this.listSourcePolygonRows(mapId, status).map(sourcePolygonRowToModel);
+    return this.listSourcePolygonRows(mapId, status).map(
+      sourcePolygonRowToModel
+    );
   }
 
   createSourcePolygon(input: {
@@ -1697,7 +3053,12 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const row = this.insertSourcePolygonRecord(input.mapId, input.vertices, input.params, now);
+        const row = this.insertSourcePolygonRecord(
+          input.mapId,
+          input.vertices,
+          input.params,
+          now
+        );
 
         return {
           dirtyBounds: rowToBounds(row),
@@ -1733,15 +3094,21 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const existing = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const existing = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
         const nextVertices = input.vertices
           ? ensurePolygonVertices(input.vertices)
           : parseJson<WorldPoint[]>(existing.verticesJson);
-        const nextParams = input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson);
+        const nextParams =
+          input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson);
         const nextBounds = computePolygonBbox(nextVertices);
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_source_polygons
             SET
               vertices_json = ?,
@@ -1752,7 +3119,8 @@ export class MapRepository {
               bbox_max_z = ?,
               updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(
             JSON.stringify(nextVertices),
             JSON.stringify(nextParams),
@@ -1765,7 +3133,11 @@ export class MapRepository {
             input.id
           );
 
-        const row = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const row = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
 
         return {
           dirtyBounds: mergeBounds(rowToBounds(existing), rowToBounds(row)),
@@ -1792,14 +3164,20 @@ export class MapRepository {
         mapId: input.mapId
       },
       (_mapRow, now) => {
-        const existing = this.getSourcePolygonRowOrThrow(input.mapId, input.id, 'active');
+        const existing = this.getSourcePolygonRowOrThrow(
+          input.mapId,
+          input.id,
+          'active'
+        );
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_source_polygons
             SET status = 'retired', retired_at = ?, updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(now, now, input.mapId, input.id);
 
         const row = this.getSourcePolygonRowOrThrow(input.mapId, input.id);
@@ -1823,9 +3201,11 @@ export class MapRepository {
     return this.listControlPointRows(mapId).map(controlPointRowToModel);
   }
 
-  createControlPoint(input: Omit<ControlPoint, 'createdAt' | 'id' | 'updatedAt'> & {
-    expectedRevision: number;
-  }) {
+  createControlPoint(
+    input: Omit<ControlPoint, 'createdAt' | 'id' | 'updatedAt'> & {
+      expectedRevision: number;
+    }
+  ) {
     const { dirtyBounds, mapRevision, result } = this.performTerrainMutation(
       {
         expectedRevision: input.expectedRevision,
@@ -1835,12 +3215,14 @@ export class MapRepository {
         const id = randomUUID();
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             INSERT INTO map_control_points (
               id, map_id, x, z, type, elevation_meters, influence_meters, strength,
               created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `)
+          `
+          )
           .run(
             id,
             input.mapId,
@@ -1865,7 +3247,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -1904,7 +3287,8 @@ export class MapRepository {
         const existing = this.getControlPointRowOrThrow(input.mapId, input.id);
 
         this.db
-          .prepare(`
+          .prepare(
+            `
             UPDATE map_control_points
             SET
               x = ?,
@@ -1915,7 +3299,8 @@ export class MapRepository {
               strength = ?,
               updated_at = ?
             WHERE map_id = ? AND id = ?
-          `)
+          `
+          )
           .run(
             input.x ?? existing.x,
             input.z ?? existing.z,
@@ -1942,7 +3327,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -1965,7 +3351,10 @@ export class MapRepository {
           .run(input.mapId, input.id);
 
         return {
-          dirtyBounds: boundsFromPointRadius(existing, existing.influenceMeters),
+          dirtyBounds: boundsFromPointRadius(
+            existing,
+            existing.influenceMeters
+          ),
           result: model
         };
       }
@@ -1973,7 +3362,8 @@ export class MapRepository {
 
     return {
       controlPoint: result,
-      dirtyBounds: dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
+      dirtyBounds:
+        dirtyBounds ?? boundsFromPointRadius(result, result.influenceMeters),
       mapRevision
     };
   }
@@ -2000,7 +3390,8 @@ export class MapRepository {
       const now = new Date().toISOString();
 
       this.db
-        .prepare(`
+        .prepare(
+          `
           UPDATE map_derived_islands
           SET
             name = ?,
@@ -2008,7 +3399,8 @@ export class MapRepository {
             default_faction = ?,
             updated_at = ?
           WHERE map_id = ? AND id = ?
-        `)
+        `
+        )
         .run(
           input.name === undefined ? existing.name : input.name,
           input.defaultOwner === undefined
@@ -2076,7 +3468,12 @@ export class MapRepository {
 
         const combinedParams = averageSourcePolygonParams(operands);
         const createdRows = resultPolygons.map(vertices =>
-          this.insertSourcePolygonRecord(input.mapId, vertices, combinedParams, now)
+          this.insertSourcePolygonRecord(
+            input.mapId,
+            vertices,
+            combinedParams,
+            now
+          )
         );
 
         const retire = this.db.prepare(`
@@ -2092,7 +3489,10 @@ export class MapRepository {
         const dirtyBounds = [
           ...operands.map(operand => operand.bbox),
           ...createdRows.map(rowToBounds)
-        ].reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null);
+        ].reduce<WorldBounds | null>(
+          (bounds, bbox) => mergeBounds(bounds, bbox),
+          null
+        );
 
         return {
           dirtyBounds,
@@ -2106,12 +3506,13 @@ export class MapRepository {
 
     return {
       createdPolygons: result.createdPolygons,
-      dirtyBounds:
-        dirtyBounds ??
+      dirtyBounds: dirtyBounds ??
         result.createdPolygons
           .map(polygon => polygon.bbox)
-          .reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null) ??
-        {
+          .reduce<WorldBounds | null>(
+            (bounds, bbox) => mergeBounds(bounds, bbox),
+            null
+          ) ?? {
           maxX: 0,
           maxZ: 0,
           minX: 0,
@@ -2124,11 +3525,22 @@ export class MapRepository {
 
   getOverview(mapId: string): MapOverview {
     const map = this.ensureInfiniteVectorMapRow(mapId);
-    const polygons = this.listSourcePolygonRows(mapId, 'active').map(sourcePolygonRowToModel);
-    const controlPoints = this.listControlPointRows(mapId).map(controlPointRowToModel);
-    const islands = this.listDerivedIslandRows(mapId).map(derivedIslandRowToModel);
-    const overallBounds = [...polygons.map(polygon => polygon.bbox), ...controlPoints.map(point => boundsFromPointRadius(point))]
-      .reduce<WorldBounds | null>((bounds, bbox) => mergeBounds(bounds, bbox), null);
+    const polygons = this.listSourcePolygonRows(mapId, 'active').map(
+      sourcePolygonRowToModel
+    );
+    const controlPoints = this.listControlPointRows(mapId).map(
+      controlPointRowToModel
+    );
+    const islands = this.listDerivedIslandRows(mapId).map(
+      derivedIslandRowToModel
+    );
+    const overallBounds = [
+      ...polygons.map(polygon => polygon.bbox),
+      ...controlPoints.map(point => boundsFromPointRadius(point))
+    ].reduce<WorldBounds | null>(
+      (bounds, bbox) => mergeBounds(bounds, bbox),
+      null
+    );
     const padding = map.chunkSizeTiles * map.metersPerTile;
     const nodes = [
       ...polygons.map(polygon => ({
@@ -2163,7 +3575,11 @@ export class MapRepository {
         controlPointCount += current.controlPointCount;
         sourcePolygonCount += current.sourcePolygonCount;
 
-        for (let candidateIndex = 0; candidateIndex < nodes.length; candidateIndex += 1) {
+        for (
+          let candidateIndex = 0;
+          candidateIndex < nodes.length;
+          candidateIndex += 1
+        ) {
           if (visited.has(candidateIndex)) {
             continue;
           }
@@ -2214,7 +3630,8 @@ export class MapRepository {
 
   listDerivedIslandLineage(mapId: string) {
     return this.db
-      .query<LineageRow, [string]>(`
+      .query<LineageRow, [string]>(
+        `
         SELECT
           child_island_id AS childIslandId,
           created_at AS createdAt,
@@ -2225,11 +3642,16 @@ export class MapRepository {
         FROM map_derived_island_lineage
         WHERE map_id = ?
         ORDER BY created_at ASC, id ASC
-      `)
+      `
+      )
       .all(mapId);
   }
 
-  private ensureColumnExists(table: string, column: string, definition: string) {
+  private ensureColumnExists(
+    table: string,
+    column: string,
+    definition: string
+  ) {
     const columns = this.db
       .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
       .all()
@@ -2266,6 +3688,10 @@ export class MapRepository {
         export_bounds_min_z REAL,
         export_bounds_max_x REAL,
         export_bounds_max_z REAL,
+        static_entity_export_manifest_json TEXT,
+        static_entity_export_manifest_hash TEXT,
+        static_entity_export_entity_count INTEGER,
+        static_entity_export_archetype_count INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (source_map_id) REFERENCES maps(id) ON DELETE SET NULL
@@ -2344,6 +3770,53 @@ export class MapRepository {
         FOREIGN KEY (map_id) REFERENCES maps(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS asset_versions (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        original_file_json TEXT NOT NULL,
+        runtime_file_json TEXT,
+        diagnostics_json TEXT NOT NULL,
+        footprint_json TEXT NOT NULL,
+        collision_box_json TEXT NOT NULL,
+        collision_class TEXT NOT NULL,
+        grounding_policy TEXT NOT NULL,
+        max_height_delta_meters REAL NOT NULL,
+        instancing_eligible INTEGER NOT NULL DEFAULT 0,
+        map_preview_category TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS archetypes (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        asset_version_id TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (asset_version_id) REFERENCES asset_versions(id) ON DELETE RESTRICT
+      );
+
+      CREATE TABLE IF NOT EXISTS map_static_entities (
+        id TEXT NOT NULL,
+        map_id TEXT NOT NULL,
+        label TEXT,
+        archetype_id TEXT NOT NULL,
+        position_x REAL NOT NULL,
+        position_z REAL NOT NULL,
+        yaw REAL NOT NULL,
+        scale REAL NOT NULL,
+        y_offset REAL NOT NULL,
+        state TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (map_id, id),
+        FOREIGN KEY (map_id) REFERENCES maps(id) ON DELETE CASCADE,
+        FOREIGN KEY (archetype_id) REFERENCES archetypes(id) ON DELETE RESTRICT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_map_source_polygons_map_status
         ON map_source_polygons(map_id, status);
       CREATE INDEX IF NOT EXISTS idx_map_source_polygons_bbox
@@ -2354,10 +3827,20 @@ export class MapRepository {
         ON map_derived_islands(map_id);
       CREATE INDEX IF NOT EXISTS idx_map_derived_island_lineage_map
         ON map_derived_island_lineage(map_id);
+      CREATE INDEX IF NOT EXISTS idx_archetypes_status
+        ON archetypes(status);
+      CREATE INDEX IF NOT EXISTS idx_map_static_entities_map
+        ON map_static_entities(map_id);
+      CREATE INDEX IF NOT EXISTS idx_map_static_entities_archetype
+        ON map_static_entities(archetype_id);
     `);
 
     this.ensureColumnExists('maps', 'revision', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumnExists('maps', 'terrain_revision', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumnExists(
+      'maps',
+      'terrain_revision',
+      'INTEGER NOT NULL DEFAULT 0'
+    );
     this.ensureColumnExists('maps', 'source_map_id', 'TEXT');
     this.ensureColumnExists('maps', 'source_revision', 'INTEGER');
     this.ensureColumnExists('maps', 'exported_at', 'TEXT');
@@ -2365,6 +3848,18 @@ export class MapRepository {
     this.ensureColumnExists('maps', 'export_bounds_min_z', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_x', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_z', 'REAL');
+    this.ensureColumnExists('maps', 'static_entity_export_manifest_json', 'TEXT');
+    this.ensureColumnExists('maps', 'static_entity_export_manifest_hash', 'TEXT');
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_entity_count',
+      'INTEGER'
+    );
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_archetype_count',
+      'INTEGER'
+    );
 
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_maps_source_map
