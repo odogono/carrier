@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Static entity editor helper coverage for overlay math, snapping, duplicate label generation, catalog/outliner filtering, grounding diagnostics, and editor snapshot entity state
 - Static entity Phase 7 gameplay rendering in the client: referenced-archetype resolution, asset-version metadata reads, lazy runtime GLB loading, grounded placement rendering, and instancing-ready asset caching
 - Static entity Phase 8 export snapshot support: exported map slices now snapshot intersecting static entities, persist deterministic referenced-archetype manifests with SHA-256 compatibility hashes, and expose export summary/detail metadata for future import validation
+- Static entity Phase 9 Go engine integration in `apps/game`: exported-slice world loading from the API, manifest-backed static obstacle resolution, grounding/collision geometry parity, and spatial obstacle query support
 
 ### Changed
 
@@ -37,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Admin map editor data loading now hydrates map static-entity placements, referenced archetypes, active placeable archetypes, and asset-version metadata for entity overlays and diagnostics
 - Admin map editor interaction state now tracks entity selection and draft edits alongside polygon/control-point workflows while keeping terrain and entity selections mutually exclusive
 - Exported map metadata now returns static-entity manifest summaries in list responses and full manifest detail on export/detail reads, and the admin map detail page surfaces the snapshot counts and manifest hash
+- Game server startup now loads a required exported map slice via `api-base-url` and `export-map-id` before serving websocket traffic
 
 ## [0.4.0] - 2026-03-22
 
