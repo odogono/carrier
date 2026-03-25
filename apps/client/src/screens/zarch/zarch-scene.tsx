@@ -6,6 +6,7 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   DynamicDrawUsage,
   FrontSide,
   Group,
@@ -21,6 +22,7 @@ import {
   Vector2,
   Vector3,
   type AmbientLight,
+  type BufferGeometry as BufferGeometryType,
   type DirectionalLight,
   type Intersection,
   type PerspectiveCamera
@@ -44,6 +46,8 @@ import {
 
 import type { ZarchInputState, ZarchRuntimeState } from './use-zarch-runtime';
 import { wrapWorldCoordinate } from './zarch-minimap';
+import { createPlayerShipGeometry } from './zarch-player-ship-geometry';
+import { stepPlayerShip } from './zarch-player-ship';
 import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
@@ -53,7 +57,7 @@ import {
 } from './zarch-particles';
 import { ZarchStaticEntities } from './zarch-static-entities';
 
-type TileMesh = Mesh<BufferGeometry, MeshLambertMaterial>;
+type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
 
 type TreeMeshEntry = {
@@ -79,6 +83,46 @@ type ZarchSceneProps = {
 const TILE_BASE_COLOR = new Color();
 const TREE_BASE_COLOR = new Color();
 const PARTICLE_COLOR = new Color();
+const isCodePressed = (
+  input: ZarchInputState,
+  code: string,
+  fallbackKey?: string
+) => input.codes[code] || (fallbackKey ? input.keys[fallbackKey] : false);
+
+const clampOrWrapFocus = ({
+  terrain,
+  x,
+  z
+}: {
+  terrain: ZarchTerrain;
+  x: number;
+  z: number;
+}) => {
+  let nextX = x;
+  let nextZ = z;
+
+  if (terrain.widthTiles !== null && terrain.wrapX) {
+    nextX = wrapWorldCoordinate(nextX, terrain.widthTiles * TILE);
+  } else if (terrain.widthTiles !== null) {
+    nextX = MathUtils.clamp(
+      nextX,
+      0,
+      Math.max((terrain.widthTiles - 1) * TILE, 0)
+    );
+  }
+
+  if (terrain.heightTiles !== null && terrain.wrapZ) {
+    nextZ = wrapWorldCoordinate(nextZ, terrain.heightTiles * TILE);
+  } else if (terrain.heightTiles !== null) {
+    nextZ = MathUtils.clamp(
+      nextZ,
+      0,
+      Math.max((terrain.heightTiles - 1) * TILE, 0)
+    );
+  }
+
+  return { x: nextX, z: nextZ };
+};
 
 const createClipPlanes = () => [
   new Plane(new Vector3(1, 0, 0), 0),
@@ -311,28 +355,34 @@ export const ZarchScene = ({
   const particleSystemRef = useRef(createParticleSystemState());
   const poolsRef = useRef<ScenePools | null>(null);
   const rightRef = useRef(new Vector3());
+  const shipGroupRef = useRef<Group>(null);
+  const shipMeshRef = useRef<Mesh<BufferGeometryType, MeshLambertMaterial>>(null);
+  const shipGeometry = useMemo(() => createPlayerShipGeometry(), []);
+  const shipMaterial = useMemo(
+    () =>
+      new MeshLambertMaterial({
+        color: 0xff_ff_ff,
+        flatShading: true,
+        side: DoubleSide,
+        vertexColors: true
+      }),
+    []
+  );
   const worldRef = useRef<Group>(null);
   const particleSurface = useMemo(
     () => ({
       getHeightAt: (x: number, z: number) => {
-        const gx = Math.floor(x / TILE);
-        const gz = Math.floor(z / TILE);
-
-        if (!terrain.isTileLoaded(gx, gz)) {
+        if (!terrain.isWorldPointLoaded(x, z)) {
           return null;
         }
 
-        if (terrain.isWaterTile(gx, gz)) {
+        if (terrain.isWaterAtWorld(x, z)) {
           return configRef.current.seaY;
         }
 
-        return terrain.getTileAverageHeight(gx, gz);
+        return terrain.sampleHeightAtWorld(x, z);
       },
-      isWaterAt: (x: number, z: number) => {
-        const gx = Math.floor(x / TILE);
-        const gz = Math.floor(z / TILE);
-        return terrain.isTileLoaded(gx, gz) && terrain.isWaterTile(gx, gz);
-      }
+      isWaterAt: (x: number, z: number) => terrain.isWaterAtWorld(x, z)
     }),
     [configRef, terrain]
   );
@@ -362,6 +412,14 @@ export const ZarchScene = ({
   useEffect(() => {
     particleSystemRef.current.count = 0;
   }, [terrain.id]);
+
+  useEffect(
+    () => () => {
+      shipGeometry.dispose();
+      shipMaterial.dispose();
+    },
+    [shipGeometry, shipMaterial]
+  );
 
   useFrame((state, delta) => {
     const camera = cameraRef.current;
@@ -400,100 +458,165 @@ export const ZarchScene = ({
       directionalRef.current.shadow.bias = config.shadowBias;
     }
 
-    forward.set(-Math.sin(runtime.camYaw), 0, -Math.cos(runtime.camYaw));
-    right.set(Math.cos(runtime.camYaw), 0, -Math.sin(runtime.camYaw));
-
-    let ax = 0;
-    let az = 0;
-
-    if (input.keys.ArrowUp || input.keys.w || input.keys.W) {
-      ax -= forward.x;
-      az -= forward.z;
-    }
-    if (input.keys.ArrowDown || input.keys.s || input.keys.S) {
-      ax += forward.x;
-      az += forward.z;
-    }
-    if (input.keys.ArrowLeft || input.keys.a || input.keys.A) {
-      ax += right.x;
-      az += right.z;
-    }
-    if (input.keys.ArrowRight || input.keys.d || input.keys.D) {
-      ax -= right.x;
-      az -= right.z;
-    }
     if (input.keys.q || input.keys.Q) {
-      runtime.camZoomTarget = clampZoom(
-        runtime.camZoomTarget - config.keyboardZoomSpeed * dt,
+      runtime.camera.zoomTarget = clampZoom(
+        runtime.camera.zoomTarget - config.keyboardZoomSpeed * dt,
         config.zoomMin,
         config.zoomMax
       );
     }
     if (input.keys.e || input.keys.E) {
-      runtime.camZoomTarget = clampZoom(
-        runtime.camZoomTarget + config.keyboardZoomSpeed * dt,
+      runtime.camera.zoomTarget = clampZoom(
+        runtime.camera.zoomTarget + config.keyboardZoomSpeed * dt,
         config.zoomMin,
         config.zoomMax
       );
     }
 
-    runtime.velX += ax * 400 * dt;
-    runtime.velZ += az * 400 * dt;
-    runtime.velX -= runtime.velX * 2.5 * dt;
-    runtime.velZ -= runtime.velZ * 2.5 * dt;
-    runtime.camX += runtime.velX * dt;
-    runtime.camZ += runtime.velZ * dt;
-    if (terrain.widthTiles !== null && terrain.wrapX) {
-      runtime.camX = wrapWorldCoordinate(
-        runtime.camX,
-        terrain.widthTiles * TILE
-      );
-    } else if (terrain.widthTiles !== null) {
-      runtime.camX = MathUtils.clamp(
-        runtime.camX,
-        0,
-        Math.max((terrain.widthTiles - 1) * TILE, 0)
-      );
-    }
-    if (terrain.heightTiles !== null && terrain.wrapZ) {
-      runtime.camZ = wrapWorldCoordinate(
-        runtime.camZ,
-        terrain.heightTiles * TILE
-      );
-    } else if (terrain.heightTiles !== null) {
-      runtime.camZ = MathUtils.clamp(
-        runtime.camZ,
-        0,
-        Math.max((terrain.heightTiles - 1) * TILE, 0)
-      );
-    }
-    runtime.camZoom = MathUtils.damp(
-      runtime.camZoom,
-      runtime.camZoomTarget,
+    runtime.camera.zoom = MathUtils.damp(
+      runtime.camera.zoom,
+      runtime.camera.zoomTarget,
       config.zoomDamping,
       dt
     );
-    runtime.score += Math.trunc(
-      Math.round(Math.abs(runtime.velX) + Math.abs(runtime.velZ)) * dt
-    );
 
-    const zoomRadius = config.viewRadiusBase * runtime.camZoom;
+    if (runtime.mode === 'navigation') {
+      forward.set(
+        -Math.sin(runtime.navigation.yaw),
+        0,
+        -Math.cos(runtime.navigation.yaw)
+      );
+      right.set(
+        Math.cos(runtime.navigation.yaw),
+        0,
+        -Math.sin(runtime.navigation.yaw)
+      );
+
+      let ax = 0;
+      let az = 0;
+
+      if (input.keys.ArrowUp || input.keys.w || input.keys.W) {
+        ax -= forward.x;
+        az -= forward.z;
+      }
+      if (input.keys.ArrowDown || input.keys.s || input.keys.S) {
+        ax += forward.x;
+        az += forward.z;
+      }
+      if (input.keys.ArrowLeft || input.keys.a || input.keys.A) {
+        ax += right.x;
+        az += right.z;
+      }
+      if (input.keys.ArrowRight || input.keys.d || input.keys.D) {
+        ax -= right.x;
+        az -= right.z;
+      }
+
+      runtime.navigation.velX += ax * 400 * dt;
+      runtime.navigation.velZ += az * 400 * dt;
+      runtime.navigation.velX -= runtime.navigation.velX * 2.5 * dt;
+      runtime.navigation.velZ -= runtime.navigation.velZ * 2.5 * dt;
+      runtime.navigation.x += runtime.navigation.velX * dt;
+      runtime.navigation.z += runtime.navigation.velZ * dt;
+
+      const focus = clampOrWrapFocus({
+        terrain,
+        x: runtime.navigation.x,
+        z: runtime.navigation.z
+      });
+
+      runtime.navigation.x = focus.x;
+      runtime.navigation.z = focus.z;
+      runtime.camera.x = focus.x;
+      runtime.camera.z = focus.z;
+      runtime.camera.yaw = runtime.navigation.yaw;
+      runtime.score += Math.trunc(
+        Math.round(
+          Math.abs(runtime.navigation.velX) + Math.abs(runtime.navigation.velZ)
+        ) * dt
+      );
+    } else if (runtime.ship) {
+      const shipStep = stepPlayerShip({
+        deltaSeconds: dt,
+        input: {
+          pitchDown: isCodePressed(input, 'KeyW', 'w') || input.keys.W,
+          pitchUp: isCodePressed(input, 'KeyS', 's') || input.keys.S,
+          thrust: isCodePressed(input, 'Space', ' '),
+          yawLeft: isCodePressed(input, 'KeyA', 'a') || input.keys.A,
+          yawRight: isCodePressed(input, 'KeyD', 'd') || input.keys.D
+        },
+        state: runtime.ship,
+        surface: {
+          isWaterAtWorld: terrain.isWaterAtWorld,
+          isWorldPointLoaded: terrain.isWorldPointLoaded,
+          sampleHeightAtWorld: terrain.sampleHeightAtWorld,
+          waterHeight: config.seaY
+        }
+      });
+
+      runtime.ship = shipStep.state;
+      runtime.camera.x = runtime.ship.x;
+      runtime.camera.z = runtime.ship.z;
+      runtime.score += Math.trunc(
+        Math.round(
+          Math.abs(runtime.ship.velX) +
+            Math.abs(runtime.ship.velY) +
+            Math.abs(runtime.ship.velZ)
+        ) * dt
+      );
+
+      if (shipStep.event?.kind === 'crash') {
+        emitTapParticlePreset(
+          particleSystem,
+          shipStep.event.water ? 'water-tap' : 'land-tap',
+          {
+            x: shipStep.event.x,
+            y: shipStep.event.y,
+            z: shipStep.event.z
+          },
+          config
+        );
+      }
+    }
+
+    const zoomRadius = config.viewRadiusBase * runtime.camera.zoom;
     const viewRadius = Math.ceil(zoomRadius);
     const clipRadius = Math.max((zoomRadius - 0.6) * TILE, TILE);
     const pullBack = clipRadius * config.cameraPullbackMultiplier;
     const cameraHeight = clipRadius * config.cameraHeightMultiplier;
+    const focusY =
+      runtime.mode === 'ship' && runtime.ship ? runtime.ship.y : 0;
 
     camera.position.set(
-      -Math.sin(runtime.camYaw) * pullBack,
-      cameraHeight,
-      -Math.cos(runtime.camYaw) * pullBack
+      -Math.sin(runtime.camera.yaw) * pullBack,
+      focusY + cameraHeight,
+      -Math.cos(runtime.camera.yaw) * pullBack
     );
-    camera.lookAt(0, 0, 0);
+    camera.lookAt(0, focusY, 0);
 
-    const camTileX = Math.floor(runtime.camX / TILE);
-    const camTileZ = Math.floor(runtime.camZ / TILE);
+    const camTileX = Math.floor(runtime.camera.x / TILE);
+    const camTileZ = Math.floor(runtime.camera.z / TILE);
 
     terrain.requestVisibleChunks(camTileX, camTileZ, viewRadius);
+
+    if (shipGroupRef.current) {
+      if (runtime.mode === 'ship' && runtime.ship) {
+        shipGroupRef.current.visible = true;
+        shipGroupRef.current.rotation.order = 'YXZ';
+        shipGroupRef.current.position.set(
+          runtime.ship.x - runtime.camera.x,
+          runtime.ship.y,
+          runtime.ship.z - runtime.camera.z
+        );
+        shipGroupRef.current.rotation.set(
+          runtime.ship.pitch,
+          runtime.ship.yaw,
+          0
+        );
+      } else {
+        shipGroupRef.current.visible = false;
+      }
+    }
 
     let tileIndex = 0;
     let treeIndex = 0;
@@ -502,8 +625,8 @@ export const ZarchScene = ({
       for (let dx = -viewRadius; dx <= viewRadius; dx += 1) {
         const gx = camTileX + dx;
         const gz = camTileZ + dz;
-        const worldX = gx * TILE - runtime.camX;
-        const worldZ = gz * TILE - runtime.camZ;
+        const worldX = gx * TILE - runtime.camera.x;
+        const worldZ = gz * TILE - runtime.camera.z;
 
         if (!terrain.containsTile(gx, gz)) {
           continue;
@@ -672,9 +795,9 @@ export const ZarchScene = ({
               particleSystem,
               isWater ? 'water-tap' : 'land-tap',
               {
-                x: hit.point.x + runtime.camX,
+                x: hit.point.x + runtime.camera.x,
                 y: isWater ? config.seaY : hit.point.y,
-                z: hit.point.z + runtime.camZ
+                z: hit.point.z + runtime.camera.z
               },
               config
             );
@@ -697,9 +820,9 @@ export const ZarchScene = ({
       );
 
       particleDummy.position.set(
-        particleSystem.x[index] - runtime.camX,
+        particleSystem.x[index] - runtime.camera.x,
         particleSystem.y[index],
-        particleSystem.z[index] - runtime.camZ
+        particleSystem.z[index] - runtime.camera.z
       );
       particleDummy.quaternion.copy(camera.quaternion);
       particleDummy.scale.set(size, size * aspect, 1);
@@ -722,9 +845,9 @@ export const ZarchScene = ({
         (1 + Math.min(heightAboveSurface * 0.025, 1.2));
       const shadowDepth = shadowScale * (aspect * config.particleShadowStretch);
       particleShadowDummy.position.set(
-        particleSystem.x[index] - runtime.camX,
+        particleSystem.x[index] - runtime.camera.x,
         surfaceHeight + config.particleShadowLift,
-        particleSystem.z[index] - runtime.camZ
+        particleSystem.z[index] - runtime.camera.z
       );
       particleShadowDummy.rotation.set(-Math.PI / 2, 0, 0);
       particleShadowDummy.scale.set(shadowScale, shadowDepth, 1);
@@ -767,6 +890,16 @@ export const ZarchScene = ({
         ref={cameraRef}
       />
       <group ref={worldRef}>
+        <group ref={shipGroupRef} visible={false}>
+          <mesh
+            castShadow
+            geometry={shipGeometry}
+            material={shipMaterial}
+            receiveShadow
+            ref={shipMeshRef}
+            rotation={[0, -Math.PI * 0.5, Math.PI]}
+          />
+        </group>
         <ZarchStaticEntities map={map} runtimeRef={runtimeRef} />
       </group>
       <ambientLight intensity={ambientIntensity} ref={ambientRef} />

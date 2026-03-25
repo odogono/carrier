@@ -32,7 +32,9 @@ export type ZarchTerrain = {
   heightTiles: number | null;
   id: string;
   isTileLoaded: (gx: number, gz: number) => boolean;
+  isWaterAtWorld: (worldX: number, worldZ: number) => boolean;
   isWaterTile: (gx: number, gz: number) => boolean;
+  isWorldPointLoaded: (worldX: number, worldZ: number) => boolean;
   requestVisibleChunks: (
     centerTileX: number,
     centerTileZ: number,
@@ -40,6 +42,12 @@ export type ZarchTerrain = {
   ) => void;
   resolveTileMaterial: (gx: number, gz: number, elevation: number) => MapSurfaceMaterial;
   sampleHeight: (gx: number, gz: number) => number | null;
+  sampleHeightAtWorld: (worldX: number, worldZ: number) => number | null;
+  sampleNormalAtWorld: (worldX: number, worldZ: number) => {
+    x: number;
+    y: number;
+    z: number;
+  } | null;
   shouldHaveTree: (gx: number, gz: number) => boolean;
   tileColor: (
     gx: number,
@@ -48,9 +56,9 @@ export type ZarchTerrain = {
     target?: Color
   ) => Color;
   treeType: (gx: number, gz: number) => ZarchTreeType;
+  widthTiles: number | null;
   wrapX: boolean;
   wrapZ: boolean;
-  widthTiles: number | null;
 };
 export const clampZoom = (zoom: number, min = ZOOM_MIN, max = ZOOM_MAX) =>
   Math.max(min, Math.min(max, zoom));
@@ -86,6 +94,76 @@ export const isWaterTileFromHeights = (
 
 export const shouldHaveTree = (gx: number, gz: number) =>
   tileHash(gx, gz) < 0.1;
+
+export const sampleHeightAtWorldFromGrid = (
+  sampleHeight: (gx: number, gz: number) => number | null,
+  worldX: number,
+  worldZ: number
+) => {
+  const gridX = worldX / TILE;
+  const gridZ = worldZ / TILE;
+  const x0 = Math.floor(gridX);
+  const z0 = Math.floor(gridZ);
+  const x1 = x0 + 1;
+  const z1 = z0 + 1;
+  const tx = gridX - x0;
+  const tz = gridZ - z0;
+  const h00 = sampleHeight(x0, z0);
+  const h10 = sampleHeight(x1, z0);
+  const h01 = sampleHeight(x0, z1);
+  const h11 = sampleHeight(x1, z1);
+
+  if (
+    h00 === null ||
+    h10 === null ||
+    h01 === null ||
+    h11 === null
+  ) {
+    return null;
+  }
+
+  const top = h00 * (1 - tx) + h10 * tx;
+  const bottom = h01 * (1 - tx) + h11 * tx;
+  return top * (1 - tz) + bottom * tz;
+};
+
+export const sampleNormalAtWorldFromGrid = (
+  sampleHeightAtWorld: (worldX: number, worldZ: number) => number | null,
+  worldX: number,
+  worldZ: number,
+  offset = TILE * 0.25
+) => {
+  const left = sampleHeightAtWorld(worldX - offset, worldZ);
+  const right = sampleHeightAtWorld(worldX + offset, worldZ);
+  const down = sampleHeightAtWorld(worldX, worldZ - offset);
+  const up = sampleHeightAtWorld(worldX, worldZ + offset);
+
+  if (
+    left === null ||
+    right === null ||
+    down === null ||
+    up === null
+  ) {
+    return null;
+  }
+
+  const dx = (right - left) / (offset * 2);
+  const dz = (up - down) / (offset * 2);
+  const nx = -dx;
+  const ny = 1;
+  const nz = -dz;
+  const length = Math.hypot(nx, ny, nz);
+
+  if (length === 0) {
+    return { x: 0, y: 1, z: 0 };
+  }
+
+  return {
+    x: nx / length,
+    y: ny / length,
+    z: nz / length
+  };
+};
 
 export const getTreeType = (gx: number, gz: number): ZarchTreeType => {
   const value = Math.sin(gx * 311.7 + gz * 127.1) * 43_758.5453;

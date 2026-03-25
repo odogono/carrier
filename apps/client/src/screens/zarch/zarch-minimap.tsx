@@ -16,8 +16,10 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const { widthTiles, heightTiles } = terrain;
-    if (widthTiles === null || heightTiles === null) return;
+    const { heightTiles, widthTiles } = terrain;
+    if (widthTiles === null || heightTiles === null) {
+      return;
+    }
 
     const canvas = canvasRef.current;
 
@@ -95,7 +97,7 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
           0,
           Math.round(
             (wrapWorldCoordinate(
-              runtimeRef.current?.camX ?? 0,
+              runtimeRef.current?.camera.x ?? 0,
               Math.max(widthTiles * TILE, TILE)
             ) /
               Math.max(widthTiles * TILE, TILE)) *
@@ -109,7 +111,7 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
           0,
           Math.round(
             (wrapWorldCoordinate(
-              runtimeRef.current?.camZ ?? 0,
+              runtimeRef.current?.camera.z ?? 0,
               Math.max(heightTiles * TILE, TILE)
             ) /
               Math.max(heightTiles * TILE, TILE)) *
@@ -132,7 +134,9 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
     };
   }, [runtimeRef, terrain]);
 
-  if (terrain.widthTiles === null || terrain.heightTiles === null) return null;
+  if (terrain.widthTiles === null || terrain.heightTiles === null) {
+    return null;
+  }
 
   return (
     <canvas

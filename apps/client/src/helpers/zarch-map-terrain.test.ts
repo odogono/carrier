@@ -1,3 +1,4 @@
+/* eslint-disable perfectionist/sort-objects */
 /* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
 
@@ -121,6 +122,26 @@ describe('server-backed zarch terrain', () => {
     expect(terrain.sampleHeight(65, 0)).toBeNull();
     expect(terrain.containsTile(-1, 0)).toBe(false);
     expect(terrain.containsTile(63, 63)).toBe(true);
+  });
+
+  test('samples world-space height and normal continuously', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
+
+    const terrain = createServerMapTerrain({
+      map,
+      prefetchChunk: () => {},
+      queryClient
+    });
+
+    expect(terrain.sampleHeightAtWorld(12, 12)).toBe((0 + 1 + 33 + 34) * 0.25);
+    expect(terrain.isWorldPointLoaded(12, 12)).toBe(true);
+    expect(terrain.sampleNormalAtWorld(12, 12)).toEqual({
+      x: expect.any(Number),
+      y: expect.any(Number),
+      z: expect.any(Number)
+    });
+    expect(terrain.isWaterAtWorld(12, 12)).toBe(false);
   });
 
   test('requests visible chunks with a one-ring prefetch window', () => {

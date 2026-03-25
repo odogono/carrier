@@ -1,4 +1,3 @@
-/* eslint-disable import-x/no-unresolved */
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import {
   isFiniteMap,
@@ -11,7 +10,10 @@ import {
   WATER_LEVEL,
   applyTileColor,
   getTreeType,
+  sampleHeightAtWorldFromGrid,
+  sampleNormalAtWorldFromGrid,
   shouldHaveTree,
+  TILE,
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
 
@@ -277,6 +279,24 @@ export const createServerMapTerrain = ({
   const isTileLoaded = (gx: number, gz: number) =>
     containsTile(gx, gz) && getTileAverageHeight(gx, gz) !== null;
 
+  const sampleHeightAtWorld = (worldX: number, worldZ: number) =>
+    sampleHeightAtWorldFromGrid(sampleHeight, worldX, worldZ);
+
+  const isWorldPointLoaded = (worldX: number, worldZ: number) =>
+    sampleHeightAtWorld(worldX, worldZ) !== null;
+
+  const isWaterAtWorld = (worldX: number, worldZ: number) => {
+    const gx = Math.floor(worldX / TILE);
+    const gz = Math.floor(worldZ / TILE);
+
+    return isTileLoaded(gx, gz) && isWaterTile(gx, gz);
+  };
+
+  const isWaterTile = (gx: number, gz: number) => {
+    const average = getTileAverageHeight(gx, gz);
+    return average !== null && average < WATER_LEVEL;
+  };
+
   const shouldHaveTreeAt = (gx: number, gz: number) => {
     if (!containsTile(gx, gz)) {
       return false;
@@ -293,10 +313,9 @@ export const createServerMapTerrain = ({
     heightTiles: mapHeightTiles,
     id: map.id,
     isTileLoaded,
-    isWaterTile: (gx, gz) => {
-      const average = getTileAverageHeight(gx, gz);
-      return average !== null && average < WATER_LEVEL;
-    },
+    isWaterAtWorld,
+    isWaterTile,
+    isWorldPointLoaded,
     requestVisibleChunks: (centerTileX, centerTileZ, viewRadiusTiles) => {
       chunkLookupCache.clear();
       heightLookupCache.clear();
@@ -336,6 +355,9 @@ export const createServerMapTerrain = ({
     },
     resolveTileMaterial,
     sampleHeight,
+    sampleHeightAtWorld,
+    sampleNormalAtWorld: (worldX, worldZ) =>
+      sampleNormalAtWorldFromGrid(sampleHeightAtWorld, worldX, worldZ),
     shouldHaveTree: shouldHaveTreeAt,
     tileColor: (gx, gz, elevation, target) => {
       const c = canonicalize(gx, gz);
@@ -351,8 +373,8 @@ export const createServerMapTerrain = ({
       const c = canonicalize(gx, gz);
       return getTreeType(c.x, c.z);
     },
+    widthTiles: mapWidthTiles,
     wrapX: wrappedFinite,
-    wrapZ: wrappedFinite,
-    widthTiles: mapWidthTiles
+    wrapZ: wrappedFinite
   };
 };

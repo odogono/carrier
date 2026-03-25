@@ -278,10 +278,10 @@ export const ZarchStaticEntities = ({
 
     const runtime = runtimeRef.current;
     const config = configRef.current;
-    const zoomRadius = config.viewRadiusBase * runtime.camZoom;
+    const zoomRadius = config.viewRadiusBase * runtime.camera.zoom;
     const viewRadius = Math.ceil(zoomRadius);
-    const camTileX = Math.floor(runtime.camX / TILE);
-    const camTileZ = Math.floor(runtime.camZ / TILE);
+    const camTileX = Math.floor(runtime.camera.x / TILE);
+    const camTileZ = Math.floor(runtime.camera.z / TILE);
     const visibleWindow = getVisibleChunkWindow(
       map,
       camTileX,
@@ -343,7 +343,7 @@ export const ZarchStaticEntities = ({
       }
     }
 
-    root.position.set(-runtime.camX, 0, -runtime.camZ);
+    root.position.set(-runtime.camera.x, 0, -runtime.camera.z);
 
     const visibleCloneIds = new Set<string>();
     const instanceGroups = new Map<
@@ -373,8 +373,8 @@ export const ZarchStaticEntities = ({
       const sceneZ = entity.position.z * worldScale;
 
       if (
-        Math.abs(sceneX - runtime.camX) > maxDistance ||
-        Math.abs(sceneZ - runtime.camZ) > maxDistance
+        Math.abs(sceneX - runtime.camera.x) > maxDistance ||
+        Math.abs(sceneZ - runtime.camera.z) > maxDistance
       ) {
         continue;
       }

@@ -11,13 +11,14 @@ import { createLog } from 'odgn-ts-helpers/log';
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
-import { TILE } from '@/helpers/zarch-terrain';
+import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DevSceneControls,
   useSceneConfigValue
 } from '@/hooks/use-scene-controls';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
+import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
@@ -48,7 +49,13 @@ const MainInner = () => {
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
   }, []);
-  const { containerProps, inputRef, runtimeRef } = useZarchRuntime({
+  const {
+    containerProps,
+    enterShipMode,
+    exitShipMode,
+    inputRef,
+    runtimeRef
+  } = useZarchRuntime({
     containerElement
   });
   const { error, isLoading, map, terrain } = useServerMapTerrain();
@@ -73,14 +80,44 @@ const MainInner = () => {
 
     initializedMapIdRef.current = map.id;
     const initialCamera = getInitialCameraState(map);
-    runtimeRef.current.camX = initialCamera.camX;
-    runtimeRef.current.camZ = initialCamera.camZ;
-    runtimeRef.current.camYaw = 0;
-    runtimeRef.current.camZoom = 1;
-    runtimeRef.current.camZoomTarget = 1;
-    runtimeRef.current.velX = 0;
-    runtimeRef.current.velZ = 0;
+    runtimeRef.current.mode = 'navigation';
+    runtimeRef.current.camera.x = initialCamera.camX;
+    runtimeRef.current.camera.z = initialCamera.camZ;
+    runtimeRef.current.camera.yaw = 0;
+    runtimeRef.current.camera.zoom = 1;
+    runtimeRef.current.camera.zoomTarget = 1;
+    runtimeRef.current.navigation.x = initialCamera.camX;
+    runtimeRef.current.navigation.z = initialCamera.camZ;
+    runtimeRef.current.navigation.yaw = 0;
+    runtimeRef.current.navigation.velX = 0;
+    runtimeRef.current.navigation.velZ = 0;
+    runtimeRef.current.ship = null;
   }, [map, runtimeRef]);
+
+  const handleToggleMode = useCallback(() => {
+    if (!map || !terrain) {
+      return;
+    }
+
+    if (runtimeRef.current.mode === 'ship') {
+      exitShipMode();
+      containerElement?.focus();
+      return;
+    }
+
+    const initialCamera = getInitialCameraState(map);
+    enterShipMode(
+      createPlayerShipSpawnState({
+        surface: {
+          sampleHeightAtWorld: terrain.sampleHeightAtWorld,
+          waterHeight: SEA_Y
+        },
+        x: initialCamera.camX,
+        z: initialCamera.camZ
+      })
+    );
+    containerElement?.focus();
+  }, [containerElement, enterShipMode, exitShipMode, map, runtimeRef, terrain]);
 
   if (isLoading) {
     return (
@@ -134,7 +171,13 @@ const MainInner = () => {
           />
         </Canvas>
 
-        {showHud && <ZarchHud runtimeRef={runtimeRef} terrain={terrain} />}
+        {showHud && (
+          <ZarchHud
+            onToggleMode={handleToggleMode}
+            runtimeRef={runtimeRef}
+            terrain={terrain}
+          />
+        )}
         {showMinimap && (
           <ZarchMinimap runtimeRef={runtimeRef} terrain={terrain} />
         )}
