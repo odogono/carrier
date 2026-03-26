@@ -56,8 +56,8 @@ import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
   createParticleSystemState,
+  emitShipCrashParticles,
   emitShipThrustParticles,
-  emitTapParticlePreset,
   simulateParticleSystem
 } from './zarch-particles';
 import { ZarchStaticEntities } from './zarch-static-entities';
@@ -589,13 +589,15 @@ export const ZarchScene = ({
       }
 
       if (shipStep.event?.kind === 'crash') {
-        emitTapParticlePreset(
+        emitShipCrashParticles(
           particleSystem,
-          shipStep.event.water ? 'water-tap' : 'land-tap',
           {
-            x: shipStep.event.x,
-            y: shipStep.event.y,
-            z: shipStep.event.z
+            origin: {
+              x: shipStep.event.x,
+              y: shipStep.event.y,
+              z: shipStep.event.z
+            },
+            water: shipStep.event.water
           },
           config
         );
@@ -623,7 +625,11 @@ export const ZarchScene = ({
     terrain.requestVisibleChunks(camTileX, camTileZ, viewRadius);
 
     if (shipGroupRef.current) {
-      if (runtime.mode === 'ship' && runtime.ship) {
+      if (
+        runtime.mode === 'ship' &&
+        runtime.ship &&
+        runtime.ship.respawnDelaySeconds <= 0
+      ) {
         shipGroupRef.current.visible = true;
         shipGroupRef.current.rotation.order = 'YXZ';
         shipGroupRef.current.position.set(

@@ -27,6 +27,7 @@ export type PlayerShipSpec = {
   pitchRate: number;
   probeOffsets: PlayerShipProbe[];
   respawnClearance: number;
+  respawnDelaySeconds: number;
   spawnGraceSeconds: number;
   thrustAcceleration: number;
   verticalDrag: number;
@@ -72,6 +73,7 @@ export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
     { x: 3.2, y: -0.8, z: -1.2 }
   ],
   respawnClearance: 48,
+  respawnDelaySeconds: 1.25,
   spawnGraceSeconds: 0.75,
   thrustAcceleration: 110,
   verticalDrag: 0.18,
@@ -153,6 +155,7 @@ export const createPlayerShipSpawnState = ({
 
   return {
     pitch: 0,
+    respawnDelaySeconds: 0,
     respawnX: x,
     respawnY: spawnY,
     respawnZ: z,
@@ -184,6 +187,36 @@ export const stepPlayerShip = ({
   const next: ZarchShipState = {
     ...state
   };
+
+  if (next.respawnDelaySeconds > 0) {
+    next.respawnDelaySeconds = Math.max(0, next.respawnDelaySeconds - dt);
+
+    if (next.respawnDelaySeconds > 0) {
+      return {
+        event: null,
+        state: next
+      };
+    }
+
+    const respawnState = createPlayerShipSpawnState({
+      spec,
+      surface,
+      x: state.respawnX,
+      yaw: state.yaw,
+      z: state.respawnZ
+    });
+
+    return {
+      event: null,
+      state: {
+        ...respawnState,
+        respawnX: state.respawnX,
+        respawnY: state.respawnY,
+        respawnZ: state.respawnZ
+      }
+    };
+  }
+
   const pitchInput =
     (input.pitchUp ? 1 : 0) -
     (input.pitchDown ? 1 : 0);
@@ -259,14 +292,6 @@ export const stepPlayerShip = ({
     const collisionHeight = water ? surface.waterHeight : terrainHeight;
 
     if (next.spawnGraceSeconds <= 0 && probeY <= collisionHeight) {
-      const respawnState = createPlayerShipSpawnState({
-        spec,
-        surface,
-        x: state.respawnX,
-        yaw: state.yaw,
-        z: state.respawnZ
-      });
-
       return {
         event: {
           kind: 'crash',
@@ -276,10 +301,15 @@ export const stepPlayerShip = ({
           z: probeZ
         },
         state: {
-          ...respawnState,
-          respawnX: state.respawnX,
-          respawnY: state.respawnY,
-          respawnZ: state.respawnZ
+          ...next,
+          respawnDelaySeconds: spec.respawnDelaySeconds,
+          spawnGraceSeconds: 0,
+          velX: 0,
+          velY: 0,
+          velZ: 0,
+          x: probeX,
+          y: collisionHeight,
+          z: probeZ
         }
       };
     }

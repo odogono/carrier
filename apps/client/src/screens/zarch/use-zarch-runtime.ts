@@ -35,6 +35,7 @@ export type ZarchNavigationState = {
 
 export type ZarchShipState = {
   pitch: number;
+  respawnDelaySeconds: number;
   respawnX: number;
   respawnY: number;
   respawnZ: number;

@@ -14,6 +14,7 @@ import {
   SPRAY_PALETTE,
   addParticle,
   createParticleSystemState,
+  emitShipCrashParticles,
   emitShipThrustParticles,
   emitTapParticlePreset,
   simulateParticleSystem
@@ -68,7 +69,9 @@ describe('zarch particle emitters', () => {
 
       if (state.kind[index] === PARTICLE_KINDS.spark) {
         expect(SPARK_PALETTE).toContain(color);
-        expect(SPARK_SIZES).toContain(state.size[index]);
+        expect(
+          SPARK_SIZES.map(size => size * DEFAULT_PARTICLE_CONFIG.particleSizeScale)
+        ).toContain(state.size[index]);
         expect(
           (state.flags[index] & PARTICLE_FLAGS.fadeToRed) !== 0
         ).toBe(true);
@@ -76,7 +79,11 @@ describe('zarch particle emitters', () => {
 
       if (state.kind[index] === PARTICLE_KINDS.debris) {
         expect(DEBRIS_PALETTE).toContain(color);
-        expect(DEBRIS_SIZES).toContain(state.size[index]);
+        expect(
+          DEBRIS_SIZES.map(
+            size => size * DEFAULT_PARTICLE_CONFIG.particleSizeScale
+          )
+        ).toContain(state.size[index]);
       }
 
       if (state.kind[index] === PARTICLE_KINDS.smoke) {
@@ -199,6 +206,29 @@ describe('zarch particle emitters', () => {
     expect(countKind(state.kind, state.count, PARTICLE_KINDS.spark)).toBeGreaterThan(
       0
     );
+  });
+
+  test('emits a larger crash burst for ship impacts', () => {
+    const state = createParticleSystemState();
+    emitShipCrashParticles(
+      state,
+      {
+        origin: { x: 0, y: 10, z: 0 },
+        water: false
+      },
+      DEFAULT_PARTICLE_CONFIG,
+      createRng([0.1, 0.3, 0.6, 0.9])
+    );
+
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.spark)).toBeGreaterThan(
+      0
+    );
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.smoke)).toBeGreaterThan(
+      0
+    );
+    expect(
+      countKind(state.kind, state.count, PARTICLE_KINDS.debris)
+    ).toBeGreaterThan(DEFAULT_PARTICLE_CONFIG.particleThrustLandDustCount);
   });
 });
 

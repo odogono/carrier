@@ -76,7 +76,7 @@ describe('zarch player ship simulation', () => {
     expect(thrustVector.z).not.toBe(0);
   });
 
-  test('crashes on terrain contact and respawns at the saved spawn point', () => {
+  test('crashes on terrain contact and waits before respawning at the saved spawn point', () => {
     const initial = createPlayerShipSpawnState({
       surface: makeSurface({ terrainHeight: 10 }),
       x: 48,
@@ -107,9 +107,51 @@ describe('zarch player ship simulation', () => {
       y: 10,
       z: expect.any(Number)
     });
-    expect(result.state.x).toBe(initial.respawnX);
-    expect(result.state.z).toBe(initial.respawnZ);
-    expect(result.state.y).toBe(initial.respawnY);
+    expect(result.state.x).toBe(result.event.x);
+    expect(result.state.z).toBe(result.event.z);
+    expect(result.state.y).toBe(result.event.y);
+    expect(result.state.respawnDelaySeconds).toBeGreaterThan(0);
+
+    const waiting = stepPlayerShip({
+      deltaSeconds: result.state.respawnDelaySeconds * 0.5,
+      input: {
+        pitchDown: false,
+        pitchUp: false,
+        thrust: true,
+        yawLeft: false,
+        yawRight: false
+      },
+      state: result.state,
+      surface: makeSurface({ terrainHeight: 10 })
+    });
+
+    expect(waiting.event).toBeNull();
+    expect(waiting.state.x).toBe(result.state.x);
+    expect(waiting.state.y).toBe(result.state.y);
+    expect(waiting.state.respawnDelaySeconds).toBeGreaterThan(0);
+
+    let respawned = waiting;
+
+    while (respawned.state.respawnDelaySeconds > 0) {
+      respawned = stepPlayerShip({
+        deltaSeconds: 0.05,
+        input: {
+          pitchDown: false,
+          pitchUp: false,
+          thrust: false,
+          yawLeft: false,
+          yawRight: false
+        },
+        state: respawned.state,
+        surface: makeSurface({ terrainHeight: 10 })
+      });
+    }
+
+    expect(respawned.event).toBeNull();
+    expect(respawned.state.x).toBe(initial.respawnX);
+    expect(respawned.state.z).toBe(initial.respawnZ);
+    expect(respawned.state.y).toBe(initial.respawnY);
+    expect(respawned.state.respawnDelaySeconds).toBe(0);
   });
 
   test('blocks movement when terrain samples are unavailable', () => {
