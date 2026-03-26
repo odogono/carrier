@@ -1,5 +1,6 @@
 export const PARTICLE_CAPACITY = 256;
 export const SMALL_EXPLOSION_CLUSTER_COUNT = 3;
+export const SHIP_THRUST_PARTICLES_PER_SECOND = 42;
 export const WATER_TAP_SPRAY_COUNT = 20;
 export const WATER_IMPACT_SPRAY_COUNT = 10;
 export const PARTICLE_GRAVITY = 180;
@@ -11,20 +12,20 @@ export const PARTICLE_KINDS = {
   spray: 3
 } as const;
 
-export type ParticleKind =
-  (typeof PARTICLE_KINDS)[keyof typeof PARTICLE_KINDS];
+export type ParticleKind = (typeof PARTICLE_KINDS)[keyof typeof PARTICLE_KINDS];
 
 export const PARTICLE_FLAGS = {
   bounce: 1 << 1,
   fadeToRed: 1 << 2,
   gravity: 1 << 0,
+  splashOnLandImpact: 1 << 4,
   splashOnWaterImpact: 1 << 3
 } as const;
 
 export type ParticleFlags =
   (typeof PARTICLE_FLAGS)[keyof typeof PARTICLE_FLAGS];
 
-export type ParticleEmitterPreset = 'land-tap' | 'water-tap';
+export type ParticleEmitterPreset = 'land-tap' | 'ship-thrust' | 'water-tap';
 
 export type ZarchParticleConfig = {
   particleGravity: number;
@@ -38,12 +39,24 @@ export type ZarchParticleConfig = {
   particleSmokeRiseScale: number;
   particleTapMaxDurationMs: number;
   particleTapMaxMovementPx: number;
+  particleThrustEmissionRate: number;
+  particleThrustLandDustCount: number;
+  particleThrustSpeed: number;
+  particleThrustSpread: number;
+  particleThrustWaterDisturbanceHeight: number;
+  particleThrustWaterSprayCount: number;
   particleWaterImpactSprayCount: number;
   particleWaterVelocityScale: number;
   particleWaterWaveCount: number;
 };
 
 export type ParticleOrigin = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ParticleVector = {
   x: number;
   y: number;
   z: number;
@@ -104,10 +117,16 @@ export const DEFAULT_PARTICLE_CONFIG: ZarchParticleConfig = {
   particleShadowOpacity: 0.34,
   particleShadowScale: 1,
   particleShadowStretch: 0.7,
-  particleSizeScale: 1,
+  particleSizeScale: 0.5,
   particleSmokeRiseScale: 1,
   particleTapMaxDurationMs: 200,
   particleTapMaxMovementPx: 8,
+  particleThrustEmissionRate: SHIP_THRUST_PARTICLES_PER_SECOND,
+  particleThrustLandDustCount: 4,
+  particleThrustSpeed: 46,
+  particleThrustSpread: 10,
+  particleThrustWaterDisturbanceHeight: 20,
+  particleThrustWaterSprayCount: 4,
   particleWaterImpactSprayCount: WATER_IMPACT_SPRAY_COUNT,
   particleWaterVelocityScale: 1,
   particleWaterWaveCount: WATER_TAP_SPRAY_COUNT + 12
@@ -123,6 +142,83 @@ const randomRange = (min: number, max: number, rng: () => number) =>
 
 const randomSigned = (magnitude: number, rng: () => number) =>
   (rng() * 2 - 1) * magnitude;
+
+const normalizeVector = (vector: ParticleVector) => {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+
+  if (length === 0) {
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length
+  };
+};
+
+const crossVectors = (
+  a: ParticleVector,
+  b: ParticleVector
+): ParticleVector => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x
+});
+
+const scaleVector = (
+  vector: ParticleVector,
+  scalar: number
+): ParticleVector => ({
+  x: vector.x * scalar,
+  y: vector.y * scalar,
+  z: vector.z * scalar
+});
+
+const addVectors = (a: ParticleVector, b: ParticleVector): ParticleVector => ({
+  x: a.x + b.x,
+  y: a.y + b.y,
+  z: a.z + b.z
+});
+
+const getConeBasis = (axis: ParticleVector) => {
+  const fallback =
+    Math.abs(axis.y) < 0.95 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+  const tangent = normalizeVector(crossVectors(axis, fallback));
+  const bitangent = normalizeVector(crossVectors(axis, tangent));
+
+  return { bitangent, tangent };
+};
+
+const sampleDirectionInCone = (
+  axis: ParticleVector,
+  spread: number,
+  rng: () => number
+) => {
+  const normalizedAxis = normalizeVector(axis);
+
+  if (
+    normalizedAxis.x === 0 &&
+    normalizedAxis.y === 0 &&
+    normalizedAxis.z === 0
+  ) {
+    return normalizedAxis;
+  }
+
+  const coneAngle = Math.min(Math.PI / 3, Math.max(0.02, spread * 0.08));
+  const cosTheta = randomRange(Math.cos(coneAngle), 1, rng);
+  const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+  const azimuth = randomRange(0, Math.PI * 2, rng);
+  const { bitangent, tangent } = getConeBasis(normalizedAxis);
+  const radial = addVectors(
+    scaleVector(tangent, Math.cos(azimuth) * sinTheta),
+    scaleVector(bitangent, Math.sin(azimuth) * sinTheta)
+  );
+
+  return normalizeVector(
+    addVectors(scaleVector(normalizedAxis, cosTheta), radial)
+  );
+};
 
 const copyParticle = (
   state: ParticleSystemState,
@@ -251,7 +347,11 @@ const emitSprayBurst = (
       maxAge: randomRange(maxAgeMin, maxAgeMax, rng),
       size: pickOne(sizeSet, rng) * sizeScale,
       vx: randomSigned(speedXz * velocityScale, rng),
-      vy: randomRange(speedYMin * velocityScale, speedYMax * velocityScale, rng),
+      vy: randomRange(
+        speedYMin * velocityScale,
+        speedYMax * velocityScale,
+        rng
+      ),
       vz: randomSigned(speedXz * velocityScale, rng),
       x: origin.x + randomSigned(spread, rng),
       y: origin.y,
@@ -325,6 +425,110 @@ const emitExplosionCluster = (
   });
 };
 
+const emitLandDustBurst = (
+  state: ParticleSystemState,
+  origin: ParticleOrigin,
+  count: number,
+  rng: () => number,
+  config: ZarchParticleConfig
+) => {
+  for (let index = 0; index < count; index += 1) {
+    addParticle(state, {
+      color: pickOne(DEBRIS_PALETTE, rng),
+      flags: PARTICLE_FLAGS.gravity,
+      kind: PARTICLE_KINDS.debris,
+      maxAge: randomRange(0.2, 0.45, rng),
+      size: pickOne(DEBRIS_SIZES, rng) * config.particleSizeScale * 0.7,
+      vx: randomSigned(16, rng),
+      vy: randomRange(6, 18, rng),
+      vz: randomSigned(16, rng),
+      x: origin.x + randomSigned(1.5, rng),
+      y: origin.y,
+      z: origin.z + randomSigned(1.5, rng)
+    });
+  }
+};
+
+export const emitShipThrustParticles = (
+  state: ParticleSystemState,
+  {
+    direction,
+    origin,
+    surface
+  }: {
+    direction: ParticleVector;
+    origin: ParticleOrigin;
+    surface?: ParticleSurface;
+  },
+  config: ZarchParticleConfig = DEFAULT_PARTICLE_CONFIG,
+  rng: () => number = Math.random,
+  deltaSeconds = 1 / 60
+) => {
+  const normalized = normalizeVector(direction);
+  const emissionCount = Math.max(
+    1,
+    Math.round(config.particleThrustEmissionRate * deltaSeconds)
+  );
+  const spread = config.particleThrustSpread;
+  const speed = config.particleThrustSpeed;
+
+  for (let index = 0; index < emissionCount; index += 1) {
+    const speedScale = randomRange(0.75, 1.25, rng);
+    const velocity = sampleDirectionInCone(normalized, spread, rng);
+
+    addParticle(state, {
+      color: pickOne(SPARK_PALETTE, rng),
+      flags:
+        PARTICLE_FLAGS.gravity |
+        PARTICLE_FLAGS.fadeToRed |
+        PARTICLE_FLAGS.splashOnLandImpact |
+        PARTICLE_FLAGS.splashOnWaterImpact,
+      kind: PARTICLE_KINDS.spark,
+      maxAge: randomRange(0.2, 0.85, rng),
+      size: pickOne(SPARK_SIZES, rng) * config.particleSizeScale * 0.85,
+      vx: velocity.x * speed * speedScale,
+      vy: velocity.y * speed * speedScale,
+      vz: velocity.z * speed * speedScale,
+      x: origin.x,
+      y: origin.y,
+      z: origin.z
+    });
+  }
+
+  if (!surface || !surface.isWaterAt(origin.x, origin.z)) {
+    return;
+  }
+
+  const surfaceHeight = surface.getHeightAt(origin.x, origin.z);
+
+  if (
+    surfaceHeight === null ||
+    origin.y - surfaceHeight > config.particleThrustWaterDisturbanceHeight
+  ) {
+    return;
+  }
+
+  emitSprayBurst(
+    state,
+    {
+      x: origin.x,
+      y: surfaceHeight,
+      z: origin.z
+    },
+    config.particleThrustWaterSprayCount,
+    rng,
+    config,
+    {
+      maxAgeMax: 0.45,
+      maxAgeMin: 0.2,
+      speedXz: 24,
+      speedYMax: 20,
+      speedYMin: 8,
+      spread: 2
+    }
+  );
+};
+
 export const emitTapParticlePreset = (
   state: ParticleSystemState,
   preset: ParticleEmitterPreset,
@@ -332,6 +536,19 @@ export const emitTapParticlePreset = (
   config: ZarchParticleConfig = DEFAULT_PARTICLE_CONFIG,
   rng: () => number = Math.random
 ) => {
+  if (preset === 'ship-thrust') {
+    emitShipThrustParticles(
+      state,
+      {
+        direction: { x: 0, y: -1, z: 0 },
+        origin
+      },
+      config,
+      rng
+    );
+    return;
+  }
+
   if (preset === 'water-tap') {
     emitSprayBurst(
       state,
@@ -421,6 +638,20 @@ export const simulateParticleSystem = (
 
         removeParticle(state, index);
         continue;
+      }
+
+      if ((state.flags[index] & PARTICLE_FLAGS.splashOnLandImpact) !== 0) {
+        emitLandDustBurst(
+          state,
+          {
+            x: state.x[index],
+            y: surfaceHeight,
+            z: state.z[index]
+          },
+          config.particleThrustLandDustCount,
+          rng,
+          config
+        );
       }
 
       if ((state.flags[index] & PARTICLE_FLAGS.bounce) !== 0) {

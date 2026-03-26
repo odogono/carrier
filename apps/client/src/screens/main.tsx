@@ -13,6 +13,9 @@ import { connectApi } from '@/helpers/api-link';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
 import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
+  DEV_SCENE_CONTROL_FOLDERS,
+  type DevSceneControlFolder,
+  type DevSceneControlFolderState,
   DevSceneControls,
   useSceneConfigValue
 } from '@/hooks/use-scene-controls';
@@ -25,8 +28,72 @@ import { ZarchMinimap } from './zarch/zarch-minimap';
 import { ZarchScene } from './zarch/zarch-scene';
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
+const LEVA_UI_STATE_STORAGE_KEY = 'carrier:leva-ui-state';
 
 const log = createLog('Main');
+
+type LevaUiState = {
+  collapsed: boolean;
+  folderState: DevSceneControlFolderState;
+  position: {
+    x?: number;
+    y?: number;
+  };
+};
+
+const DEFAULT_LEVA_UI_STATE: LevaUiState = {
+  collapsed: false,
+  folderState: {},
+  position: {}
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const readLevaUiState = (): LevaUiState => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_LEVA_UI_STATE;
+  }
+
+  try {
+    const rawState = window.localStorage.getItem(LEVA_UI_STATE_STORAGE_KEY);
+
+    if (!rawState) {
+      return DEFAULT_LEVA_UI_STATE;
+    }
+
+    const parsed = JSON.parse(rawState) as unknown;
+
+    if (!isRecord(parsed)) {
+      return DEFAULT_LEVA_UI_STATE;
+    }
+
+    const folderState = isRecord(parsed.folderState) ? parsed.folderState : {};
+    const position = isRecord(parsed.position) ? parsed.position : {};
+
+    return {
+      collapsed:
+        typeof parsed.collapsed === 'boolean'
+          ? parsed.collapsed
+          : DEFAULT_LEVA_UI_STATE.collapsed,
+      folderState: Object.fromEntries(
+        DEV_SCENE_CONTROL_FOLDERS.map(folderName => [
+          folderName,
+          typeof folderState[folderName] === 'boolean'
+            ? (folderState[folderName] as boolean)
+            : false
+        ])
+      ) as DevSceneControlFolderState,
+      position: {
+        x: typeof position.x === 'number' ? position.x : undefined,
+        y: typeof position.y === 'number' ? position.y : undefined
+      }
+    };
+  } catch (error) {
+    log.warn('Failed to read persisted Leva state', error);
+    return DEFAULT_LEVA_UI_STATE;
+  }
+};
 
 export const getInitialCameraState = (map: MapMetadata) => {
   if (!isFiniteMap(map)) {
@@ -43,8 +110,12 @@ export const getInitialCameraState = (map: MapMetadata) => {
 };
 
 const MainInner = () => {
+  const [levaUiState, setLevaUiState] = useState<LevaUiState>(() =>
+    readLevaUiState()
+  );
   const [containerElement, setContainerElement] =
     useState<HTMLDivElement | null>(null);
+  const levaContainerRef = useRef<HTMLDivElement | null>(null);
   const initializedMapIdRef = useRef<string | null>(null);
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
@@ -67,6 +138,78 @@ const MainInner = () => {
 
     void connectApi();
   }, []);
+
+  useEffect(() => {
+    if (!IS_DEV || typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      LEVA_UI_STATE_STORAGE_KEY,
+      JSON.stringify(levaUiState)
+    );
+  }, [levaUiState]);
+
+  const updateLevaUiState = useCallback(
+    (updater: (current: LevaUiState) => LevaUiState) => {
+      setLevaUiState(current => updater(current));
+    },
+    []
+  );
+
+  const handleLevaCollapsedChange = useCallback(
+    (collapsed: boolean) => {
+      updateLevaUiState(current => ({ ...current, collapsed }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleLevaDrag = useCallback(
+    (position: { x?: number; y?: number }) => {
+      updateLevaUiState(current => ({
+        ...current,
+        position: {
+          x: position.x,
+          y: position.y
+        }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleLevaClickCapture = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const container = levaContainerRef.current;
+
+      if (!container) {
+        return;
+      }
+
+      let element = event.target as HTMLElement | null;
+
+      while (element && element !== container) {
+        const label = element.textContent?.trim();
+
+        if (
+          label &&
+          DEV_SCENE_CONTROL_FOLDERS.includes(label as DevSceneControlFolder) &&
+          element.nextElementSibling
+        ) {
+          updateLevaUiState(current => ({
+            ...current,
+            folderState: {
+              ...current.folderState,
+              [label]: !(current.folderState[label as DevSceneControlFolder] ?? false)
+            }
+          }));
+          return;
+        }
+
+        element = element.parentElement;
+      }
+    },
+    [updateLevaUiState]
+  );
 
   useEffect(() => {
     if (!map) {
@@ -145,8 +288,21 @@ const MainInner = () => {
 
   return (
     <>
-      <Leva collapsed hidden={!IS_DEV} oneLineLabels />
-      {IS_DEV && <DevSceneControls />}
+      <div onClickCapture={handleLevaClickCapture} ref={levaContainerRef}>
+        <Leva
+          collapsed={{
+            collapsed: levaUiState.collapsed,
+            onChange: handleLevaCollapsedChange
+          }}
+          hidden={!IS_DEV}
+          oneLineLabels
+          titleBar={{
+            onDragEnd: handleLevaDrag,
+            position: levaUiState.position
+          }}
+        />
+      </div>
+      {IS_DEV && <DevSceneControls folderState={levaUiState.folderState} />}
       <div
         className="relative h-screen w-screen touch-none overflow-hidden bg-black text-white select-none"
         ref={handleContainerRef}

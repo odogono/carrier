@@ -10,11 +10,32 @@ import {
   type ZarchSceneConfig
 } from '@/helpers/zarch-scene-config';
 
+export const DEV_SCENE_CONTROL_FOLDERS = [
+  'Camera',
+  'View',
+  'Lighting',
+  'Rendering',
+  'Scene',
+  'Particles',
+  'Debug'
+] as const;
+
+export type DevSceneControlFolder =
+  (typeof DEV_SCENE_CONTROL_FOLDERS)[number];
+
+export type DevSceneControlFolderState = Partial<
+  Record<DevSceneControlFolder, boolean>
+>;
+
 /**
  * Mounts Leva controls and syncs their values into the Jotai sceneConfigAtom.
  * Render this component only in dev mode.
  */
-export const DevSceneControls = () => {
+export const DevSceneControls = ({
+  folderState = {}
+}: {
+  folderState?: DevSceneControlFolderState;
+}) => {
   const cameraValues = useControls('Camera', {
     cameraFov: {
       label: 'FOV',
@@ -37,6 +58,8 @@ export const DevSceneControls = () => {
       step: 0.05,
       value: DEFAULT_SCENE_CONFIG.cameraPullbackMultiplier
     }
+  }, {
+    collapsed: folderState.Camera ?? false
   });
 
   const viewValues = useControls('View', {
@@ -75,6 +98,8 @@ export const DevSceneControls = () => {
       step: 0.05,
       value: DEFAULT_SCENE_CONFIG.zoomMin
     }
+  }, {
+    collapsed: folderState.View ?? false
   });
 
   const lightingValues = useControls('Lighting', {
@@ -109,6 +134,8 @@ export const DevSceneControls = () => {
       options: [256, 512, 1024, 2048, 4096],
       value: DEFAULT_SCENE_CONFIG.shadowMapSize
     }
+  }, {
+    collapsed: folderState.Lighting ?? false
   });
 
   const renderingValues = useControls('Rendering', {
@@ -144,6 +171,8 @@ export const DevSceneControls = () => {
       step: 0.01,
       value: DEFAULT_SCENE_CONFIG.brightnessMin
     }
+  }, {
+    collapsed: folderState.Rendering ?? false
   });
 
   const sceneValues = useControls('Scene', {
@@ -162,6 +191,8 @@ export const DevSceneControls = () => {
       label: 'Wireframe',
       value: DEFAULT_SCENE_CONFIG.wireframe
     }
+  }, {
+    collapsed: folderState.Scene ?? false
   });
 
   const particleValues = useControls('Particles', {
@@ -242,6 +273,48 @@ export const DevSceneControls = () => {
       step: 1,
       value: DEFAULT_SCENE_CONFIG.particleTapMaxMovementPx
     },
+    particleThrustEmissionRate: {
+      label: 'Thrust rate',
+      max: 128,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustEmissionRate
+    },
+    particleThrustLandDustCount: {
+      label: 'Thrust dust',
+      max: 16,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustLandDustCount
+    },
+    particleThrustSpeed: {
+      label: 'Thrust speed',
+      max: 120,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustSpeed
+    },
+    particleThrustSpread: {
+      label: 'Thrust spread',
+      max: 12,
+      min: 0,
+      step: 0.1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustSpread
+    },
+    particleThrustWaterDisturbanceHeight: {
+      label: 'Thrust water h',
+      max: 64,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustWaterDisturbanceHeight
+    },
+    particleThrustWaterSprayCount: {
+      label: 'Thrust spray',
+      max: 24,
+      min: 0,
+      step: 1,
+      value: DEFAULT_SCENE_CONFIG.particleThrustWaterSprayCount
+    },
     particleWaterImpactSprayCount: {
       label: 'Impact spray',
       max: 48,
@@ -263,6 +336,8 @@ export const DevSceneControls = () => {
       step: 1,
       value: DEFAULT_SCENE_CONFIG.particleWaterWaveCount
     }
+  }, {
+    collapsed: folderState.Particles ?? false
   });
 
   const debugValues = useControls('Debug', {
@@ -274,6 +349,8 @@ export const DevSceneControls = () => {
       label: 'Minimap',
       value: DEFAULT_SCENE_CONFIG.showMinimap
     }
+  }, {
+    collapsed: folderState.Debug ?? false
   });
 
   useEffect(() => {

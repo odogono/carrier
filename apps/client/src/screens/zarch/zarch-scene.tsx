@@ -47,11 +47,16 @@ import {
 import type { ZarchInputState, ZarchRuntimeState } from './use-zarch-runtime';
 import { wrapWorldCoordinate } from './zarch-minimap';
 import { createPlayerShipGeometry } from './zarch-player-ship-geometry';
-import { stepPlayerShip } from './zarch-player-ship';
+import {
+  getPlayerShipExhaustDirection,
+  getPlayerShipExhaustOrigin,
+  stepPlayerShip
+} from './zarch-player-ship';
 import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
   createParticleSystemState,
+  emitShipThrustParticles,
   emitTapParticlePreset,
   simulateParticleSystem
 } from './zarch-particles';
@@ -536,12 +541,13 @@ export const ZarchScene = ({
         ) * dt
       );
     } else if (runtime.ship) {
+      const thrustActive = isCodePressed(input, 'Space', ' ');
       const shipStep = stepPlayerShip({
         deltaSeconds: dt,
         input: {
           pitchDown: isCodePressed(input, 'KeyW', 'w') || input.keys.W,
           pitchUp: isCodePressed(input, 'KeyS', 's') || input.keys.S,
-          thrust: isCodePressed(input, 'Space', ' '),
+          thrust: thrustActive,
           yawLeft: isCodePressed(input, 'KeyA', 'a') || input.keys.A,
           yawRight: isCodePressed(input, 'KeyD', 'd') || input.keys.D
         },
@@ -564,6 +570,23 @@ export const ZarchScene = ({
             Math.abs(runtime.ship.velZ)
         ) * dt
       );
+
+      if (thrustActive) {
+        emitShipThrustParticles(
+          particleSystem,
+          {
+            direction: getPlayerShipExhaustDirection(
+              runtime.ship.yaw,
+              runtime.ship.pitch
+            ),
+            origin: getPlayerShipExhaustOrigin(runtime.ship),
+            surface: particleSurface
+          },
+          config,
+          Math.random,
+          dt
+        );
+      }
 
       if (shipStep.event?.kind === 'crash') {
         emitTapParticlePreset(

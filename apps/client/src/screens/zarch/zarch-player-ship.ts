@@ -16,6 +16,8 @@ export type PlayerShipProbe = {
   z: number;
 };
 
+export type PlayerShipPose = Pick<ZarchShipState, 'pitch' | 'x' | 'y' | 'yaw' | 'z'>;
+
 export type PlayerShipSpec = {
   collisionRadius: number;
   gravity: number;
@@ -108,6 +110,29 @@ export const getPlayerShipThrustVector = (yaw: number, pitch: number) =>
     yaw,
     pitch
   );
+
+export const getPlayerShipExhaustDirection = (yaw: number, pitch: number) => {
+  const thrust = getPlayerShipThrustVector(yaw, pitch);
+
+  return {
+    x: -thrust.x,
+    y: -thrust.y,
+    z: -thrust.z
+  };
+};
+
+export const getPlayerShipExhaustOrigin = (
+  ship: PlayerShipPose,
+  offset: PlayerShipProbe = { x: 0, y: 0, z: 0 }
+) => {
+  const rotated = rotateLocalProbe(offset, ship.yaw, ship.pitch);
+
+  return {
+    x: ship.x + rotated.x,
+    y: ship.y + rotated.y,
+    z: ship.z + rotated.z
+  };
+};
 
 export const createPlayerShipSpawnState = ({
   spec = DEFAULT_PLAYER_SHIP_SPEC,
