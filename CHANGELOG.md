@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Client Zarch ship mode: the app now starts in free landscape navigation, exposes an `Enter Ship` / `Exit Ship` HUD toggle, renders the original Zarch player ship model, and supports local single-player ship flight with gravity, thrust, terrain/water collision, crash particles, and respawn
+- Client Zarch ship combat: ship mode now supports local bullet firing from the nose with inherited ship velocity, terrain/water impact detection, bullet visuals, and matching land/splash particle effects
 
 ### Changed
 

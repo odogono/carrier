@@ -56,10 +56,17 @@ import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
   createParticleSystemState,
+  emitBulletImpactParticles,
   emitShipCrashParticles,
   emitShipThrustParticles,
   simulateParticleSystem
 } from './zarch-particles';
+import {
+  DEFAULT_ZARCH_BULLET_SPEC,
+  ZARCH_BULLET_CAPACITY,
+  createShipBullet,
+  stepZarchBullet
+} from './zarch-bullets';
 import { ZarchStaticEntities } from './zarch-static-entities';
 
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
@@ -71,6 +78,7 @@ type TreeMeshEntry = {
 };
 
 type ScenePools = {
+  bulletMesh: ParticleMesh;
   particleMesh: ParticleMesh;
   particleShadowMesh: ParticleMesh;
   root: Group;
@@ -174,6 +182,25 @@ const buildParticleMesh = (clipPlanes: Plane[]) => {
   return mesh;
 };
 
+const buildBulletMesh = (clipPlanes: Plane[]) => {
+  const geometry = new PlaneGeometry(1, 1);
+  const material = new MeshBasicMaterial({
+    clippingPlanes: clipPlanes,
+    color: 0xff_f1_8b,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+    transparent: true
+  });
+
+  const mesh = new InstancedMesh(geometry, material, ZARCH_BULLET_CAPACITY);
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  mesh.renderOrder = 12;
+  return mesh;
+};
+
 const buildParticleShadowMesh = (clipPlanes: Plane[]) => {
   const geometry = new PlaneGeometry(1, 1);
   const material = new MeshBasicMaterial({
@@ -274,11 +301,13 @@ const buildRoundTree = (clipPlanes: Plane[]) => {
 
 const createScenePools = (clipPlanes: Plane[]): ScenePools => {
   const root = new Group();
+  const bulletMesh = buildBulletMesh(clipPlanes);
   const particleMesh = buildParticleMesh(clipPlanes);
   const particleShadowMesh = buildParticleShadowMesh(clipPlanes);
   const tilePool: TileMesh[] = [];
   const treePool: TreeMeshEntry[] = [];
 
+  root.add(bulletMesh);
   root.add(particleShadowMesh);
   root.add(particleMesh);
 
@@ -299,7 +328,14 @@ const createScenePools = (clipPlanes: Plane[]): ScenePools => {
     treePool.push({ pine, round });
   }
 
-  return { particleMesh, particleShadowMesh, root, tilePool, treePool };
+  return {
+    bulletMesh,
+    particleMesh,
+    particleShadowMesh,
+    root,
+    tilePool,
+    treePool
+  };
 };
 
 const disposeScenePools = (root: Group) => {
@@ -353,6 +389,7 @@ export const ZarchScene = ({
   const viewRadiusBase = useSceneConfigValue('viewRadiusBase');
   const forwardRef = useRef(new Vector3());
   const intersectionsRef = useRef<Intersection[]>([]);
+  const bulletDummyRef = useRef(new Object3D());
   const particleDummyRef = useRef(new Object3D());
   const particleShadowDummyRef = useRef(new Object3D());
   const particleNdcRef = useRef(new Vector2());
@@ -416,7 +453,9 @@ export const ZarchScene = ({
 
   useEffect(() => {
     particleSystemRef.current.count = 0;
-  }, [terrain.id]);
+    runtimeRef.current.bullets = [];
+    runtimeRef.current.shipFireCooldownSeconds = 0;
+  }, [runtimeRef, terrain.id]);
 
   useEffect(
     () => () => {
@@ -430,6 +469,7 @@ export const ZarchScene = ({
     const camera = cameraRef.current;
     const config = configRef.current;
     const intersections = intersectionsRef.current;
+    const bulletDummy = bulletDummyRef.current;
     const particleDummy = particleDummyRef.current;
     const particleShadowDummy = particleShadowDummyRef.current;
     const particleNdc = particleNdcRef.current;
@@ -541,6 +581,11 @@ export const ZarchScene = ({
         ) * dt
       );
     } else if (runtime.ship) {
+      runtime.shipFireCooldownSeconds = Math.max(
+        0,
+        runtime.shipFireCooldownSeconds - dt
+      );
+
       const thrustActive = isCodePressed(input, 'Space', ' ');
       const shipStep = stepPlayerShip({
         deltaSeconds: dt,
@@ -588,6 +633,22 @@ export const ZarchScene = ({
         );
       }
 
+      if (
+        input.shipFireHeld &&
+        runtime.ship.respawnDelaySeconds <= 0 &&
+        runtime.bullets.length < ZARCH_BULLET_CAPACITY &&
+        runtime.shipFireCooldownSeconds <= 0
+      ) {
+        runtime.bullets.push(
+          createShipBullet({
+            ship: runtime.ship,
+            spec: DEFAULT_ZARCH_BULLET_SPEC
+          })
+        );
+        runtime.shipFireCooldownSeconds =
+          DEFAULT_ZARCH_BULLET_SPEC.fireCooldownSeconds;
+      }
+
       if (shipStep.event?.kind === 'crash') {
         emitShipCrashParticles(
           particleSystem,
@@ -602,6 +663,51 @@ export const ZarchScene = ({
           config
         );
       }
+    }
+
+    if (runtime.bullets.length > 0) {
+      const nextBullets = [];
+
+      for (const bullet of runtime.bullets) {
+        const result = stepZarchBullet({
+          adjustWorldPoint: point =>
+            clampOrWrapFocus({
+              terrain,
+              x: point.x,
+              z: point.z
+            }),
+          deltaSeconds: dt,
+          spec: DEFAULT_ZARCH_BULLET_SPEC,
+          state: bullet,
+          surface: {
+            isWaterAtWorld: terrain.isWaterAtWorld,
+            isWorldPointLoaded: terrain.isWorldPointLoaded,
+            sampleHeightAtWorld: terrain.sampleHeightAtWorld,
+            waterHeight: config.seaY
+          }
+        });
+
+        if (result.event?.kind === 'land' || result.event?.kind === 'water') {
+          emitBulletImpactParticles(
+            particleSystem,
+            {
+              origin: {
+                x: result.event.x,
+                y: result.event.y,
+                z: result.event.z
+              },
+              water: result.event.kind === 'water'
+            },
+            config
+          );
+        }
+
+        if (result.state) {
+          nextBullets.push(result.state);
+        }
+      }
+
+      runtime.bullets = nextBullets;
     }
 
     const zoomRadius = config.viewRadiusBase * runtime.camera.zoom;
@@ -836,6 +942,23 @@ export const ZarchScene = ({
     }
 
     simulateParticleSystem(particleSystem, dt, particleSurface, config);
+
+    for (let index = 0; index < runtime.bullets.length; index += 1) {
+      const bullet = runtime.bullets[index];
+
+      bulletDummy.position.set(
+        bullet.x - runtime.camera.x,
+        bullet.y,
+        bullet.z - runtime.camera.z
+      );
+      bulletDummy.quaternion.copy(camera.quaternion);
+      bulletDummy.scale.set(4.4, 1.35, 1);
+      bulletDummy.updateMatrix();
+      pools.bulletMesh.setMatrixAt(index, bulletDummy.matrix);
+    }
+
+    pools.bulletMesh.count = runtime.bullets.length;
+    pools.bulletMesh.instanceMatrix.needsUpdate = true;
 
     let shadowCount = 0;
 

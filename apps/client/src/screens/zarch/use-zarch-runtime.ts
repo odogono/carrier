@@ -9,6 +9,7 @@ import {
 import { clampZoom } from '@/helpers/zarch-terrain';
 import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 
+import type { ZarchBulletState } from './zarch-bullets';
 import {
   isQuickTapGesture,
   type PointerTapCandidate,
@@ -50,11 +51,13 @@ export type ZarchShipState = {
 };
 
 export type ZarchRuntimeState = {
+  bullets: ZarchBulletState[];
   camera: ZarchCameraState;
   mode: ZarchRuntimeMode;
   navigation: ZarchNavigationState;
   score: number;
   ship: ZarchShipState | null;
+  shipFireCooldownSeconds: number;
 };
 
 export type ZarchInputState = {
@@ -65,6 +68,7 @@ export type ZarchInputState = {
   pointerCandidate: PointerTapCandidate | null;
   pointerId: number | null;
   queuedTap: PointerTapPayload | null;
+  shipFireHeld: boolean;
 };
 
 type UseZarchRuntimeArgs = {
@@ -84,6 +88,7 @@ export const useZarchRuntime = ({
 }: UseZarchRuntimeArgs) => {
   const configRef = useSceneConfigRef();
   const runtimeRef = useRef<ZarchRuntimeState>({
+    bullets: [],
     camera: {
       x: 0,
       yaw: 0,
@@ -100,7 +105,8 @@ export const useZarchRuntime = ({
       z: 0
     },
     score: 0,
-    ship: null
+    ship: null,
+    shipFireCooldownSeconds: 0
   });
   const inputRef = useRef<ZarchInputState>({
     codes: {},
@@ -109,7 +115,8 @@ export const useZarchRuntime = ({
     lastPointerX: 0,
     pointerCandidate: null,
     pointerId: null,
-    queuedTap: null
+    queuedTap: null,
+    shipFireHeld: false
   });
 
   useEffect(() => {
@@ -144,6 +151,10 @@ export const useZarchRuntime = ({
       inputRef.current.keys[event.key] = true;
       inputRef.current.codes[event.code] = true;
 
+      if (event.code === 'KeyF') {
+        inputRef.current.shipFireHeld = true;
+      }
+
       if (PREVENT_SCROLL_KEYS.has(event.key)) {
         event.preventDefault();
       }
@@ -152,6 +163,10 @@ export const useZarchRuntime = ({
     const handleKeyUp = (event: KeyboardEvent<HTMLElement>) => {
       inputRef.current.keys[event.key] = false;
       inputRef.current.codes[event.code] = false;
+
+      if (event.code === 'KeyF') {
+        inputRef.current.shipFireHeld = false;
+      }
     };
 
     const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
@@ -240,7 +255,9 @@ export const useZarchRuntime = ({
     containerProps,
     enterShipMode: (shipState: ZarchShipState) => {
       runtimeRef.current.mode = 'ship';
+      runtimeRef.current.bullets = [];
       runtimeRef.current.ship = shipState;
+      runtimeRef.current.shipFireCooldownSeconds = 0;
       runtimeRef.current.camera.x = shipState.x;
       runtimeRef.current.camera.z = shipState.z;
     },
@@ -253,7 +270,10 @@ export const useZarchRuntime = ({
       runtime.navigation.yaw = runtime.camera.yaw;
       runtime.navigation.velX = 0;
       runtime.navigation.velZ = 0;
+      runtime.bullets = [];
+      runtime.shipFireCooldownSeconds = 0;
       runtime.ship = null;
+      inputRef.current.shipFireHeld = false;
     },
     inputRef,
     runtimeRef

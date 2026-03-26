@@ -14,6 +14,7 @@ import {
   SPRAY_PALETTE,
   addParticle,
   createParticleSystemState,
+  emitBulletImpactParticles,
   emitShipCrashParticles,
   emitShipThrustParticles,
   emitTapParticlePreset,
@@ -229,6 +230,44 @@ describe('zarch particle emitters', () => {
     expect(
       countKind(state.kind, state.count, PARTICLE_KINDS.debris)
     ).toBeGreaterThan(DEFAULT_PARTICLE_CONFIG.particleThrustLandDustCount);
+  });
+
+  test('emits a small debris burst for bullet land impacts', () => {
+    const state = createParticleSystemState();
+    emitBulletImpactParticles(
+      state,
+      {
+        origin: { x: 3, y: 12, z: -4 },
+        water: false
+      },
+      DEFAULT_PARTICLE_CONFIG,
+      createRng([0.1, 0.3, 0.6, 0.9])
+    );
+
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.spark)).toBeGreaterThan(
+      0
+    );
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.debris)).toBeGreaterThan(
+      0
+    );
+  });
+
+  test('emits spray for bullet water impacts', () => {
+    const state = createParticleSystemState();
+    emitBulletImpactParticles(
+      state,
+      {
+        origin: { x: 0, y: -12, z: 0 },
+        water: true
+      },
+      DEFAULT_PARTICLE_CONFIG,
+      createRng([0.2, 0.4, 0.6, 0.8])
+    );
+
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.spray)).toBeGreaterThan(
+      0
+    );
+    expect(countKind(state.kind, state.count, PARTICLE_KINDS.spark)).toBe(0);
   });
 });
 

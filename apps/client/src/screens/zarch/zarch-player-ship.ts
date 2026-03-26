@@ -16,7 +16,10 @@ export type PlayerShipProbe = {
   z: number;
 };
 
-export type PlayerShipPose = Pick<ZarchShipState, 'pitch' | 'x' | 'y' | 'yaw' | 'z'>;
+export type PlayerShipPose = Pick<
+  ZarchShipState,
+  'pitch' | 'x' | 'y' | 'yaw' | 'z'
+>;
 
 export type PlayerShipSpec = {
   collisionRadius: number;
@@ -60,9 +63,9 @@ export type PlayerShipStepResult = {
 
 export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
   collisionRadius: TILE * 0.28,
-  gravity: 72,
+  gravity: 22,
   linearDrag: 0.45,
-  maxPitch: 0.78,
+  maxPitch: 1.3,
   pitchDamping: 2.8,
   pitchRate: 1.8,
   probeOffsets: [
@@ -75,7 +78,7 @@ export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
   respawnClearance: 48,
   respawnDelaySeconds: 1.25,
   spawnGraceSeconds: 0.75,
-  thrustAcceleration: 110,
+  thrustAcceleration: 130,
   verticalDrag: 0.18,
   yawRate: 1.75
 };
@@ -123,6 +126,17 @@ export const getPlayerShipExhaustDirection = (yaw: number, pitch: number) => {
   };
 };
 
+export const getPlayerShipNoseDirection = (yaw: number, pitch: number) =>
+  rotateLocalProbe(
+    {
+      x: 0,
+      y: 0,
+      z: -1
+    },
+    yaw,
+    pitch
+  );
+
 export const getPlayerShipExhaustOrigin = (
   ship: PlayerShipPose,
   offset: PlayerShipProbe = { x: 0, y: 0, z: 0 }
@@ -135,6 +149,13 @@ export const getPlayerShipExhaustOrigin = (
     z: ship.z + rotated.z
   };
 };
+
+export const getPlayerShipNoseOrigin = (ship: PlayerShipPose, offset = 9.5) =>
+  getPlayerShipExhaustOrigin(ship, {
+    x: 0,
+    y: 0,
+    z: -offset
+  });
 
 export const createPlayerShipSpawnState = ({
   spec = DEFAULT_PLAYER_SHIP_SPEC,
@@ -149,7 +170,8 @@ export const createPlayerShipSpawnState = ({
   yaw?: number;
   z: number;
 }): ZarchShipState => {
-  const terrainHeight = surface.sampleHeightAtWorld(x, z) ?? surface.waterHeight;
+  const terrainHeight =
+    surface.sampleHeightAtWorld(x, z) ?? surface.waterHeight;
   const spawnY =
     Math.max(terrainHeight, surface.waterHeight) + spec.respawnClearance;
 
@@ -217,12 +239,8 @@ export const stepPlayerShip = ({
     };
   }
 
-  const pitchInput =
-    (input.pitchUp ? 1 : 0) -
-    (input.pitchDown ? 1 : 0);
-  const yawInput =
-    (input.yawLeft ? 1 : 0) -
-    (input.yawRight ? 1 : 0);
+  const pitchInput = (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0);
+  const yawInput = (input.yawLeft ? 1 : 0) - (input.yawRight ? 1 : 0);
 
   next.yaw += yawInput * spec.yawRate * dt;
   next.pitch = clamp(

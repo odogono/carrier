@@ -6,7 +6,7 @@ type PlayerShipFace = {
 };
 
 const FIXED_24_SHIFT = 16_777_216;
-const PLAYER_SHIP_LENGTH = 18;
+export const PLAYER_SHIP_LENGTH = 18;
 
 const fromFixed24 = (valueHex: string) => {
   const value = Number.parseInt(valueHex, 16);

@@ -514,6 +514,47 @@ export const emitShipCrashParticles = (
   );
 };
 
+export const emitBulletImpactParticles = (
+  state: ParticleSystemState,
+  {
+    origin,
+    water
+  }: {
+    origin: ParticleOrigin;
+    water: boolean;
+  },
+  config: ZarchParticleConfig = DEFAULT_PARTICLE_CONFIG,
+  rng: () => number = Math.random
+) => {
+  if (water) {
+    emitSprayBurst(
+      state,
+      origin,
+      Math.max(4, Math.round(config.particleWaterImpactSprayCount * 0.8)),
+      rng,
+      config,
+      {
+        maxAgeMax: 0.85,
+        maxAgeMin: 0.35,
+        speedXz: 42,
+        speedYMax: 40,
+        speedYMin: 14,
+        spread: 2.25
+      }
+    );
+    return;
+  }
+
+  emitExplosionCluster(state, origin, rng, false, config);
+  emitLandDustBurst(
+    state,
+    origin,
+    Math.max(2, Math.round(config.particleThrustLandDustCount * 0.5)),
+    rng,
+    config
+  );
+};
+
 export const emitShipThrustParticles = (
   state: ParticleSystemState,
   {

@@ -116,6 +116,7 @@ export const ZarchHud = ({
             <div>W/S - pitch</div>
             <div>A/D - yaw</div>
             <div>Space - thrust</div>
+            <div>F - fire</div>
           </>
         ) : (
           <>
