@@ -2,6 +2,8 @@ import { TILE } from '@/helpers/zarch-terrain';
 
 import type { ZarchShipState } from './use-zarch-runtime';
 
+export const PLAYER_SHIP_LENGTH = 18;
+
 export type PlayerShipInput = {
   pitchDown: boolean;
   pitchUp: boolean;

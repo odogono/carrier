@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
 
 import {
-  Box3,
   Group,
   InstancedMesh,
   Mesh,
   Object3D,
-  Vector3,
   type BufferGeometry,
   type Material
 } from 'three';
@@ -17,9 +15,14 @@ import type {
   MapMetadata,
   RuntimeMapChunk
 } from 'carrier-contracts/types';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import { apiUrl, client } from '@/helpers/api-link';
+import {
+  createNormalizedModel,
+  fetchAndParseGltf,
+  setModelShadowProps,
+  type NormalizedModel
+} from '@/helpers/three-model-utils';
 import {
   getMapChunkQueryKey,
   getVisibleChunkWindow
@@ -40,11 +43,6 @@ import { wrapWorldCoordinate } from './zarch-minimap';
 type InstancedAssetRuntime = {
   geometry: BufferGeometry;
   material: Material;
-};
-
-type NormalizedModel = {
-  object: Group;
-  size: Vector3;
 };
 
 type LoadedAssetRuntime = {
@@ -74,38 +72,6 @@ type ZarchStaticEntitiesProps = {
 };
 
 const assetRuntimeCache = new Map<string, AssetRuntimeCacheEntry>();
-const gltfLoader = new GLTFLoader();
-
-const setModelShadowProps = (object: Object3D) => {
-  object.traverse(child => {
-    if (!(child instanceof Mesh)) {
-      return;
-    }
-
-    child.castShadow = true;
-    child.frustumCulled = false;
-    child.receiveShadow = true;
-  });
-};
-
-const createNormalizedModel = (source: Object3D): NormalizedModel => {
-  const clone = source.clone(true);
-  const group = new Group();
-  group.add(clone);
-
-  const bounds = new Box3().setFromObject(group);
-  const center = bounds.getCenter(new Vector3());
-  const size = bounds.getSize(new Vector3());
-
-  clone.position.x -= center.x;
-  clone.position.z -= center.z;
-  clone.position.y -= bounds.min.y;
-
-  return {
-    object: group,
-    size
-  };
-};
 
 const getInstancedRuntime = (
   normalized: NormalizedModel
@@ -140,18 +106,7 @@ const getAssetRuntimeUrl = (assetVersionId: string) =>
 
 const loadAssetRuntime = async (assetVersionId: string) => {
   const url = getAssetRuntimeUrl(assetVersionId);
-  const response = await fetch(url, {
-    credentials: 'include'
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load runtime asset ${assetVersionId}`);
-  }
-
-  const gltf = await gltfLoader.parseAsync(
-    await response.arrayBuffer(),
-    url
-  );
+  const gltf = await fetchAndParseGltf(url, `runtime asset ${assetVersionId}`);
   const normalized = createNormalizedModel(gltf.scene);
   setModelShadowProps(normalized.object);
 

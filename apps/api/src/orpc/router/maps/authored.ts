@@ -23,6 +23,8 @@ import {
   GetAssetVersionRoute,
   GetOverviewInput,
   GetOverviewRoute,
+  GetZarchRuntimeEntityInput,
+  GetZarchRuntimeEntityRoute,
   ListArchetypesInput,
   ListArchetypesRoute,
   ListAssetVersionsInput,
@@ -37,6 +39,8 @@ import {
   ListStaticEntitiesRoute,
   ListSourcePolygonsInput,
   ListSourcePolygonsRoute,
+  ListZarchRuntimeEntitiesInput,
+  ListZarchRuntimeEntitiesRoute,
   UpdateArchetypeInput,
   UpdateArchetypeRoute,
   UpdateAssetVersionReviewInput,
@@ -48,7 +52,9 @@ import {
   UpdateStaticEntityInput,
   UpdateStaticEntityRoute,
   UpdateSourcePolygonInput,
-  UpdateSourcePolygonRoute
+  UpdateSourcePolygonRoute,
+  UpsertZarchRuntimeEntityInput,
+  UpsertZarchRuntimeEntityRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
 
 import { ORPCError, os } from '@orpc/server';
@@ -114,6 +120,46 @@ const approveAssetVersion = os
   .handler(async ({ input }) => {
     try {
       return getMapRepository().approveAssetVersion(input.id);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const listZarchRuntimeEntities = os
+  .route(ListZarchRuntimeEntitiesRoute)
+  .input(ListZarchRuntimeEntitiesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().listZarchRuntimeEntities(input.status);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const getZarchRuntimeEntity = os
+  .route(GetZarchRuntimeEntityRoute)
+  .input(GetZarchRuntimeEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      const runtimeEntity = getMapRepository().getZarchRuntimeEntity(input.id);
+      if (!runtimeEntity) {
+        throw new ORPCError('NOT_FOUND', {
+          message: `Zarch runtime entity ${input.id} was not found`
+        });
+      }
+
+      return runtimeEntity;
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const upsertZarchRuntimeEntity = os
+  .route(UpsertZarchRuntimeEntityRoute)
+  .input(UpsertZarchRuntimeEntityInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().upsertZarchRuntimeEntity(input);
     } catch (error) {
       return asOrpcError(error);
     }
@@ -371,6 +417,7 @@ export const authored = {
   getArchetype,
   getAssetVersion,
   getOverview,
+  getZarchRuntimeEntity,
   listArchetypes,
   listAssetVersions,
   listControlPoints,
@@ -378,10 +425,12 @@ export const authored = {
   listReferencedArchetypes,
   listStaticEntities,
   listSourcePolygons,
+  listZarchRuntimeEntities,
   updateArchetype,
   updateAssetVersionReview,
   updateControlPoint,
   updateDerivedIsland,
   updateStaticEntity,
-  updateSourcePolygon
+  updateSourcePolygon,
+  upsertZarchRuntimeEntity
 };

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 import { AssetPreviewPanel } from '@/components/assets/asset-preview';
@@ -24,7 +24,8 @@ import type {
   ArchetypeStatus,
   AssetVersion,
   AssetVersionStatus,
-  type MapMetadata
+  MapMetadata,
+  ZarchRuntimeEntity
 } from 'carrier-contracts/types';
 
 const assetStatusOptions: Array<AssetVersionStatus | 'all'> = [
@@ -44,6 +45,9 @@ const archetypeCategories: ArchetypeCategory[] = [
 ];
 
 const archetypeStatuses: ArchetypeStatus[] = ['active', 'deprecated', 'archived'];
+const DEFAULT_ZARCH_RUNTIME_ENTITY_ID = 'zarch-player-ship';
+const DEFAULT_ZARCH_RUNTIME_ENTITY_NAME = 'Zarch Player Ship';
+const DEFAULT_ZARCH_RUNTIME_ENTITY_LENGTH_METERS = 18;
 
 const titleCaseSlug = (value: string) =>
   value
@@ -74,6 +78,12 @@ type ReviewDraft = {
   groundingPolicy: string;
   instancingEligible: boolean;
   maxHeightDeltaMeters: string;
+};
+
+type ZarchRuntimeEntityDraft = {
+  id: string;
+  lengthMeters: string;
+  name: string;
 };
 
 const buildReviewDraft = (asset: AssetVersion): ReviewDraft => ({
@@ -122,6 +132,17 @@ const buildArchetypeDraft = (asset: AssetVersion): ArchetypeDraft => {
   };
 };
 
+const buildRuntimeEntityDraft = (
+  runtimeEntity?: ZarchRuntimeEntity | null
+): ZarchRuntimeEntityDraft => ({
+  id: runtimeEntity?.id ?? DEFAULT_ZARCH_RUNTIME_ENTITY_ID,
+  lengthMeters: String(
+    runtimeEntity?.renderDimensions.lengthMeters ??
+      DEFAULT_ZARCH_RUNTIME_ENTITY_LENGTH_METERS
+  ),
+  name: runtimeEntity?.name ?? DEFAULT_ZARCH_RUNTIME_ENTITY_NAME
+});
+
 async function uploadAsset(file: File) {
   const formData = new FormData();
   formData.set('file', file);
@@ -144,24 +165,36 @@ async function uploadAsset(file: File) {
 
 function AssetReviewCard({
   asset,
-  availableMaps
+  availableMaps,
+  runtimeEntities
 }: {
   asset: AssetVersion;
   availableMaps: MapMetadata[];
+  runtimeEntities: ZarchRuntimeEntity[];
 }) {
   const queryClient = useQueryClient();
+  const currentRuntimeEntity = useMemo(
+    () => runtimeEntities.find(entity => entity.assetVersionId === asset.id) ?? null,
+    [runtimeEntities, asset.id]
+  );
   const [reviewDraft, setReviewDraft] = useState(() => buildReviewDraft(asset));
   const [archetypeDraft, setArchetypeDraft] = useState(() =>
     buildArchetypeDraft(asset)
+  );
+  const [runtimeEntityDraft, setRuntimeEntityDraft] = useState(() =>
+    buildRuntimeEntityDraft(currentRuntimeEntity)
   );
 
   useEffect(() => {
     setReviewDraft(buildReviewDraft(asset));
     setArchetypeDraft(buildArchetypeDraft(asset));
-  }, [asset.id, asset.updatedAt]);
+    setRuntimeEntityDraft(buildRuntimeEntityDraft(currentRuntimeEntity));
+  }, [asset.id, asset.updatedAt, currentRuntimeEntity]);
 
   const invalidateAssets = () =>
     queryClient.invalidateQueries({ queryKey: ['assets'] });
+  const invalidateRuntimeEntities = () =>
+    queryClient.invalidateQueries({ queryKey: ['zarch-runtime-entities'] });
 
   const reviewMutation = useMutation({
     mutationFn: async () =>
@@ -231,11 +264,33 @@ function AssetReviewCard({
     }
   });
 
+  const runtimeEntityMutation = useMutation({
+    mutationFn: async () =>
+      client.maps.upsertZarchRuntimeEntity({
+        assetVersionId: asset.id,
+        id: runtimeEntityDraft.id.trim(),
+        kind: 'player-ship',
+        name: runtimeEntityDraft.name.trim(),
+        renderDimensions: {
+          lengthMeters: Number(runtimeEntityDraft.lengthMeters)
+        },
+        status: 'active'
+      }),
+    onError: error => {
+      toast.error(toMessage(error, 'Failed to bind runtime entity'));
+    },
+    onSuccess: async bound => {
+      await invalidateRuntimeEntities();
+      toast.success(`Runtime entity ${bound.id} now points to ${asset.id}`);
+    }
+  });
+
   const pending =
     reviewMutation.isPending ||
     approveMutation.isPending ||
     archetypeMutation.isPending ||
-    approveAndCreateMutation.isPending;
+    approveAndCreateMutation.isPending ||
+    runtimeEntityMutation.isPending;
 
   const runtimeHref =
     asset.runtimeFile === null ? null : `${apiUrl}/maps/assets/${asset.id}/runtime`;
@@ -564,6 +619,88 @@ function AssetReviewCard({
             </Button>
           </div>
         </div>
+
+        <div className="space-y-4 rounded-md border p-4">
+          <div>
+            <div className="text-sm font-medium">Zarch Runtime Entity Binding</div>
+            <p className="text-sm text-muted-foreground">
+              Bind this approved asset to a stable Zarch runtime entity id for
+              non-static gameplay models.
+            </p>
+          </div>
+
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <div>
+              Current asset binding:{' '}
+              {currentRuntimeEntity
+                ? `${currentRuntimeEntity.id} (${currentRuntimeEntity.name})`
+                : 'None'}
+            </div>
+            <div>
+              Target runtime entity:{' '}
+              {runtimeEntities.find(
+                entity => entity.id === runtimeEntityDraft.id.trim()
+              )?.assetVersionId ?? 'Unbound'}
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor={`${asset.id}-runtime-entity-id`}>
+                Runtime entity ID
+              </Label>
+              <Input
+                id={`${asset.id}-runtime-entity-id`}
+                onChange={event =>
+                  setRuntimeEntityDraft(current => ({
+                    ...current,
+                    id: event.target.value
+                  }))
+                }
+                value={runtimeEntityDraft.id}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`${asset.id}-runtime-entity-name`}>Name</Label>
+              <Input
+                id={`${asset.id}-runtime-entity-name`}
+                onChange={event =>
+                  setRuntimeEntityDraft(current => ({
+                    ...current,
+                    name: event.target.value
+                  }))
+                }
+                value={runtimeEntityDraft.name}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`${asset.id}-runtime-entity-length`}>
+                Length meters
+              </Label>
+              <Input
+                id={`${asset.id}-runtime-entity-length`}
+                onChange={event =>
+                  setRuntimeEntityDraft(current => ({
+                    ...current,
+                    lengthMeters: event.target.value
+                  }))
+                }
+                value={runtimeEntityDraft.lengthMeters}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={pending || asset.status !== 'ready'}
+              onClick={() => runtimeEntityMutation.mutate()}
+              type="button"
+              variant="outline"
+            >
+              Bind Runtime Entity
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -586,6 +723,10 @@ export function AssetsPage() {
         status: status === 'all' ? undefined : status
       }),
     queryKey: ['assets', status]
+  });
+  const runtimeEntitiesQuery = useQuery({
+    queryFn: () => client.maps.listZarchRuntimeEntities({}),
+    queryKey: ['zarch-runtime-entities']
   });
 
   const uploadMutation = useMutation({
@@ -611,6 +752,7 @@ export function AssetsPage() {
 
   const assets = assetsQuery.data ?? [];
   const maps = mapsQuery.data ?? [];
+  const runtimeEntities = runtimeEntitiesQuery.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -688,6 +830,7 @@ export function AssetsPage() {
               asset={asset}
               availableMaps={maps}
               key={asset.id}
+              runtimeEntities={runtimeEntities}
             />
           ))}
         </div>

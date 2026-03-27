@@ -277,6 +277,7 @@ describe('map repository', () => {
 
     try {
       expect(hasTable(repository, 'asset_versions')).toBe(true);
+      expect(hasTable(repository, 'zarch_runtime_entities')).toBe(true);
       expect(hasTable(repository, 'archetypes')).toBe(true);
       expect(hasTable(repository, 'map_static_entities')).toBe(true);
 
@@ -797,6 +798,140 @@ describe('map repository', () => {
       expect(repository.getMapChunk(created.id, 0, 0)?.heights).not.toEqual(
         beforeExportChunk?.heights
       );
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('creates and rebinds zarch runtime entities against ready asset versions', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const uploaded = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 8,
+          heightMeters: 4,
+          widthMeters: 18
+        },
+        collisionClass: 'vehicle-light',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 8,
+          widthMeters: 18
+        },
+        groundingPolicy: 'none',
+        id: 'zarch-player-ship-v0',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 0,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/zarch-player-ship-v0.glb',
+          sizeBytes: 1024
+        },
+        runtimeFile: null,
+        status: 'uploaded'
+      });
+
+      expect(() =>
+        repository.upsertZarchRuntimeEntity({
+          assetVersionId: uploaded.id,
+          id: 'zarch-player-ship',
+          kind: 'player-ship',
+          name: 'Zarch Player Ship',
+          renderDimensions: {
+            lengthMeters: 18
+          },
+          status: 'active'
+        })
+      ).toThrow(MapRepositoryError);
+
+      const firstReady = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 8,
+          heightMeters: 4,
+          widthMeters: 18
+        },
+        collisionClass: 'vehicle-light',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 8,
+          widthMeters: 18
+        },
+        groundingPolicy: 'none',
+        id: 'zarch-player-ship-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 0,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/zarch-player-ship-v1.glb',
+          sizeBytes: 1024
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/zarch-player-ship-v1.glb',
+          sizeBytes: 2048
+        },
+        status: 'ready'
+      });
+
+      const runtimeEntity = repository.upsertZarchRuntimeEntity({
+        assetVersionId: firstReady.id,
+        id: 'zarch-player-ship',
+        kind: 'player-ship',
+        name: 'Zarch Player Ship',
+        renderDimensions: {
+          lengthMeters: 18
+        },
+        status: 'active'
+      });
+
+      expect(repository.getZarchRuntimeEntity(runtimeEntity.id)).toEqual(
+        runtimeEntity
+      );
+      expect(repository.listZarchRuntimeEntities()).toEqual([runtimeEntity]);
+
+      const secondReady = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 8,
+          heightMeters: 5,
+          widthMeters: 18
+        },
+        collisionClass: 'vehicle-light',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 8,
+          widthMeters: 18
+        },
+        groundingPolicy: 'none',
+        id: 'zarch-player-ship-v2',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 0,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/zarch-player-ship-v2.glb',
+          sizeBytes: 1024
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/zarch-player-ship-v2.glb',
+          sizeBytes: 2048
+        },
+        status: 'ready'
+      });
+
+      const rebound = repository.upsertZarchRuntimeEntity({
+        assetVersionId: secondReady.id,
+        id: runtimeEntity.id,
+        kind: runtimeEntity.kind,
+        name: runtimeEntity.name,
+        renderDimensions: {
+          lengthMeters: 18
+        },
+        status: 'active'
+      });
+
+      expect(rebound.assetVersionId).toBe(secondReady.id);
+      expect(repository.listZarchRuntimeEntities('active')).toEqual([rebound]);
     } finally {
       repository.close();
     }

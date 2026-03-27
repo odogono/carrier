@@ -125,6 +125,16 @@ export type ArchetypeStatus = z.infer<typeof ArchetypeStatusSchema>;
 export const StaticEntityStateSchema = z.enum(['active', 'disabled']);
 export type StaticEntityState = z.infer<typeof StaticEntityStateSchema>;
 
+export const ZarchRuntimeEntityKindSchema = z.enum(['player-ship']);
+export type ZarchRuntimeEntityKind = z.infer<
+  typeof ZarchRuntimeEntityKindSchema
+>;
+
+export const ZarchRuntimeEntityStatusSchema = z.enum(['active', 'archived']);
+export type ZarchRuntimeEntityStatus = z.infer<
+  typeof ZarchRuntimeEntityStatusSchema
+>;
+
 export const ArchetypeCategorySchema = z.enum([
   'building',
   'landmark',
@@ -169,6 +179,25 @@ export const AssetVersionSchema = z.object({
   updatedAt: timestampSchema
 });
 export type AssetVersion = z.infer<typeof AssetVersionSchema>;
+
+export const ZarchRuntimeEntityRenderDimensionsSchema = z.object({
+  lengthMeters: positiveFiniteNumber
+});
+export type ZarchRuntimeEntityRenderDimensions = z.infer<
+  typeof ZarchRuntimeEntityRenderDimensionsSchema
+>;
+
+export const ZarchRuntimeEntitySchema = z.object({
+  assetVersionId: z.string().min(1),
+  createdAt: timestampSchema,
+  id: z.string().min(1),
+  kind: ZarchRuntimeEntityKindSchema,
+  name: z.string().trim().min(1).max(120),
+  renderDimensions: ZarchRuntimeEntityRenderDimensionsSchema,
+  status: ZarchRuntimeEntityStatusSchema,
+  updatedAt: timestampSchema
+});
+export type ZarchRuntimeEntity = z.infer<typeof ZarchRuntimeEntitySchema>;
 
 export const ArchetypeSchema = z.object({
   assetVersionId: z.string().min(1),
@@ -252,6 +281,49 @@ export type UpdateAssetVersionReviewInput = z.infer<
 export const UpdateAssetVersionReviewOutput = AssetVersionSchema;
 export type UpdateAssetVersionReviewOutput = z.infer<
   typeof UpdateAssetVersionReviewOutput
+>;
+
+export const ListZarchRuntimeEntitiesInput = z.object({
+  status: ZarchRuntimeEntityStatusSchema.optional()
+});
+export type ListZarchRuntimeEntitiesInput = z.infer<
+  typeof ListZarchRuntimeEntitiesInput
+>;
+
+export const ListZarchRuntimeEntitiesOutput = z.array(
+  ZarchRuntimeEntitySchema
+);
+export type ListZarchRuntimeEntitiesOutput = z.infer<
+  typeof ListZarchRuntimeEntitiesOutput
+>;
+
+export const GetZarchRuntimeEntityInput = z.object({
+  id: z.string().min(1)
+});
+export type GetZarchRuntimeEntityInput = z.infer<
+  typeof GetZarchRuntimeEntityInput
+>;
+
+export const GetZarchRuntimeEntityOutput = ZarchRuntimeEntitySchema;
+export type GetZarchRuntimeEntityOutput = z.infer<
+  typeof GetZarchRuntimeEntityOutput
+>;
+
+export const UpsertZarchRuntimeEntityInput = z.object({
+  assetVersionId: z.string().min(1),
+  id: z.string().min(1),
+  kind: ZarchRuntimeEntityKindSchema,
+  name: z.string().trim().min(1).max(120),
+  renderDimensions: ZarchRuntimeEntityRenderDimensionsSchema,
+  status: ZarchRuntimeEntityStatusSchema
+});
+export type UpsertZarchRuntimeEntityInput = z.infer<
+  typeof UpsertZarchRuntimeEntityInput
+>;
+
+export const UpsertZarchRuntimeEntityOutput = ZarchRuntimeEntitySchema;
+export type UpsertZarchRuntimeEntityOutput = z.infer<
+  typeof UpsertZarchRuntimeEntityOutput
 >;
 
 export const ApproveAssetVersionInput = z.object({
@@ -656,6 +728,27 @@ export const ApproveAssetVersionRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const ListZarchRuntimeEntitiesRoute: Route = {
+  description: 'List global Zarch runtime entity definitions',
+  method: 'GET',
+  path: '/zarch/runtime-entities',
+  tags: ['zarch']
+} as const;
+
+export const GetZarchRuntimeEntityRoute: Route = {
+  description: 'Retrieve a single Zarch runtime entity definition',
+  method: 'GET',
+  path: '/zarch/runtime-entities/{id}',
+  tags: ['zarch']
+} as const;
+
+export const UpsertZarchRuntimeEntityRoute: Route = {
+  description: 'Create or update a Zarch runtime entity definition',
+  method: 'PUT',
+  path: '/zarch/runtime-entities/{id}',
+  tags: ['zarch']
+} as const;
+
 export const CreateArchetypeRoute: Route = {
   description: 'Create an archetype from a ready asset version',
   method: 'POST',
@@ -724,6 +817,10 @@ export const authoredMapsContract = {
     .route(ApproveAssetVersionRoute)
     .input(ApproveAssetVersionInput)
     .output(ApproveAssetVersionOutput),
+  getZarchRuntimeEntity: oc
+    .route(GetZarchRuntimeEntityRoute)
+    .input(GetZarchRuntimeEntityInput)
+    .output(GetZarchRuntimeEntityOutput),
   applyBoolean: oc
     .route(ApplyBooleanRoute)
     .input(ApplyBooleanInput)
@@ -769,6 +866,10 @@ export const authoredMapsContract = {
     .route(ListAssetVersionsRoute)
     .input(ListAssetVersionsInput)
     .output(ListAssetVersionsOutput),
+  listZarchRuntimeEntities: oc
+    .route(ListZarchRuntimeEntitiesRoute)
+    .input(ListZarchRuntimeEntitiesInput)
+    .output(ListZarchRuntimeEntitiesOutput),
   listArchetypes: oc
     .route(ListArchetypesRoute)
     .input(ListArchetypesInput)
@@ -809,6 +910,10 @@ export const authoredMapsContract = {
     .route(UpdateDerivedIslandRoute)
     .input(UpdateDerivedIslandInput)
     .output(UpdateDerivedIslandOutput),
+  upsertZarchRuntimeEntity: oc
+    .route(UpsertZarchRuntimeEntityRoute)
+    .input(UpsertZarchRuntimeEntityInput)
+    .output(UpsertZarchRuntimeEntityOutput),
   updateStaticEntity: oc
     .route(UpdateStaticEntityRoute)
     .input(UpdateStaticEntityInput)

@@ -5,7 +5,7 @@ import { safeParseInt } from 'odgn-ts-helpers/number';
 import { z } from 'zod';
 
 import { getAssetPipeline } from '@/maps/assets';
-import { MapRepositoryError } from '@/maps/repository';
+import { getMapRepository, MapRepositoryError } from '@/maps/repository';
 import { cors } from '@elysiajs/cors';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
@@ -176,6 +176,32 @@ export const createServer = async () => {
         return toJsonErrorResponse(
           404,
           `Runtime artifact for asset version ${params.id} was not found`,
+          requestId
+        );
+      }
+
+      response.headers.set('X-Request-ID', requestId);
+      return response;
+    })
+    .get('/api/zarch/runtime-entities/:id/model', async ({ params, requestId }) => {
+      const runtimeEntity = getMapRepository().getZarchRuntimeEntity(params.id);
+
+      if (!runtimeEntity) {
+        return toJsonErrorResponse(
+          404,
+          `Zarch runtime entity ${params.id} was not found`,
+          requestId
+        );
+      }
+
+      const response = await getAssetPipeline().runtimeResponse(
+        runtimeEntity.assetVersionId
+      );
+
+      if (!response) {
+        return toJsonErrorResponse(
+          404,
+          `Runtime artifact for zarch runtime entity ${params.id} was not found`,
           requestId
         );
       }

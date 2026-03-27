@@ -25,7 +25,8 @@ import type {
   StaticEntityArchetypeSummary,
   StaticEntityListItem,
   WorldBounds,
-  WorldPoint
+  WorldPoint,
+  ZarchRuntimeEntity
 } from 'carrier-contracts';
 import {
   normalizeStaticEntityExportManifest,
@@ -176,6 +177,17 @@ type ArchetypeRow = {
   name: string;
   status: string;
   tagsJson: string;
+  updatedAt: string;
+};
+
+type ZarchRuntimeEntityRow = {
+  assetVersionId: string;
+  createdAt: string;
+  id: string;
+  kind: string;
+  name: string;
+  renderDimensionsJson: string;
+  status: string;
   updatedAt: string;
 };
 
@@ -400,6 +412,17 @@ const ARCHETYPE_COLUMNS = `
   name,
   status,
   tags_json AS tagsJson,
+  updated_at AS updatedAt
+`;
+
+const ZARCH_RUNTIME_ENTITY_COLUMNS = `
+  asset_version_id AS assetVersionId,
+  created_at AS createdAt,
+  id,
+  kind,
+  name,
+  render_dimensions_json AS renderDimensionsJson,
+  status,
   updated_at AS updatedAt
 `;
 
@@ -708,6 +731,21 @@ const archetypeRowToModel = (row: ArchetypeRow): Archetype => ({
   name: row.name,
   status: row.status as Archetype['status'],
   tags: parseJson<Archetype['tags']>(row.tagsJson),
+  updatedAt: row.updatedAt
+});
+
+const zarchRuntimeEntityRowToModel = (
+  row: ZarchRuntimeEntityRow
+): ZarchRuntimeEntity => ({
+  assetVersionId: row.assetVersionId,
+  createdAt: row.createdAt,
+  id: row.id,
+  kind: row.kind as ZarchRuntimeEntity['kind'],
+  name: row.name,
+  renderDimensions: parseJson<ZarchRuntimeEntity['renderDimensions']>(
+    row.renderDimensionsJson
+  ),
+  status: row.status as ZarchRuntimeEntity['status'],
   updatedAt: row.updatedAt
 });
 
@@ -1155,6 +1193,58 @@ export class MapRepository {
       throw new MapRepositoryError(
         'NOT_FOUND',
         `Asset version ${id} was not found`
+      );
+    }
+
+    return row;
+  }
+
+  private listZarchRuntimeEntityRows(
+    status?: ZarchRuntimeEntity['status']
+  ): ZarchRuntimeEntityRow[] {
+    if (status) {
+      return this.db
+        .query<ZarchRuntimeEntityRow, [string]>(
+          `
+          SELECT ${ZARCH_RUNTIME_ENTITY_COLUMNS}
+          FROM zarch_runtime_entities
+          WHERE status = ?
+          ORDER BY created_at ASC, id ASC
+        `
+        )
+        .all(status);
+    }
+
+    return this.db
+      .query<ZarchRuntimeEntityRow, []>(
+        `
+        SELECT ${ZARCH_RUNTIME_ENTITY_COLUMNS}
+        FROM zarch_runtime_entities
+        ORDER BY created_at ASC, id ASC
+      `
+      )
+      .all();
+  }
+
+  private getZarchRuntimeEntityRow(id: string) {
+    return this.db
+      .query<ZarchRuntimeEntityRow, [string]>(
+        `
+        SELECT ${ZARCH_RUNTIME_ENTITY_COLUMNS}
+        FROM zarch_runtime_entities
+        WHERE id = ?
+      `
+      )
+      .get(id);
+  }
+
+  private getZarchRuntimeEntityRowOrThrow(id: string) {
+    const row = this.getZarchRuntimeEntityRow(id);
+
+    if (!row) {
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Zarch runtime entity ${id} was not found`
       );
     }
 
@@ -2637,6 +2727,89 @@ export class MapRepository {
     return this.updateAssetVersion({ id, status: 'ready' }, current);
   }
 
+  listZarchRuntimeEntities(status?: ZarchRuntimeEntity['status']) {
+    return this.listZarchRuntimeEntityRows(status).map(
+      zarchRuntimeEntityRowToModel
+    );
+  }
+
+  getZarchRuntimeEntity(id: string) {
+    const row = this.getZarchRuntimeEntityRow(id);
+    return row ? zarchRuntimeEntityRowToModel(row) : null;
+  }
+
+  upsertZarchRuntimeEntity(
+    input: Omit<ZarchRuntimeEntity, 'createdAt' | 'updatedAt'>
+  ) {
+    const assetVersion = assetVersionRowToModel(
+      this.getAssetVersionRowOrThrow(input.assetVersionId)
+    );
+
+    if (assetVersion.status !== 'ready' || assetVersion.runtimeFile === null) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Asset version ${input.assetVersionId} is not ready for runtime entity binding`
+      );
+    }
+
+    const existing = this.getZarchRuntimeEntity(input.id);
+    const now = new Date().toISOString();
+
+    try {
+      if (existing) {
+        this.db
+          .prepare(
+            `
+            UPDATE zarch_runtime_entities
+            SET
+              name = ?,
+              kind = ?,
+              asset_version_id = ?,
+              render_dimensions_json = ?,
+              status = ?,
+              updated_at = ?
+            WHERE id = ?
+          `
+          )
+          .run(
+            input.name,
+            input.kind,
+            input.assetVersionId,
+            JSON.stringify(input.renderDimensions),
+            input.status,
+            now,
+            input.id
+          );
+      } else {
+        this.db
+          .prepare(
+            `
+            INSERT INTO zarch_runtime_entities (
+              id, name, kind, asset_version_id, render_dimensions_json,
+              status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `
+          )
+          .run(
+            input.id,
+            input.name,
+            input.kind,
+            input.assetVersionId,
+            JSON.stringify(input.renderDimensions),
+            input.status,
+            now,
+            now
+          );
+      }
+    } catch (error) {
+      throw normalizeSqliteError(error);
+    }
+
+    return zarchRuntimeEntityRowToModel(
+      this.getZarchRuntimeEntityRowOrThrow(input.id)
+    );
+  }
+
   createArchetype(input: CreateArchetypeInput) {
     const now = new Date().toISOString();
     const assetVersion = assetVersionRowToModel(
@@ -3787,6 +3960,18 @@ export class MapRepository {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS zarch_runtime_entities (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        asset_version_id TEXT NOT NULL,
+        render_dimensions_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (asset_version_id) REFERENCES asset_versions(id) ON DELETE RESTRICT
+      );
+
       CREATE TABLE IF NOT EXISTS archetypes (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -3829,6 +4014,10 @@ export class MapRepository {
         ON map_derived_island_lineage(map_id);
       CREATE INDEX IF NOT EXISTS idx_archetypes_status
         ON archetypes(status);
+      CREATE INDEX IF NOT EXISTS idx_zarch_runtime_entities_status
+        ON zarch_runtime_entities(status);
+      CREATE INDEX IF NOT EXISTS idx_zarch_runtime_entities_asset_version
+        ON zarch_runtime_entities(asset_version_id);
       CREATE INDEX IF NOT EXISTS idx_map_static_entities_map
         ON map_static_entities(map_id);
       CREATE INDEX IF NOT EXISTS idx_map_static_entities_archetype

@@ -6,7 +6,6 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
-  DoubleSide,
   DynamicDrawUsage,
   FrontSide,
   Group,
@@ -29,9 +28,11 @@ import {
 } from 'three';
 import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
+import { useQuery } from '@tanstack/react-query';
 
 import type { MapMetadata } from 'carrier-contracts/types';
 
+import { client } from '@/helpers/api-link';
 import {
   TILE,
   TILE_POOL_SIZE,
@@ -46,7 +47,6 @@ import {
 
 import type { ZarchInputState, ZarchRuntimeState } from './use-zarch-runtime';
 import { wrapWorldCoordinate } from './zarch-minimap';
-import { createPlayerShipGeometry } from './zarch-player-ship-geometry';
 import {
   getPlayerShipExhaustDirection,
   getPlayerShipExhaustOrigin,
@@ -58,6 +58,7 @@ import {
   createParticleSystemState,
   emitBulletImpactParticles,
   emitShipCrashParticles,
+  emitTapParticlePreset,
   emitShipThrustParticles,
   simulateParticleSystem
 } from './zarch-particles';
@@ -67,6 +68,7 @@ import {
   createShipBullet,
   stepZarchBullet
 } from './zarch-bullets';
+import { loadZarchRuntimeEntityModel } from './zarch-runtime-entity-model';
 import { ZarchStaticEntities } from './zarch-static-entities';
 
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
@@ -398,19 +400,38 @@ export const ZarchScene = ({
   const poolsRef = useRef<ScenePools | null>(null);
   const rightRef = useRef(new Vector3());
   const shipGroupRef = useRef<Group>(null);
-  const shipMeshRef = useRef<Mesh<BufferGeometryType, MeshLambertMaterial>>(null);
-  const shipGeometry = useMemo(() => createPlayerShipGeometry(), []);
-  const shipMaterial = useMemo(
-    () =>
-      new MeshLambertMaterial({
-        color: 0xff_ff_ff,
-        flatShading: true,
-        side: DoubleSide,
-        vertexColors: true
-      }),
-    []
-  );
   const worldRef = useRef<Group>(null);
+  const shipRuntimeEntityQuery = useQuery({
+    queryFn: () =>
+      client.maps.getZarchRuntimeEntity({
+        id: 'zarch-player-ship'
+      }),
+    queryKey: ['zarch-runtime-entity', 'zarch-player-ship'],
+    staleTime: 60_000
+  });
+  const shipModelQuery = useQuery({
+    enabled: Boolean(shipRuntimeEntityQuery.data),
+    queryFn: () => loadZarchRuntimeEntityModel(shipRuntimeEntityQuery.data!),
+    queryKey: [
+      'zarch-runtime-entity-model',
+      shipRuntimeEntityQuery.data?.id,
+      shipRuntimeEntityQuery.data?.assetVersionId
+    ],
+    staleTime: 60_000
+  });
+  const shipModelScale = useMemo(() => {
+    const runtimeEntity = shipRuntimeEntityQuery.data;
+    const loadedModel = shipModelQuery.data;
+
+    if (!runtimeEntity || !loadedModel) {
+      return 1;
+    }
+
+    return (
+      runtimeEntity.renderDimensions.lengthMeters /
+      Math.max(loadedModel.size.x, 0.001)
+    );
+  }, [shipModelQuery.data, shipRuntimeEntityQuery.data]);
   const particleSurface = useMemo(
     () => ({
       getHeightAt: (x: number, z: number) => {
@@ -428,6 +449,14 @@ export const ZarchScene = ({
     }),
     [configRef, terrain]
   );
+
+  if (shipRuntimeEntityQuery.error) {
+    throw shipRuntimeEntityQuery.error;
+  }
+
+  if (shipModelQuery.error) {
+    throw shipModelQuery.error;
+  }
 
   useEffect(() => {
     const world = worldRef.current;
@@ -456,14 +485,6 @@ export const ZarchScene = ({
     runtimeRef.current.bullets = [];
     runtimeRef.current.shipFireCooldownSeconds = 0;
   }, [runtimeRef, terrain.id]);
-
-  useEffect(
-    () => () => {
-      shipGeometry.dispose();
-      shipMaterial.dispose();
-    },
-    [shipGeometry, shipMaterial]
-  );
 
   useFrame((state, delta) => {
     const camera = cameraRef.current;
@@ -1043,14 +1064,12 @@ export const ZarchScene = ({
       />
       <group ref={worldRef}>
         <group ref={shipGroupRef} visible={false}>
-          <mesh
-            castShadow
-            geometry={shipGeometry}
-            material={shipMaterial}
-            receiveShadow
-            ref={shipMeshRef}
-            rotation={[0, -Math.PI * 0.5, Math.PI]}
-          />
+          {shipModelQuery.data ? (
+            <primitive
+              object={shipModelQuery.data.object}
+              scale={shipModelScale}
+            />
+          ) : null}
         </group>
         <ZarchStaticEntities map={map} runtimeRef={runtimeRef} />
       </group>

@@ -312,6 +312,77 @@ describe('API server map routes', () => {
     ).toEqual([updated]);
   });
 
+  test('supports zarch runtime entity binding and model delivery', async () => {
+    const repository = getMapRepository();
+    const runtimeBytes = new Uint8Array([
+      0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00
+    ]);
+    const runtimePath = 'runtime/zarch-player-ship-v1.glb';
+    const storageRoot = process.env.API_ASSET_STORAGE_ROOT as string;
+
+    await Bun.write(resolve(storageRoot, runtimePath), runtimeBytes);
+
+    const readyAsset = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 8,
+        heightMeters: 4,
+        widthMeters: 18
+      },
+      collisionClass: 'vehicle-light',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 8,
+        widthMeters: 18
+      },
+      groundingPolicy: 'none',
+      id: 'zarch-player-ship-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 0,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/zarch-player-ship-v1.glb',
+        sizeBytes: runtimeBytes.byteLength
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: runtimePath,
+        sizeBytes: runtimeBytes.byteLength
+      },
+      status: 'ready'
+    });
+
+    const client = await createTestClient();
+    const bound = await client.maps.upsertZarchRuntimeEntity({
+      assetVersionId: readyAsset.id,
+      id: 'zarch-player-ship',
+      kind: 'player-ship',
+      name: 'Zarch Player Ship',
+      renderDimensions: {
+        lengthMeters: 18
+      },
+      status: 'active'
+    });
+
+    expect(await client.maps.listZarchRuntimeEntities({})).toEqual([bound]);
+    expect(
+      await client.maps.getZarchRuntimeEntity({ id: bound.id })
+    ).toEqual(bound);
+
+    const modelResponse = await requestRaw(
+      new Request('http://localhost/api/zarch/runtime-entities/zarch-player-ship/model')
+    );
+    expect(modelResponse.status).toBe(200);
+    expect(modelResponse.headers.get('content-type')).toBe('model/gltf-binary');
+    expect(new Uint8Array(await modelResponse.arrayBuffer())).toEqual(
+      runtimeBytes
+    );
+
+    const missingResponse = await requestRaw(
+      new Request('http://localhost/api/zarch/runtime-entities/missing/model')
+    );
+    expect(missingResponse.status).toBe(404);
+  });
+
   test('supports static entity CRUD and overlap-aware chunk reads through the public contract', async () => {
     const repository = getMapRepository();
     const map = repository.createMap({

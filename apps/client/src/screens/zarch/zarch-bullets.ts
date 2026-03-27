@@ -2,9 +2,7 @@ import { TILE } from '@/helpers/zarch-terrain';
 
 import type { ZarchShipState } from './use-zarch-runtime';
 import {
-  PLAYER_SHIP_LENGTH
-} from './zarch-player-ship-geometry';
-import {
+  PLAYER_SHIP_LENGTH,
   getPlayerShipNoseDirection,
   getPlayerShipNoseOrigin
 } from './zarch-player-ship';

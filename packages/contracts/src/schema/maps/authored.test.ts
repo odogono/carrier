@@ -25,6 +25,11 @@ import {
   StaticEntitySchema,
   StaticEntityExportManifestSchema,
   StaticEntityListItemSchema,
+  GetZarchRuntimeEntityInput,
+  ListZarchRuntimeEntitiesInput,
+  UpsertZarchRuntimeEntityInput,
+  ZarchRuntimeEntityKindSchema,
+  ZarchRuntimeEntitySchema,
   stringifyStaticEntityExportManifest,
   UpdateStaticEntityOutput,
   UpdateArchetypeInput,
@@ -194,6 +199,21 @@ describe("authored map schemas", () => {
     ).toBe("review");
 
     expect(
+      ZarchRuntimeEntitySchema.parse({
+        assetVersionId: "zarch-player-ship-v1",
+        createdAt: now,
+        id: "zarch-player-ship",
+        kind: "player-ship",
+        name: "Zarch Player Ship",
+        renderDimensions: {
+          lengthMeters: 18,
+        },
+        status: "active",
+        updatedAt: now,
+      }).kind,
+    ).toBe("player-ship");
+
+    expect(
       ArchetypeSchema.parse({
         assetVersionId: "watchtower-v1",
         category: "landmark",
@@ -231,6 +251,19 @@ describe("authored map schemas", () => {
     });
 
     expect(
+      UpsertZarchRuntimeEntityInput.parse({
+        assetVersionId: "zarch-player-ship-v1",
+        id: "zarch-player-ship",
+        kind: "player-ship",
+        name: "Zarch Player Ship",
+        renderDimensions: {
+          lengthMeters: 18,
+        },
+        status: "active",
+      }).assetVersionId,
+    ).toBe("zarch-player-ship-v1");
+
+    expect(
       CreateStaticEntityInput.parse({
         archetypeId: "watchtower",
         expectedRevision: 4,
@@ -250,10 +283,21 @@ describe("authored map schemas", () => {
     ).toBeUndefined();
 
     expect(() => ArchetypeCategorySchema.parse("bridge")).toThrow();
+    expect(ZarchRuntimeEntityKindSchema.parse("player-ship")).toBe(
+      "player-ship",
+    );
     expect(ListArchetypesInput.parse({ status: "archived" }).status).toBe(
       "archived",
     );
+    expect(
+      ListZarchRuntimeEntitiesInput.parse({
+        status: "archived",
+      }).status,
+    ).toBe("archived");
     expect(GetArchetypeInput.parse({ id: "watchtower" }).id).toBe("watchtower");
+    expect(GetZarchRuntimeEntityInput.parse({ id: "zarch-player-ship" }).id).toBe(
+      "zarch-player-ship",
+    );
     expect(
       ListReferencedArchetypesInput.parse({
         mapId: "map-1",
