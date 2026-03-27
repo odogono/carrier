@@ -53,7 +53,7 @@ import {
 } from './assets.helpers';
 
 const PAGE_SIZE = 12;
-const defaultWorkflowFilter: AssetWorkflowFilter = 'review';
+const defaultWorkflowFilter: AssetWorkflowFilter = 'all';
 const assetStatusOptions: Array<AssetVersionStatus | 'all'> = [
   'all',
   'review',
@@ -85,6 +85,14 @@ const archetypeStatuses: ArchetypeStatus[] = ['active', 'deprecated', 'archived'
 const DEFAULT_ZARCH_RUNTIME_ENTITY_ID = 'zarch-player-ship';
 const DEFAULT_ZARCH_RUNTIME_ENTITY_NAME = 'Zarch Player Ship';
 const DEFAULT_ZARCH_RUNTIME_ENTITY_LENGTH_METERS = 18;
+
+type AssetsPageUrlState = {
+  page: number;
+  search: string;
+  selectedAssetId: string | null;
+  status: AssetVersionStatus | 'all';
+  workflow: AssetWorkflowFilter;
+};
 
 type ArchetypeDraft = {
   category: ArchetypeCategory;
@@ -215,6 +223,30 @@ async function uploadAsset(file: File) {
 
   return (await response.json()) as AssetVersion;
 }
+
+const parseAssetsPageUrlState = (): AssetsPageUrlState => {
+  const params = new URLSearchParams(window.location.search);
+  const workflowParam = params.get('workflow');
+  const statusParam = params.get('status');
+  const pageParam = Number(params.get('page') ?? '1');
+
+  const workflow = workflowOptions.some(option => option.value === workflowParam)
+    ? (workflowParam as AssetWorkflowFilter)
+    : defaultWorkflowFilter;
+  const status = assetStatusOptions.includes(
+    (statusParam ?? 'all') as AssetVersionStatus | 'all'
+  )
+    ? ((statusParam ?? 'all') as AssetVersionStatus | 'all')
+    : 'all';
+
+  return {
+    page: Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1,
+    search: params.get('search') ?? '',
+    selectedAssetId: params.get('asset'),
+    status,
+    workflow
+  };
+};
 
 function AssetUsageBadges({ item }: { item: AssetVersionListItem }) {
   return (
@@ -1006,12 +1038,19 @@ function AssetDetailPanel({
 export function AssetsPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<AssetVersionStatus | 'all'>('all');
-  const [workflow, setWorkflow] =
-    useState<AssetWorkflowFilter>(defaultWorkflowFilter);
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  const hasHydratedUrlStateRef = useRef(false);
+  const initialUrlState = useMemo(() => parseAssetsPageUrlState(), []);
+  const [search, setSearch] = useState(initialUrlState.search);
+  const [status, setStatus] = useState<AssetVersionStatus | 'all'>(
+    initialUrlState.status
+  );
+  const [workflow, setWorkflow] = useState<AssetWorkflowFilter>(
+    initialUrlState.workflow
+  );
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(
+    initialUrlState.selectedAssetId
+  );
+  const [page, setPage] = useState(initialUrlState.page);
   const [file, setFile] = useState<File | null>(null);
 
   const mapsQuery = useQuery({
@@ -1073,6 +1112,11 @@ export function AssetsPage() {
   );
 
   useEffect(() => {
+    if (!hasHydratedUrlStateRef.current) {
+      hasHydratedUrlStateRef.current = true;
+      return;
+    }
+
     setPage(1);
   }, [search, status, workflow]);
 
@@ -1099,6 +1143,48 @@ export function AssetsPage() {
 
   const selectedAssetItem =
     visibleAssets.find(asset => asset.asset.id === selectedAssetId) ?? null;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    if (workflow === defaultWorkflowFilter) {
+      params.delete('workflow');
+    } else {
+      params.set('workflow', workflow);
+    }
+
+    if (status === 'all') {
+      params.delete('status');
+    } else {
+      params.set('status', status);
+    }
+
+    if (search.trim().length === 0) {
+      params.delete('search');
+    } else {
+      params.set('search', search);
+    }
+
+    if (selectedAssetId) {
+      params.set('asset', selectedAssetId);
+    } else {
+      params.delete('asset');
+    }
+
+    if (page <= 1) {
+      params.delete('page');
+    } else {
+      params.set('page', String(page));
+    }
+
+    const nextQuery = params.toString();
+    const nextUrl =
+      nextQuery.length > 0
+        ? `${window.location.pathname}?${nextQuery}`
+        : window.location.pathname;
+
+    window.history.replaceState(null, '', nextUrl);
+  }, [page, search, selectedAssetId, status, workflow]);
 
   return (
     <div className="space-y-6">
