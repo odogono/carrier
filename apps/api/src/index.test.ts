@@ -1078,7 +1078,9 @@ describe('API server map routes', () => {
     const client = await createTestClient();
     const listed = await client.maps.listAssetVersions({});
     expect(listed).toHaveLength(1);
-    expect(listed[0]?.id).toBe(assetVersion.id);
+    expect(listed[0]?.asset.id).toBe(assetVersion.id);
+    expect(listed[0]?.usage.archetypeIds).toEqual([]);
+    expect(listed[0]?.isDeletable).toBe(true);
 
     const reviewed = await client.maps.updateAssetVersionReview({
       collisionBox: {
@@ -1119,6 +1121,168 @@ describe('API server map routes', () => {
         maxHeightDeltaMeters: 1
       })
     ).rejects.toThrow('Asset version refinery-v1 is not in review');
+  });
+
+  test('archives assets and permanently deletes only unreferenced asset versions', async () => {
+    const storageRoot = process.env.API_ASSET_STORAGE_ROOT as string;
+    const repository = getMapRepository();
+
+    const archivedCandidate = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 12,
+        heightMeters: 12,
+        widthMeters: 12
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 12,
+        widthMeters: 12
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'archivable-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/archivable.glb',
+        sizeBytes: 16
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/archivable.glb',
+        sizeBytes: 16
+      },
+      status: 'ready'
+    });
+    await Bun.write(
+      resolve(storageRoot, archivedCandidate.originalFile.path),
+      new Uint8Array(16)
+    );
+    await Bun.write(
+      resolve(storageRoot, archivedCandidate.runtimeFile!.path),
+      new Uint8Array(16)
+    );
+
+    const referenced = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 12,
+        heightMeters: 12,
+        widthMeters: 12
+      },
+      collisionClass: 'building-solid',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 12,
+        widthMeters: 12
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'referenced-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/referenced.glb',
+        sizeBytes: 16
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/referenced.glb',
+        sizeBytes: 16
+      },
+      status: 'ready'
+    });
+    repository.createArchetype({
+      assetVersionId: referenced.id,
+      category: 'building',
+      id: 'referenced',
+      name: 'Referenced',
+      status: 'active',
+      tags: []
+    });
+
+    const deletable = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 10,
+        heightMeters: 8,
+        widthMeters: 10
+      },
+      collisionClass: 'prop',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 10,
+        widthMeters: 10
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'deletable-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'uploads/deletable.glb',
+        sizeBytes: 8
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: 'runtime/deletable.glb',
+        sizeBytes: 8
+      },
+      status: 'ready'
+    });
+    await Bun.write(
+      resolve(storageRoot, deletable.originalFile.path),
+      new Uint8Array(8)
+    );
+    await Bun.write(
+      resolve(storageRoot, deletable.runtimeFile!.path),
+      new Uint8Array(8)
+    );
+
+    const client = await createTestClient();
+    const archived = await client.maps.archiveAssetVersion({
+      id: archivedCandidate.id
+    });
+    expect(archived.status).toBe('archived');
+
+    const archivedListResponse = await request(
+      'GET',
+      '/api/maps/assets?status=archived'
+    );
+    const archivedList = archivedListResponse.json as Array<{
+      asset: { id: string };
+    }>;
+    expect(archivedList.map(item => item.asset.id)).toEqual([
+      archivedCandidate.id
+    ]);
+
+    await expect(
+      client.maps.deleteAssetVersion({
+        id: referenced.id
+      })
+    ).rejects.toThrow('still referenced');
+
+    expect(existsSync(resolve(storageRoot, deletable.originalFile.path))).toBe(
+      true
+    );
+    expect(existsSync(resolve(storageRoot, deletable.runtimeFile!.path))).toBe(
+      true
+    );
+
+    await expect(
+      client.maps.deleteAssetVersion({
+        id: deletable.id
+      })
+    ).resolves.toEqual({
+      deleted: true,
+      id: deletable.id
+    });
+
+    expect(existsSync(resolve(storageRoot, deletable.originalFile.path))).toBe(
+      false
+    );
+    expect(existsSync(resolve(storageRoot, deletable.runtimeFile!.path))).toBe(
+      false
+    );
   });
 
   test('allows PATCH in CORS preflight responses for admin authoring routes', async () => {

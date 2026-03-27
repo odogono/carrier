@@ -937,6 +937,91 @@ describe('map repository', () => {
     }
   });
 
+  test('archives assets and only deletes unreferenced asset versions', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const referenced = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 12,
+          heightMeters: 12,
+          widthMeters: 12
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 12,
+          widthMeters: 12
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'referenced-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/referenced.glb',
+          sizeBytes: 100
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/referenced.glb',
+          sizeBytes: 100
+        },
+        status: 'ready'
+      });
+
+      repository.createArchetype({
+        assetVersionId: referenced.id,
+        category: 'building',
+        id: 'referenced-archetype',
+        name: 'Referenced Archetype',
+        status: 'active',
+        tags: []
+      });
+
+      expect(repository.archiveAssetVersion(referenced.id).status).toBe('archived');
+      expect(repository.listAssetVersionItems('archived')).toHaveLength(1);
+      expect(() => repository.deleteAssetVersion(referenced.id)).toThrow(
+        MapRepositoryError
+      );
+
+      const unreferenced = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 10,
+          heightMeters: 8,
+          widthMeters: 10
+        },
+        collisionClass: 'prop',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 10,
+          widthMeters: 10
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'free-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/free.glb',
+          sizeBytes: 100
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/free.glb',
+          sizeBytes: 100
+        },
+        status: 'ready'
+      });
+
+      const deleted = repository.deleteAssetVersion(unreferenced.id);
+      expect(deleted.id).toBe(unreferenced.id);
+      expect(repository.getAssetVersion(unreferenced.id)).toBeNull();
+    } finally {
+      repository.close();
+    }
+  });
+
   test('snapshots overlapping static entities and manifest hashes into exports', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 

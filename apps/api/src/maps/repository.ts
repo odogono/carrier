@@ -6,6 +6,8 @@ import type {
   ApplyBooleanOutput,
   Archetype,
   AssetVersion,
+  AssetVersionListItem,
+  AssetVersionUsageSummary,
   BooleanOperation,
   ControlPoint,
   CreateMapExportInput,
@@ -290,6 +292,8 @@ type DeleteStaticEntityInput = {
 type MapRepositoryOptions = {
   dbPath?: string;
 };
+
+const DEFAULT_DB_PATH = resolve(import.meta.dir, '../../../.data/carrier.sqlite');
 
 export type RepositoryErrorCode = 'BAD_REQUEST' | 'CONFLICT' | 'NOT_FOUND';
 
@@ -723,6 +727,17 @@ const assetVersionRowToModel = (row: AssetVersionRow): AssetVersion => ({
   updatedAt: row.updatedAt
 });
 
+const assetVersionListItemFromModel = (
+  asset: AssetVersion,
+  usage: AssetVersionUsageSummary
+): AssetVersionListItem => ({
+  asset,
+  isDeletable:
+    usage.archetypeIds.length === 0 && usage.runtimeEntityIds.length === 0,
+  runtimeArtifactPresent: asset.runtimeFile !== null,
+  usage
+});
+
 const archetypeRowToModel = (row: ArchetypeRow): Archetype => ({
   assetVersionId: row.assetVersionId,
   category: row.category as Archetype['category'],
@@ -862,13 +877,13 @@ const ensureChunkBounds = (
 
 export class MapRepository {
   readonly db: Database;
+  readonly dbPath: string;
 
   constructor(options: MapRepositoryOptions = {}) {
-    this.db = new Database(
-      ensureDatabasePath(
-        options.dbPath ?? process.env.API_DB_PATH ?? '.data/carrier.sqlite'
-      )
+    this.dbPath = ensureDatabasePath(
+      options.dbPath ?? process.env.API_DB_PATH ?? DEFAULT_DB_PATH
     );
+    this.db = new Database(this.dbPath);
     this.migrate();
   }
 
@@ -1197,6 +1212,85 @@ export class MapRepository {
     }
 
     return row;
+  }
+
+  private getAssetVersionUsageSummary(id: string): AssetVersionUsageSummary {
+    const archetypeIds = this.db
+      .query<{ id: string }, [string]>(
+        `
+        SELECT id
+        FROM archetypes
+        WHERE asset_version_id = ?
+        ORDER BY id ASC
+      `
+      )
+      .all(id)
+      .map(row => row.id);
+
+    const runtimeEntityIds = this.db
+      .query<{ id: string }, [string]>(
+        `
+        SELECT id
+        FROM zarch_runtime_entities
+        WHERE asset_version_id = ?
+        ORDER BY id ASC
+      `
+      )
+      .all(id)
+      .map(row => row.id);
+
+    return {
+      archetypeIds,
+      runtimeEntityIds
+    };
+  }
+
+  private batchAssetVersionUsageSummaries(): Map<string, AssetVersionUsageSummary> {
+    const map = new Map<string, AssetVersionUsageSummary>();
+
+    const archetypeRows = this.db
+      .query<{ asset_version_id: string; id: string }, []>(
+        `
+        SELECT asset_version_id, id
+        FROM archetypes
+        ORDER BY asset_version_id ASC, id ASC
+      `
+      )
+      .all();
+
+    const runtimeEntityRows = this.db
+      .query<{ asset_version_id: string; id: string }, []>(
+        `
+        SELECT asset_version_id, id
+        FROM zarch_runtime_entities
+        ORDER BY asset_version_id ASC, id ASC
+      `
+      )
+      .all();
+
+    for (const row of archetypeRows) {
+      let summary = map.get(row.asset_version_id);
+
+      if (!summary) {
+        summary = { archetypeIds: [], runtimeEntityIds: [] };
+        map.set(row.asset_version_id, summary);
+      }
+
+      summary.archetypeIds.push(row.id);
+    }
+
+    for (const row of runtimeEntityRows) {
+      let summary = map.get(row.asset_version_id);
+
+      if (!summary) {
+        summary = { archetypeIds: [], runtimeEntityIds: [] };
+        map.set(row.asset_version_id, summary);
+      }
+
+      summary.runtimeEntityIds.push(row.id);
+    }
+
+    return map;
   }
 
   private listZarchRuntimeEntityRows(
@@ -2595,6 +2689,22 @@ export class MapRepository {
     return assetVersionRowToModel(this.getAssetVersionRowOrThrow(input.id));
   }
 
+  listAssetVersionItems(status?: AssetVersion['status']) {
+    const usageMap = this.batchAssetVersionUsageSummaries();
+    const emptyUsage: AssetVersionUsageSummary = {
+      archetypeIds: [],
+      runtimeEntityIds: []
+    };
+
+    return this.listAssetVersionRows(status).map(row => {
+      const asset = assetVersionRowToModel(row);
+      return assetVersionListItemFromModel(
+        asset,
+        usageMap.get(asset.id) ?? emptyUsage
+      );
+    });
+  }
+
   listAssetVersions(status?: AssetVersion['status']) {
     return this.listAssetVersionRows(status).map(assetVersionRowToModel);
   }
@@ -2727,10 +2837,83 @@ export class MapRepository {
     return this.updateAssetVersion({ id, status: 'ready' }, current);
   }
 
+  archiveAssetVersion(id: string) {
+    const current = assetVersionRowToModel(this.getAssetVersionRowOrThrow(id));
+
+    if (current.status === 'archived') {
+      return current;
+    }
+
+    const archived: AssetVersion = {
+      ...current,
+      status: 'archived',
+      updatedAt: new Date().toISOString()
+    };
+
+    this.db
+      .prepare(
+        `
+        UPDATE asset_versions
+        SET status = ?, updated_at = ?
+        WHERE id = ?
+      `
+      )
+      .run(archived.status, archived.updatedAt, id);
+
+    return archived;
+  }
+
+  deleteAssetVersion(id: string) {
+    const current = assetVersionRowToModel(this.getAssetVersionRowOrThrow(id));
+    const usage = this.getAssetVersionUsageSummary(id);
+
+    if (usage.archetypeIds.length > 0 || usage.runtimeEntityIds.length > 0) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset version ${id} is still referenced and cannot be deleted`
+      );
+    }
+
+    this.db.prepare('DELETE FROM asset_versions WHERE id = ?').run(id);
+    return current;
+  }
+
   listZarchRuntimeEntities(status?: ZarchRuntimeEntity['status']) {
     return this.listZarchRuntimeEntityRows(status).map(
       zarchRuntimeEntityRowToModel
     );
+  }
+
+  countAssetVersions() {
+    return (
+      this.db
+        .query<{ count: number }, []>(
+          `
+          SELECT COUNT(*) as count
+          FROM asset_versions
+        `
+        )
+        .get()?.count ?? 0
+    );
+  }
+
+  getAssetDiagnostics() {
+    return {
+      assetCount: this.countAssetVersions(),
+      cwd: process.cwd(),
+      dbPath: this.dbPath,
+      recentAssetIds: this.db
+        .query<{ id: string }, []>(
+          `
+          SELECT id
+          FROM asset_versions
+          ORDER BY created_at DESC, id DESC
+          LIMIT 10
+        `
+        )
+        .all()
+        .map(row => row.id)
+    };
   }
 
   getZarchRuntimeEntity(id: string) {

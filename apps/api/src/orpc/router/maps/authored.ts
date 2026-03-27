@@ -1,4 +1,6 @@
 import {
+  ArchiveAssetVersionInput,
+  ArchiveAssetVersionRoute,
   ApproveAssetVersionInput,
   ApproveAssetVersionRoute,
   ApplyBooleanInput,
@@ -11,6 +13,8 @@ import {
   CreateStaticEntityRoute,
   CreateSourcePolygonInput,
   CreateSourcePolygonRoute,
+  DeleteAssetVersionInput,
+  DeleteAssetVersionRoute,
   DeleteControlPointInput,
   DeleteControlPointRoute,
   DeleteStaticEntityInput,
@@ -59,6 +63,7 @@ import {
 
 import { ORPCError, os } from '@orpc/server';
 
+import { getAssetPipeline } from '@/maps/assets';
 import { getMapRepository } from '@/maps/repository';
 
 import { asOrpcError } from './errors';
@@ -79,7 +84,9 @@ const listAssetVersions = os
   .input(ListAssetVersionsInput)
   .handler(async ({ input }) => {
     try {
-      return getMapRepository().listAssetVersions(input.status);
+      return getMapRepository().listAssetVersionItems(
+        input.status === 'all' ? undefined : input.status
+      );
     } catch (error) {
       return asOrpcError(error);
     }
@@ -120,6 +127,32 @@ const approveAssetVersion = os
   .handler(async ({ input }) => {
     try {
       return getMapRepository().approveAssetVersion(input.id);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const archiveAssetVersion = os
+  .route(ArchiveAssetVersionRoute)
+  .input(ArchiveAssetVersionInput)
+  .handler(async ({ input }) => {
+    try {
+      return getAssetPipeline().archive(input.id);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
+const deleteAssetVersion = os
+  .route(DeleteAssetVersionRoute)
+  .input(DeleteAssetVersionInput)
+  .handler(async ({ input }) => {
+    try {
+      getAssetPipeline().delete(input.id);
+      return {
+        deleted: true as const,
+        id: input.id
+      };
     } catch (error) {
       return asOrpcError(error);
     }
@@ -405,12 +438,14 @@ const getOverview = os
   });
 
 export const authored = {
+  archiveAssetVersion,
   approveAssetVersion,
   applyBoolean,
   createArchetype,
   createControlPoint,
   createStaticEntity,
   createSourcePolygon,
+  deleteAssetVersion,
   deleteControlPoint,
   deleteStaticEntity,
   deleteSourcePolygon,

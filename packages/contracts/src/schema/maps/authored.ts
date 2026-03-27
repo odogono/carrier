@@ -115,7 +115,8 @@ export const AssetVersionStatusSchema = z.enum([
   'processing',
   'review',
   'ready',
-  'failed'
+  'failed',
+  'archived'
 ]);
 export type AssetVersionStatus = z.infer<typeof AssetVersionStatusSchema>;
 
@@ -179,6 +180,22 @@ export const AssetVersionSchema = z.object({
   updatedAt: timestampSchema
 });
 export type AssetVersion = z.infer<typeof AssetVersionSchema>;
+
+export const AssetVersionUsageSummarySchema = z.object({
+  archetypeIds: z.array(z.string().min(1)).max(100),
+  runtimeEntityIds: z.array(z.string().min(1)).max(100)
+});
+export type AssetVersionUsageSummary = z.infer<
+  typeof AssetVersionUsageSummarySchema
+>;
+
+export const AssetVersionListItemSchema = z.object({
+  asset: AssetVersionSchema,
+  isDeletable: z.boolean(),
+  runtimeArtifactPresent: z.boolean(),
+  usage: AssetVersionUsageSummarySchema
+});
+export type AssetVersionListItem = z.infer<typeof AssetVersionListItemSchema>;
 
 export const ZarchRuntimeEntityRenderDimensionsSchema = z.object({
   lengthMeters: positiveFiniteNumber
@@ -248,12 +265,20 @@ export const StaticEntityListItemSchema = z.object({
 });
 export type StaticEntityListItem = z.infer<typeof StaticEntityListItemSchema>;
 
+export const AssetVersionListFilterStatusSchema = z.union([
+  AssetVersionStatusSchema,
+  z.literal('all')
+]);
+export type AssetVersionListFilterStatus = z.infer<
+  typeof AssetVersionListFilterStatusSchema
+>;
+
 export const ListAssetVersionsInput = z.object({
-  status: AssetVersionStatusSchema.optional()
+  status: AssetVersionListFilterStatusSchema.default('all')
 });
 export type ListAssetVersionsInput = z.infer<typeof ListAssetVersionsInput>;
 
-export const ListAssetVersionsOutput = z.array(AssetVersionSchema);
+export const ListAssetVersionsOutput = z.array(AssetVersionListItemSchema);
 export type ListAssetVersionsOutput = z.infer<typeof ListAssetVersionsOutput>;
 
 export const GetAssetVersionInput = z.object({
@@ -333,6 +358,27 @@ export type ApproveAssetVersionInput = z.infer<typeof ApproveAssetVersionInput>;
 
 export const ApproveAssetVersionOutput = AssetVersionSchema;
 export type ApproveAssetVersionOutput = z.infer<typeof ApproveAssetVersionOutput>;
+
+export const ArchiveAssetVersionInput = z.object({
+  id: z.string().min(1)
+});
+export type ArchiveAssetVersionInput = z.infer<typeof ArchiveAssetVersionInput>;
+
+export const ArchiveAssetVersionOutput = AssetVersionSchema;
+export type ArchiveAssetVersionOutput = z.infer<
+  typeof ArchiveAssetVersionOutput
+>;
+
+export const DeleteAssetVersionInput = z.object({
+  id: z.string().min(1)
+});
+export type DeleteAssetVersionInput = z.infer<typeof DeleteAssetVersionInput>;
+
+export const DeleteAssetVersionOutput = z.object({
+  deleted: z.literal(true),
+  id: z.string().min(1)
+});
+export type DeleteAssetVersionOutput = z.infer<typeof DeleteAssetVersionOutput>;
 
 export const CreateArchetypeInput = ArchetypeSchema.omit({
   createdAt: true,
@@ -728,6 +774,20 @@ export const ApproveAssetVersionRoute: Route = {
   tags: ['maps']
 } as const;
 
+export const ArchiveAssetVersionRoute: Route = {
+  description: 'Archive an asset version while keeping existing references resolvable',
+  method: 'POST',
+  path: '/maps/assets/{id}/archive',
+  tags: ['maps']
+} as const;
+
+export const DeleteAssetVersionRoute: Route = {
+  description: 'Delete an unreferenced asset version permanently',
+  method: 'DELETE',
+  path: '/maps/assets/{id}',
+  tags: ['maps']
+} as const;
+
 export const ListZarchRuntimeEntitiesRoute: Route = {
   description: 'List global Zarch runtime entity definitions',
   method: 'GET',
@@ -817,6 +877,10 @@ export const authoredMapsContract = {
     .route(ApproveAssetVersionRoute)
     .input(ApproveAssetVersionInput)
     .output(ApproveAssetVersionOutput),
+  archiveAssetVersion: oc
+    .route(ArchiveAssetVersionRoute)
+    .input(ArchiveAssetVersionInput)
+    .output(ArchiveAssetVersionOutput),
   getZarchRuntimeEntity: oc
     .route(GetZarchRuntimeEntityRoute)
     .input(GetZarchRuntimeEntityInput)
@@ -845,6 +909,10 @@ export const authoredMapsContract = {
     .route(DeleteControlPointRoute)
     .input(DeleteControlPointInput)
     .output(DeleteControlPointOutput),
+  deleteAssetVersion: oc
+    .route(DeleteAssetVersionRoute)
+    .input(DeleteAssetVersionInput)
+    .output(DeleteAssetVersionOutput),
   deleteStaticEntity: oc
     .route(DeleteStaticEntityRoute)
     .input(DeleteStaticEntityInput)

@@ -5,7 +5,9 @@ import {
   ApplyBooleanInput,
   ArchetypeCategorySchema,
   ArchetypeSchema,
+  ArchiveAssetVersionInput,
   AssetVersionSchema,
+  AssetVersionListItemSchema,
   CreateStaticEntityInput,
   CreateStaticEntityOutput,
   CreateMapExportInput,
@@ -14,9 +16,11 @@ import {
   CreateSourcePolygonOutput,
   CreateSourcePolygonInput,
   DeleteStaticEntityOutput,
+  DeleteAssetVersionInput,
   GetArchetypeInput,
   hasCompatibleStaticEntityExportManifestHash,
   ListArchetypesInput,
+  ListAssetVersionsInput,
   ListReferencedArchetypesInput,
   ListStaticEntitiesOutput,
   MapMetadataSchema,
@@ -199,6 +203,47 @@ describe("authored map schemas", () => {
     ).toBe("review");
 
     expect(
+      AssetVersionListItemSchema.parse({
+        asset: {
+          collisionBox: {
+            depthMeters: 18,
+            heightMeters: 24,
+            widthMeters: 20,
+          },
+          collisionClass: "building-solid",
+          createdAt: now,
+          diagnostics: ["auto-derived footprint"],
+          footprint: {
+            depthMeters: 18,
+            widthMeters: 20,
+          },
+          groundingPolicy: "terrain-average-footprint",
+          id: "watchtower-v1",
+          instancingEligible: false,
+          maxHeightDeltaMeters: 2.5,
+          originalFile: {
+            contentType: "model/gltf-binary",
+            path: "uploads/watchtower/source.glb",
+            sizeBytes: 1024,
+          },
+          runtimeFile: {
+            contentType: "model/gltf-binary",
+            path: "runtime/watchtower/normalized.glb",
+            sizeBytes: 2048,
+          },
+          status: "archived",
+          updatedAt: now,
+        },
+        isDeletable: false,
+        runtimeArtifactPresent: true,
+        usage: {
+          archetypeIds: ["watchtower"],
+          runtimeEntityIds: ["zarch-player-ship"],
+        },
+      }).asset.status,
+    ).toBe("archived");
+
+    expect(
       ZarchRuntimeEntitySchema.parse({
         assetVersionId: "zarch-player-ship-v1",
         createdAt: now,
@@ -286,6 +331,9 @@ describe("authored map schemas", () => {
     expect(ZarchRuntimeEntityKindSchema.parse("player-ship")).toBe(
       "player-ship",
     );
+    expect(ListAssetVersionsInput.parse({ status: "archived" }).status).toBe(
+      "archived",
+    );
     expect(ListArchetypesInput.parse({ status: "archived" }).status).toBe(
       "archived",
     );
@@ -297,6 +345,12 @@ describe("authored map schemas", () => {
     expect(GetArchetypeInput.parse({ id: "watchtower" }).id).toBe("watchtower");
     expect(GetZarchRuntimeEntityInput.parse({ id: "zarch-player-ship" }).id).toBe(
       "zarch-player-ship",
+    );
+    expect(ArchiveAssetVersionInput.parse({ id: "watchtower-v1" }).id).toBe(
+      "watchtower-v1",
+    );
+    expect(DeleteAssetVersionInput.parse({ id: "watchtower-v1" }).id).toBe(
+      "watchtower-v1",
     );
     expect(
       ListReferencedArchetypesInput.parse({

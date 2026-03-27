@@ -1,10 +1,10 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import type { AssetVersion } from 'carrier-contracts';
 
 import { getMapRepository } from './repository';
 
-const DEFAULT_STORAGE_ROOT = '.data/assets';
+const DEFAULT_STORAGE_ROOT = resolve(import.meta.dir, '../../../.data/assets');
 const PROCESSING_DIAGNOSTIC = 'Normalization pipeline completed';
 const REVIEW_DIAGNOSTIC = 'Candidate metadata auto-derived from uploaded asset';
 
@@ -139,12 +139,41 @@ class AssetPipeline {
     return assetVersion;
   }
 
-  list() {
-    return getMapRepository().listAssetVersions();
+  list(status?: AssetVersion['status']) {
+    return getMapRepository().listAssetVersionItems(status);
+  }
+
+  getDiagnostics() {
+    return {
+      cwd: process.cwd(),
+      repository: getMapRepository().getAssetDiagnostics(),
+      storageRoot: getStorageRoot()
+    };
   }
 
   get(id: string) {
     return getMapRepository().getAssetVersion(id);
+  }
+
+  archive(id: string) {
+    return getMapRepository().archiveAssetVersion(id);
+  }
+
+  delete(id: string) {
+    const repository = getMapRepository();
+    const assetVersion = repository.deleteAssetVersion(id);
+
+    rmSync(this.absoluteStoragePath(assetVersion.originalFile.path), {
+      force: true
+    });
+
+    if (assetVersion.runtimeFile) {
+      rmSync(this.absoluteStoragePath(assetVersion.runtimeFile.path), {
+        force: true
+      });
+    }
+
+    return assetVersion;
   }
 
   async runtimeResponse(id: string) {

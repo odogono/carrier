@@ -3,6 +3,7 @@ import { Elysia } from 'elysia';
 import { createLog } from 'odgn-ts-helpers/log';
 import { safeParseInt } from 'odgn-ts-helpers/number';
 import { z } from 'zod';
+import type { AssetVersion } from 'carrier-contracts';
 
 import { getAssetPipeline } from '@/maps/assets';
 import { getMapRepository, MapRepositoryError } from '@/maps/repository';
@@ -104,6 +105,16 @@ export const createServer = async () => {
       })
     ]
   });
+  const assetDiagnostics = getAssetPipeline().getDiagnostics();
+
+  log.info('Asset pipeline diagnostics', {
+    assetCount: assetDiagnostics.repository.assetCount,
+    cwd: assetDiagnostics.cwd,
+    dbPath: assetDiagnostics.repository.dbPath,
+    pid: process.pid,
+    recentAssetIds: assetDiagnostics.repository.recentAssetIds,
+    storageRoot: assetDiagnostics.storageRoot
+  });
 
   const app = new Elysia()
     .use(
@@ -145,13 +156,20 @@ export const createServer = async () => {
       status: 'ok',
       timestamp: new Date().toISOString()
     }))
-    .get('/api/maps/assets', ({ requestId }) =>
-      Response.json(getAssetPipeline().list(), {
+    .get('/api/maps/assets', ({ request, requestId }) => {
+      const statusParam = new URL(request.url).searchParams.get('status');
+      const status =
+        statusParam === null || statusParam === 'all'
+          ? undefined
+          : (statusParam as AssetVersion['status']);
+      const assets = getAssetPipeline().list(status ?? undefined);
+
+      return Response.json(assets, {
         headers: {
           'X-Request-ID': requestId
         }
-      })
-    )
+      });
+    })
     .get('/api/maps/assets/:id', ({ params, requestId }) => {
       const assetVersion = getAssetPipeline().get(params.id);
 
