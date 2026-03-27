@@ -24,50 +24,50 @@ import {
   type BufferGeometry as BufferGeometryType,
   type DirectionalLight,
   type Intersection,
+  type Material,
   type PerspectiveCamera
 } from 'three';
 import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { useQuery } from '@tanstack/react-query';
 
 import type { MapMetadata } from 'carrier-contracts/types';
 
 import { client } from '@/helpers/api-link';
 import {
   TILE,
-  TILE_POOL_SIZE,
-  TREE_POOL_SIZE,
   clampZoom,
+  getLandscapeViewMetrics,
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
 import {
   useSceneConfigRef,
   useSceneConfigValue
 } from '@/hooks/use-scene-controls';
+import { useQuery } from '@tanstack/react-query';
 
 import type { ZarchInputState, ZarchRuntimeState } from './use-zarch-runtime';
-import { wrapWorldCoordinate } from './zarch-minimap';
-import {
-  getPlayerShipExhaustDirection,
-  getPlayerShipExhaustOrigin,
-  stepPlayerShip
-} from './zarch-player-ship';
-import {
-  PARTICLE_ASPECT_BY_KIND,
-  PARTICLE_CAPACITY,
-  createParticleSystemState,
-  emitBulletImpactParticles,
-  emitShipCrashParticles,
-  emitTapParticlePreset,
-  emitShipThrustParticles,
-  simulateParticleSystem
-} from './zarch-particles';
 import {
   DEFAULT_ZARCH_BULLET_SPEC,
   ZARCH_BULLET_CAPACITY,
   createShipBullet,
   stepZarchBullet
 } from './zarch-bullets';
+import { wrapWorldCoordinate } from './zarch-minimap';
+import {
+  PARTICLE_ASPECT_BY_KIND,
+  PARTICLE_CAPACITY,
+  createParticleSystemState,
+  emitBulletImpactParticles,
+  emitShipCrashParticles,
+  emitShipThrustParticles,
+  emitTapParticlePreset,
+  simulateParticleSystem
+} from './zarch-particles';
+import {
+  getPlayerShipExhaustDirection,
+  getPlayerShipExhaustOrigin,
+  stepPlayerShip
+} from './zarch-player-ship';
 import { loadZarchRuntimeEntityModel } from './zarch-runtime-entity-model';
 import { ZarchStaticEntities } from './zarch-static-entities';
 
@@ -313,23 +313,6 @@ const createScenePools = (clipPlanes: Plane[]): ScenePools => {
   root.add(particleShadowMesh);
   root.add(particleMesh);
 
-  for (let index = 0; index < TILE_POOL_SIZE; index += 1) {
-    const mesh = buildTileMesh(clipPlanes);
-    root.add(mesh);
-    tilePool.push(mesh);
-  }
-
-  for (let index = 0; index < TREE_POOL_SIZE; index += 1) {
-    const pine = buildPineTree(clipPlanes);
-    const round = buildRoundTree(clipPlanes);
-
-    pine.visible = false;
-    round.visible = false;
-    root.add(pine);
-    root.add(round);
-    treePool.push({ pine, round });
-  }
-
   return {
     bulletMesh,
     particleMesh,
@@ -359,6 +342,66 @@ const disposeScenePools = (root: Group) => {
   });
 };
 
+const ensureTilePoolMesh = (
+  pools: ScenePools,
+  clipPlanes: Plane[],
+  index: number
+) => {
+  while (pools.tilePool.length <= index) {
+    const mesh = buildTileMesh(clipPlanes);
+    pools.root.add(mesh);
+    pools.tilePool.push(mesh);
+  }
+
+  return pools.tilePool[index]!;
+};
+
+const ensureTreePoolEntry = (
+  pools: ScenePools,
+  clipPlanes: Plane[],
+  index: number
+) => {
+  while (pools.treePool.length <= index) {
+    const pine = buildPineTree(clipPlanes);
+    const round = buildRoundTree(clipPlanes);
+
+    pine.visible = false;
+    round.visible = false;
+    pools.root.add(pine);
+    pools.root.add(round);
+    pools.treePool.push({ pine, round });
+  }
+
+  return pools.treePool[index]!;
+};
+
+const setObjectClippingPlanes = (
+  object: Object3D,
+  clippingPlanes: Plane[] | null,
+  clipShadows: boolean
+) => {
+  object.traverse(child => {
+    if (!(child instanceof Mesh)) {
+      return;
+    }
+
+    const materials = Array.isArray(child.material)
+      ? child.material
+      : [child.material];
+
+    materials.forEach(material => {
+      const target = material as Material & {
+        clipShadows?: boolean;
+        clippingPlanes?: Plane[] | null;
+      };
+
+      target.clippingPlanes = clippingPlanes;
+      target.clipShadows = clipShadows;
+      material.needsUpdate = true;
+    });
+  });
+};
+
 const setTreeBrightness = (group: Group, brightness: number) => {
   group.children.forEach(child => {
     const mesh = child as Mesh;
@@ -384,6 +427,7 @@ export const ZarchScene = ({
   const cameraFov = useSceneConfigValue('cameraFov');
   const clipPlanesRef = useRef<Plane[] | null>(null);
   const directionalIntensity = useSceneConfigValue('directionalIntensity');
+  const landscapeClipScale = useSceneConfigValue('landscapeClipScale');
   const directionalPosition = useSceneConfigValue('directionalPosition');
   const directionalRef = useRef<DirectionalLight>(null);
   const shadowBias = useSceneConfigValue('shadowBias');
@@ -479,6 +523,16 @@ export const ZarchScene = ({
       poolsRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const shipObject = shipGroupRef.current;
+
+    if (!shipObject) {
+      return;
+    }
+
+    setObjectClippingPlanes(shipObject, null, false);
+  }, [shipModelQuery.data]);
 
   useEffect(() => {
     particleSystemRef.current.count = 0;
@@ -731,13 +785,15 @@ export const ZarchScene = ({
       runtime.bullets = nextBullets;
     }
 
-    const zoomRadius = config.viewRadiusBase * runtime.camera.zoom;
-    const viewRadius = Math.ceil(zoomRadius);
-    const clipRadius = Math.max((zoomRadius - 0.6) * TILE, TILE);
-    const pullBack = clipRadius * config.cameraPullbackMultiplier;
-    const cameraHeight = clipRadius * config.cameraHeightMultiplier;
-    const focusY =
-      runtime.mode === 'ship' && runtime.ship ? runtime.ship.y : 0;
+    const { cameraClipRadius, clipRadius, viewRadius } =
+      getLandscapeViewMetrics({
+        landscapeClipScale: config.landscapeClipScale,
+        viewRadiusBase: config.viewRadiusBase,
+        zoom: runtime.camera.zoom
+      });
+    const pullBack = cameraClipRadius * config.cameraPullbackMultiplier;
+    const cameraHeight = cameraClipRadius * config.cameraHeightMultiplier;
+    const focusY = runtime.mode === 'ship' && runtime.ship ? runtime.ship.y : 0;
 
     camera.position.set(
       -Math.sin(runtime.camera.yaw) * pullBack,
@@ -788,7 +844,7 @@ export const ZarchScene = ({
           continue;
         }
 
-        const tileMesh = pools.tilePool[tileIndex];
+        const tileMesh = ensureTilePoolMesh(pools, clipPlanes, tileIndex);
         const h00Raw = terrain.sampleHeight(gx, gz);
         const h10Raw = terrain.sampleHeight(gx + 1, gz);
         const h01Raw = terrain.sampleHeight(gx, gz + 1);
@@ -875,7 +931,6 @@ export const ZarchScene = ({
 
         const canPlaceTree =
           config.showTrees &&
-          treeIndex < TREE_POOL_SIZE &&
           !isWater &&
           !(c00Water || c10Water || c01Water || c11Water) &&
           terrain.isTileLoaded(gx, gz) &&
@@ -885,7 +940,7 @@ export const ZarchScene = ({
           continue;
         }
 
-        const treeEntry = pools.treePool[treeIndex];
+        const treeEntry = ensureTreePoolEntry(pools, clipPlanes, treeIndex);
         const usePine = terrain.treeType(gx, gz) === 0;
         const activeTree = usePine ? treeEntry.pine : treeEntry.round;
         const inactiveTree = usePine ? treeEntry.round : treeEntry.pine;
@@ -902,11 +957,11 @@ export const ZarchScene = ({
       }
     }
 
-    for (let index = tileIndex; index < TILE_POOL_SIZE; index += 1) {
+    for (let index = tileIndex; index < pools.tilePool.length; index += 1) {
       pools.tilePool[index].visible = false;
     }
 
-    for (let index = treeIndex; index < TREE_POOL_SIZE; index += 1) {
+    for (let index = treeIndex; index < pools.treePool.length; index += 1) {
       pools.treePool[index].pine.visible = false;
       pools.treePool[index].round.visible = false;
     }
@@ -1049,7 +1104,14 @@ export const ZarchScene = ({
     }
   });
 
-  const shadowExtent = viewRadiusBase * 2.5 * TILE * 1.2;
+  const shadowExtent =
+    getLandscapeViewMetrics({
+      landscapeClipScale,
+      viewRadiusBase,
+      zoom: 1
+    }).clipRadius *
+    2.5 *
+    1.2;
 
   return (
     <>

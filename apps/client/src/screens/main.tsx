@@ -10,27 +10,30 @@ import { createLog } from 'odgn-ts-helpers/log';
 
 import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { connectApi } from '@/helpers/api-link';
+import { ensurePlaneToArrayCompat } from '@/helpers/three-plane-compat';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
 import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DEV_SCENE_CONTROL_FOLDERS,
-  type DevSceneControlFolder,
-  type DevSceneControlFolderState,
   DevSceneControls,
-  useSceneConfigValue
+  useSceneConfigValue,
+  type DevSceneControlFolder,
+  type DevSceneControlFolderState
 } from '@/hooks/use-scene-controls';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
-import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
+import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
 import { ZarchScene } from './zarch/zarch-scene';
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const LEVA_UI_STATE_STORAGE_KEY = 'carrier:leva-ui-state';
 
 const log = createLog('Main');
+
+ensurePlaneToArrayCompat();
 
 type LevaUiState = {
   collapsed: boolean;
@@ -120,15 +123,10 @@ const MainInner = () => {
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
   }, []);
-  const {
-    containerProps,
-    enterShipMode,
-    exitShipMode,
-    inputRef,
-    runtimeRef
-  } = useZarchRuntime({
-    containerElement
-  });
+  const { containerProps, enterShipMode, exitShipMode, inputRef, runtimeRef } =
+    useZarchRuntime({
+      containerElement
+    });
   const { error, isLoading, map, terrain } = useServerMapTerrain();
   const showHud = useSceneConfigValue('showHud');
   const showMinimap = useSceneConfigValue('showMinimap');
@@ -199,7 +197,9 @@ const MainInner = () => {
             ...current,
             folderState: {
               ...current.folderState,
-              [label]: !(current.folderState[label as DevSceneControlFolder] ?? false)
+              [label]: !(
+                current.folderState[label as DevSceneControlFolder] ?? false
+              )
             }
           }));
           return;

@@ -1,4 +1,5 @@
 import { Color } from 'three';
+
 import {
   getSurfaceMaterialColorRgb,
   resolveSurfaceMaterial,
@@ -15,13 +16,17 @@ export const WATER_LEVEL = -10;
 export const SEA_Y = -12;
 export const ZOOM_MIN = 0.4;
 export const ZOOM_MAX = 2.5;
+export const LANDSCAPE_CLIP_SCALE_MIN = 1;
+export const LANDSCAPE_CLIP_SCALE_MAX = 10;
 export const SCORE_POLL_MS = 100;
 export const MINIMAP_POLL_MS = 150;
 export const DEFAULT_WAVE = 1;
 export const DEFAULT_BEST = 652;
-export const TREE_POOL_SIZE = 160;
-export const MAX_VIEW_RADIUS = Math.round(VIEW_R_BASE * ZOOM_MAX);
+export const MAX_VIEW_RADIUS = Math.ceil(
+  VIEW_R_BASE * ZOOM_MAX * LANDSCAPE_CLIP_SCALE_MAX
+);
 export const TILE_POOL_SIZE = (MAX_VIEW_RADIUS * 2 + 1) ** 2;
+export const TREE_POOL_SIZE = TILE_POOL_SIZE;
 
 export type ZarchTreeType = 0 | 1;
 
@@ -40,10 +45,17 @@ export type ZarchTerrain = {
     centerTileZ: number,
     viewRadiusTiles: number
   ) => void;
-  resolveTileMaterial: (gx: number, gz: number, elevation: number) => MapSurfaceMaterial;
+  resolveTileMaterial: (
+    gx: number,
+    gz: number,
+    elevation: number
+  ) => MapSurfaceMaterial;
   sampleHeight: (gx: number, gz: number) => number | null;
   sampleHeightAtWorld: (worldX: number, worldZ: number) => number | null;
-  sampleNormalAtWorld: (worldX: number, worldZ: number) => {
+  sampleNormalAtWorld: (
+    worldX: number,
+    worldZ: number
+  ) => {
     x: number;
     y: number;
     z: number;
@@ -62,6 +74,27 @@ export type ZarchTerrain = {
 };
 export const clampZoom = (zoom: number, min = ZOOM_MIN, max = ZOOM_MAX) =>
   Math.max(min, Math.min(max, zoom));
+
+export const getLandscapeViewMetrics = ({
+  landscapeClipScale,
+  viewRadiusBase,
+  zoom
+}: {
+  landscapeClipScale: number;
+  viewRadiusBase: number;
+  zoom: number;
+}) => {
+  const cameraZoomRadius = viewRadiusBase * zoom;
+  const visibleZoomRadius = cameraZoomRadius * landscapeClipScale;
+
+  return {
+    cameraClipRadius: Math.max((cameraZoomRadius - 0.6) * TILE, TILE),
+    cameraZoomRadius,
+    clipRadius: Math.max((visibleZoomRadius - 0.6) * TILE, TILE),
+    viewRadius: Math.ceil(visibleZoomRadius),
+    visibleZoomRadius
+  };
+};
 
 export const toroidalIndex = (gx: number, gz: number, grid = GRID) =>
   (gz & (grid - 1)) * grid + (gx & (grid - 1));
@@ -113,12 +146,7 @@ export const sampleHeightAtWorldFromGrid = (
   const h01 = sampleHeight(x0, z1);
   const h11 = sampleHeight(x1, z1);
 
-  if (
-    h00 === null ||
-    h10 === null ||
-    h01 === null ||
-    h11 === null
-  ) {
+  if (h00 === null || h10 === null || h01 === null || h11 === null) {
     return null;
   }
 
@@ -138,12 +166,7 @@ export const sampleNormalAtWorldFromGrid = (
   const down = sampleHeightAtWorld(worldX, worldZ - offset);
   const up = sampleHeightAtWorld(worldX, worldZ + offset);
 
-  if (
-    left === null ||
-    right === null ||
-    down === null ||
-    up === null
-  ) {
+  if (left === null || right === null || down === null || up === null) {
     return null;
   }
 

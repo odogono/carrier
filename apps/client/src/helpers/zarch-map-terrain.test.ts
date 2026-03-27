@@ -1,8 +1,6 @@
 /* eslint-disable perfectionist/sort-objects */
 /* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
-
-import { QueryClient } from '@tanstack/react-query';
 import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 
 import {
@@ -10,7 +8,18 @@ import {
   getMapChunkQueryKey,
   getVisibleChunkWindow
 } from '@/helpers/zarch-map-terrain';
-import { ZOOM_MAX, ZOOM_MIN, clampZoom, getTreeType, tileHash } from '@/helpers/zarch-terrain';
+import {
+  LANDSCAPE_CLIP_SCALE_MAX,
+  MAX_VIEW_RADIUS,
+  VIEW_R_BASE,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  clampZoom,
+  getLandscapeViewMetrics,
+  getTreeType,
+  tileHash
+} from '@/helpers/zarch-terrain';
+import { QueryClient } from '@tanstack/react-query';
 
 const map: MapMetadata = {
   id: 'map-1',
@@ -98,11 +107,31 @@ const chunk11: RuntimeMapChunk = {
 
 describe('server-backed zarch terrain', () => {
   test('query keys and tile hash helpers remain stable', () => {
-    expect(getMapChunkQueryKey('map-1', 2, 3)).toEqual(['map-chunk', 'map-1', 2, 3]);
+    expect(getMapChunkQueryKey('map-1', 2, 3)).toEqual([
+      'map-chunk',
+      'map-1',
+      2,
+      3
+    ]);
     expect(tileHash(7, 13)).toBe(tileHash(7, 13));
     expect(getTreeType(3, 9)).toBe(getTreeType(3, 9));
     expect(clampZoom(ZOOM_MIN - 1)).toBe(ZOOM_MIN);
     expect(clampZoom(ZOOM_MAX + 1)).toBe(ZOOM_MAX);
+  });
+
+  test('supports expanded landscape visibility beyond the previous cap', () => {
+    const metrics = getLandscapeViewMetrics({
+      landscapeClipScale: LANDSCAPE_CLIP_SCALE_MAX,
+      viewRadiusBase: VIEW_R_BASE,
+      zoom: ZOOM_MAX
+    });
+
+    expect(metrics.viewRadius).toBe(MAX_VIEW_RADIUS);
+    expect(metrics.viewRadius).toBeGreaterThan(
+      Math.round(VIEW_R_BASE * ZOOM_MAX)
+    );
+    expect(metrics.cameraZoomRadius).toBe(VIEW_R_BASE * ZOOM_MAX);
+    expect(metrics.clipRadius).toBeGreaterThan(metrics.cameraClipRadius);
   });
 
   test('reads heights from the query cache and respects map bounds', () => {

@@ -5,6 +5,11 @@ import {
   type ZarchParticleConfig
 } from '@/screens/zarch/zarch-particles';
 
+export {
+  LANDSCAPE_CLIP_SCALE_MAX,
+  LANDSCAPE_CLIP_SCALE_MIN
+} from '@/helpers/zarch-terrain';
+
 export type ZarchSceneConfig = ZarchParticleConfig & {
   ambientIntensity: number;
   backgroundColor: string;
@@ -18,6 +23,7 @@ export type ZarchSceneConfig = ZarchParticleConfig & {
   directionalIntensity: number;
   directionalPosition: [number, number, number];
   keyboardZoomSpeed: number;
+  landscapeClipScale: number;
   seaY: number;
   shadowBias: number;
   shadowMapSize: number;
@@ -44,6 +50,7 @@ export const DEFAULT_SCENE_CONFIG: ZarchSceneConfig = {
   directionalIntensity: 0.8,
   directionalPosition: [0, 400, 0],
   keyboardZoomSpeed: 1.4,
+  landscapeClipScale: 1,
   ...DEFAULT_PARTICLE_CONFIG,
   seaY: -12,
   shadowBias: -0.001,

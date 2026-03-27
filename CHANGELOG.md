@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-27
+
 ### Added
 
 - Client Zarch ship mode: the app now starts in free landscape navigation, exposes an `Enter Ship` / `Exit Ship` HUD toggle, renders the original Zarch player ship model, and supports local single-player ship flight with gravity, thrust, terrain/water collision, crash particles, and respawn
@@ -15,11 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Client Zarch runtime now separates navigation-camera state from player-ship state and adds continuous world-position terrain sampling for gameplay queries
 - Ship mode camera now follows ship position without inheriting ship rotation
+- Client Zarch view controls now expose a dev-only `Landscape clip` setting that expands the visible terrain/clipping window without changing camera zoom, and terrain/tree render pools now grow on demand to support larger clip ranges
 
 ### Fixed
 
 - Zarch ship control tuning: forward/back input now drives pitch on the correct axis and in the correct direction, and thrust now applies along the ship's upward axis rather than the nose direction
 - Zarch ship spawn and rendering: respawn no longer immediately crash-loops after activation, and the ship model now renders correctly from below with corrected orientation and underside shading
+- Client Zarch ship rendering now excludes hydrated runtime model objects from persisted React Query cache state, fixing the player ship disappearing after reload until the cache was manually cleared
 
 ## [0.5.0] - 2026-03-25
 

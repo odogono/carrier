@@ -33,7 +33,7 @@ import {
   getStaticEntityGrounding,
   getTerrainGrids
 } from '@/helpers/zarch-static-entities';
-import { TILE } from '@/helpers/zarch-terrain';
+import { TILE, getLandscapeViewMetrics } from '@/helpers/zarch-terrain';
 import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -233,8 +233,11 @@ export const ZarchStaticEntities = ({
 
     const runtime = runtimeRef.current;
     const config = configRef.current;
-    const zoomRadius = config.viewRadiusBase * runtime.camera.zoom;
-    const viewRadius = Math.ceil(zoomRadius);
+    const { viewRadius } = getLandscapeViewMetrics({
+      landscapeClipScale: config.landscapeClipScale,
+      viewRadiusBase: config.viewRadiusBase,
+      zoom: runtime.camera.zoom
+    });
     const camTileX = Math.floor(runtime.camera.x / TILE);
     const camTileZ = Math.floor(runtime.camera.z / TILE);
     const visibleWindow = getVisibleChunkWindow(
@@ -382,11 +385,7 @@ export const ZarchStaticEntities = ({
         cloneEntriesRef.current.set(entity.id, cloneEntry);
       }
 
-      cloneEntry.object.position.set(
-        sceneX,
-        grounding.effectiveY,
-        sceneZ
-      );
+      cloneEntry.object.position.set(sceneX, grounding.effectiveY, sceneZ);
       cloneEntry.object.rotation.set(
         0,
         (-entity.rotation.yaw * Math.PI) / 180,

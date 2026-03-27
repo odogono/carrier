@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react';
 
 import { TEN_MINUTES } from 'odgn-ts-helpers/time';
 
+import {
+  QUERY_CACHE_BUSTER,
+  shouldPersistQuery
+} from '@/contexts/query/persistence';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
@@ -35,15 +39,9 @@ const localStoragePersister = createAsyncStoragePersister({
 });
 
 const persistOptions = {
-  buster: 'carrier-client-2026-03-18-phase4',
+  buster: QUERY_CACHE_BUSTER,
   dehydrateOptions: {
-    shouldDehydrateQuery: (query: {
-      queryKey: readonly unknown[];
-      state: { status: string };
-    }) => {
-      if (query.queryKey[0] === 'map-chunk') return false;
-      return query.state.status === 'success';
-    }
+    shouldDehydrateQuery: shouldPersistQuery
   },
   persister: localStoragePersister
 };

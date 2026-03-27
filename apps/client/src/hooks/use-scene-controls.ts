@@ -5,6 +5,8 @@ import { useControls } from 'leva';
 
 import {
   DEFAULT_SCENE_CONFIG,
+  LANDSCAPE_CLIP_SCALE_MAX,
+  LANDSCAPE_CLIP_SCALE_MIN,
   sceneConfigAtom,
   sceneConfigStore,
   type ZarchSceneConfig
@@ -20,8 +22,7 @@ export const DEV_SCENE_CONTROL_FOLDERS = [
   'Debug'
 ] as const;
 
-export type DevSceneControlFolder =
-  (typeof DEV_SCENE_CONTROL_FOLDERS)[number];
+export type DevSceneControlFolder = (typeof DEV_SCENE_CONTROL_FOLDERS)[number];
 
 export type DevSceneControlFolderState = Partial<
   Record<DevSceneControlFolder, boolean>
@@ -36,322 +37,357 @@ export const DevSceneControls = ({
 }: {
   folderState?: DevSceneControlFolderState;
 }) => {
-  const cameraValues = useControls('Camera', {
-    cameraFov: {
-      label: 'FOV',
-      max: 120,
-      min: 30,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.cameraFov
+  const cameraValues = useControls(
+    'Camera',
+    {
+      cameraFov: {
+        label: 'FOV',
+        max: 120,
+        min: 30,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.cameraFov
+      },
+      cameraHeightMultiplier: {
+        label: 'Height mult',
+        max: 5,
+        min: 0.3,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.cameraHeightMultiplier
+      },
+      cameraPullbackMultiplier: {
+        label: 'Pullback mult',
+        max: 5,
+        min: 0.5,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.cameraPullbackMultiplier
+      }
     },
-    cameraHeightMultiplier: {
-      label: 'Height mult',
-      max: 5,
-      min: 0.3,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.cameraHeightMultiplier
-    },
-    cameraPullbackMultiplier: {
-      label: 'Pullback mult',
-      max: 5,
-      min: 0.5,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.cameraPullbackMultiplier
+    {
+      collapsed: folderState.Camera ?? false
     }
-  }, {
-    collapsed: folderState.Camera ?? false
-  });
+  );
 
-  const viewValues = useControls('View', {
-    keyboardZoomSpeed: {
-      label: 'KB zoom speed',
-      max: 5,
-      min: 0.2,
-      step: 0.1,
-      value: DEFAULT_SCENE_CONFIG.keyboardZoomSpeed
+  const viewValues = useControls(
+    'View',
+    {
+      keyboardZoomSpeed: {
+        label: 'KB zoom speed',
+        max: 5,
+        min: 0.2,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.keyboardZoomSpeed
+      },
+      landscapeClipScale: {
+        label: 'Landscape clip',
+        max: LANDSCAPE_CLIP_SCALE_MAX,
+        min: LANDSCAPE_CLIP_SCALE_MIN,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.landscapeClipScale
+      },
+      viewRadiusBase: {
+        label: 'View radius',
+        max: 16,
+        min: 2,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.viewRadiusBase
+      },
+      zoomDamping: {
+        label: 'Zoom damping',
+        max: 20,
+        min: 1,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.zoomDamping
+      },
+      zoomMax: {
+        label: 'Zoom max',
+        max: 6,
+        min: 1,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.zoomMax
+      },
+      zoomMin: {
+        label: 'Zoom min',
+        max: 1,
+        min: 0.1,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.zoomMin
+      }
     },
-    viewRadiusBase: {
-      label: 'View radius',
-      max: 16,
-      min: 2,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.viewRadiusBase
-    },
-    zoomDamping: {
-      label: 'Zoom damping',
-      max: 20,
-      min: 1,
-      step: 0.5,
-      value: DEFAULT_SCENE_CONFIG.zoomDamping
-    },
-    zoomMax: {
-      label: 'Zoom max',
-      max: 6,
-      min: 1,
-      step: 0.1,
-      value: DEFAULT_SCENE_CONFIG.zoomMax
-    },
-    zoomMin: {
-      label: 'Zoom min',
-      max: 1,
-      min: 0.1,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.zoomMin
+    {
+      collapsed: folderState.View ?? false
     }
-  }, {
-    collapsed: folderState.View ?? false
-  });
+  );
 
-  const lightingValues = useControls('Lighting', {
-    ambientIntensity: {
-      label: 'Ambient',
-      max: 2,
-      min: 0,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.ambientIntensity
+  const lightingValues = useControls(
+    'Lighting',
+    {
+      ambientIntensity: {
+        label: 'Ambient',
+        max: 2,
+        min: 0,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.ambientIntensity
+      },
+      directionalIntensity: {
+        label: 'Directional',
+        max: 3,
+        min: 0,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.directionalIntensity
+      },
+      directionalPosition: {
+        joystick: true,
+        label: 'Dir position',
+        value: DEFAULT_SCENE_CONFIG.directionalPosition
+      },
+      shadowBias: {
+        label: 'Shadow bias',
+        max: 0,
+        min: -0.01,
+        step: 0.0001,
+        value: DEFAULT_SCENE_CONFIG.shadowBias
+      },
+      shadowMapSize: {
+        label: 'Shadow map',
+        options: [256, 512, 1024, 2048, 4096],
+        value: DEFAULT_SCENE_CONFIG.shadowMapSize
+      }
     },
-    directionalIntensity: {
-      label: 'Directional',
-      max: 3,
-      min: 0,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.directionalIntensity
-    },
-    directionalPosition: {
-      joystick: true,
-      label: 'Dir position',
-      value: DEFAULT_SCENE_CONFIG.directionalPosition
-    },
-    shadowBias: {
-      label: 'Shadow bias',
-      max: 0,
-      min: -0.01,
-      step: 0.0001,
-      value: DEFAULT_SCENE_CONFIG.shadowBias
-    },
-    shadowMapSize: {
-      label: 'Shadow map',
-      options: [256, 512, 1024, 2048, 4096],
-      value: DEFAULT_SCENE_CONFIG.shadowMapSize
+    {
+      collapsed: folderState.Lighting ?? false
     }
-  }, {
-    collapsed: folderState.Lighting ?? false
-  });
+  );
 
-  const renderingValues = useControls('Rendering', {
-    backgroundColor: {
-      label: 'Background',
-      value: DEFAULT_SCENE_CONFIG.backgroundColor
+  const renderingValues = useControls(
+    'Rendering',
+    {
+      backgroundColor: {
+        label: 'Background',
+        value: DEFAULT_SCENE_CONFIG.backgroundColor
+      },
+      brightnessDistanceFactor: {
+        label: 'Bright dist',
+        max: 6,
+        min: 1,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.brightnessDistanceFactor
+      },
+      brightnessFalloffPower: {
+        label: 'Bright power',
+        max: 5,
+        min: 0.5,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.brightnessFalloffPower
+      },
+      brightnessFalloffScale: {
+        label: 'Bright scale',
+        max: 1,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.brightnessFalloffScale
+      },
+      brightnessMin: {
+        label: 'Bright min',
+        max: 1,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.brightnessMin
+      }
     },
-    brightnessDistanceFactor: {
-      label: 'Bright dist',
-      max: 6,
-      min: 1,
-      step: 0.1,
-      value: DEFAULT_SCENE_CONFIG.brightnessDistanceFactor
-    },
-    brightnessFalloffPower: {
-      label: 'Bright power',
-      max: 5,
-      min: 0.5,
-      step: 0.1,
-      value: DEFAULT_SCENE_CONFIG.brightnessFalloffPower
-    },
-    brightnessFalloffScale: {
-      label: 'Bright scale',
-      max: 1,
-      min: 0,
-      step: 0.01,
-      value: DEFAULT_SCENE_CONFIG.brightnessFalloffScale
-    },
-    brightnessMin: {
-      label: 'Bright min',
-      max: 1,
-      min: 0,
-      step: 0.01,
-      value: DEFAULT_SCENE_CONFIG.brightnessMin
+    {
+      collapsed: folderState.Rendering ?? false
     }
-  }, {
-    collapsed: folderState.Rendering ?? false
-  });
+  );
 
-  const sceneValues = useControls('Scene', {
-    seaY: {
-      label: 'Sea Y',
-      max: 0,
-      min: -30,
-      step: 0.5,
-      value: DEFAULT_SCENE_CONFIG.seaY
+  const sceneValues = useControls(
+    'Scene',
+    {
+      seaY: {
+        label: 'Sea Y',
+        max: 0,
+        min: -30,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.seaY
+      },
+      showTrees: {
+        label: 'Trees',
+        value: DEFAULT_SCENE_CONFIG.showTrees
+      },
+      wireframe: {
+        label: 'Wireframe',
+        value: DEFAULT_SCENE_CONFIG.wireframe
+      }
     },
-    showTrees: {
-      label: 'Trees',
-      value: DEFAULT_SCENE_CONFIG.showTrees
-    },
-    wireframe: {
-      label: 'Wireframe',
-      value: DEFAULT_SCENE_CONFIG.wireframe
+    {
+      collapsed: folderState.Scene ?? false
     }
-  }, {
-    collapsed: folderState.Scene ?? false
-  });
+  );
 
-  const particleValues = useControls('Particles', {
-    particleGravity: {
-      label: 'Gravity',
-      max: 400,
-      min: 20,
-      step: 5,
-      value: DEFAULT_SCENE_CONFIG.particleGravity
+  const particleValues = useControls(
+    'Particles',
+    {
+      particleGravity: {
+        label: 'Gravity',
+        max: 400,
+        min: 20,
+        step: 5,
+        value: DEFAULT_SCENE_CONFIG.particleGravity
+      },
+      particleLandClusterCount: {
+        label: 'Land clusters',
+        max: 12,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleLandClusterCount
+      },
+      particleLandVelocityScale: {
+        label: 'Land velocity',
+        max: 3,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleLandVelocityScale
+      },
+      particleShadowLift: {
+        label: 'Shadow lift',
+        max: 2,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.particleShadowLift
+      },
+      particleShadowOpacity: {
+        label: 'Shadow alpha',
+        max: 0.8,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.particleShadowOpacity
+      },
+      particleShadowScale: {
+        label: 'Shadow scale',
+        max: 3,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleShadowScale
+      },
+      particleShadowStretch: {
+        label: 'Shadow stretch',
+        max: 2,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleShadowStretch
+      },
+      particleSizeScale: {
+        label: 'Size scale',
+        max: 3,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleSizeScale
+      },
+      particleSmokeRiseScale: {
+        label: 'Smoke rise',
+        max: 3,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleSmokeRiseScale
+      },
+      particleTapMaxDurationMs: {
+        label: 'Tap ms',
+        max: 400,
+        min: 50,
+        step: 5,
+        value: DEFAULT_SCENE_CONFIG.particleTapMaxDurationMs
+      },
+      particleTapMaxMovementPx: {
+        label: 'Tap px',
+        max: 24,
+        min: 2,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleTapMaxMovementPx
+      },
+      particleThrustEmissionRate: {
+        label: 'Thrust rate',
+        max: 128,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustEmissionRate
+      },
+      particleThrustLandDustCount: {
+        label: 'Thrust dust',
+        max: 16,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustLandDustCount
+      },
+      particleThrustSpeed: {
+        label: 'Thrust speed',
+        max: 120,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustSpeed
+      },
+      particleThrustSpread: {
+        label: 'Thrust spread',
+        max: 12,
+        min: 0,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustSpread
+      },
+      particleThrustWaterDisturbanceHeight: {
+        label: 'Thrust water h',
+        max: 64,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustWaterDisturbanceHeight
+      },
+      particleThrustWaterSprayCount: {
+        label: 'Thrust spray',
+        max: 24,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleThrustWaterSprayCount
+      },
+      particleWaterImpactSprayCount: {
+        label: 'Impact spray',
+        max: 48,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleWaterImpactSprayCount
+      },
+      particleWaterVelocityScale: {
+        label: 'Water velocity',
+        max: 3,
+        min: 0.2,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.particleWaterVelocityScale
+      },
+      particleWaterWaveCount: {
+        label: 'Water count',
+        max: 96,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.particleWaterWaveCount
+      }
     },
-    particleLandClusterCount: {
-      label: 'Land clusters',
-      max: 12,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleLandClusterCount
-    },
-    particleLandVelocityScale: {
-      label: 'Land velocity',
-      max: 3,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleLandVelocityScale
-    },
-    particleShadowLift: {
-      label: 'Shadow lift',
-      max: 2,
-      min: 0,
-      step: 0.01,
-      value: DEFAULT_SCENE_CONFIG.particleShadowLift
-    },
-    particleShadowOpacity: {
-      label: 'Shadow alpha',
-      max: 0.8,
-      min: 0,
-      step: 0.01,
-      value: DEFAULT_SCENE_CONFIG.particleShadowOpacity
-    },
-    particleShadowScale: {
-      label: 'Shadow scale',
-      max: 3,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleShadowScale
-    },
-    particleShadowStretch: {
-      label: 'Shadow stretch',
-      max: 2,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleShadowStretch
-    },
-    particleSizeScale: {
-      label: 'Size scale',
-      max: 3,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleSizeScale
-    },
-    particleSmokeRiseScale: {
-      label: 'Smoke rise',
-      max: 3,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleSmokeRiseScale
-    },
-    particleTapMaxDurationMs: {
-      label: 'Tap ms',
-      max: 400,
-      min: 50,
-      step: 5,
-      value: DEFAULT_SCENE_CONFIG.particleTapMaxDurationMs
-    },
-    particleTapMaxMovementPx: {
-      label: 'Tap px',
-      max: 24,
-      min: 2,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleTapMaxMovementPx
-    },
-    particleThrustEmissionRate: {
-      label: 'Thrust rate',
-      max: 128,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustEmissionRate
-    },
-    particleThrustLandDustCount: {
-      label: 'Thrust dust',
-      max: 16,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustLandDustCount
-    },
-    particleThrustSpeed: {
-      label: 'Thrust speed',
-      max: 120,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustSpeed
-    },
-    particleThrustSpread: {
-      label: 'Thrust spread',
-      max: 12,
-      min: 0,
-      step: 0.1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustSpread
-    },
-    particleThrustWaterDisturbanceHeight: {
-      label: 'Thrust water h',
-      max: 64,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustWaterDisturbanceHeight
-    },
-    particleThrustWaterSprayCount: {
-      label: 'Thrust spray',
-      max: 24,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleThrustWaterSprayCount
-    },
-    particleWaterImpactSprayCount: {
-      label: 'Impact spray',
-      max: 48,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleWaterImpactSprayCount
-    },
-    particleWaterVelocityScale: {
-      label: 'Water velocity',
-      max: 3,
-      min: 0.2,
-      step: 0.05,
-      value: DEFAULT_SCENE_CONFIG.particleWaterVelocityScale
-    },
-    particleWaterWaveCount: {
-      label: 'Water count',
-      max: 96,
-      min: 0,
-      step: 1,
-      value: DEFAULT_SCENE_CONFIG.particleWaterWaveCount
+    {
+      collapsed: folderState.Particles ?? false
     }
-  }, {
-    collapsed: folderState.Particles ?? false
-  });
+  );
 
-  const debugValues = useControls('Debug', {
-    showHud: {
-      label: 'HUD',
-      value: DEFAULT_SCENE_CONFIG.showHud
+  const debugValues = useControls(
+    'Debug',
+    {
+      showHud: {
+        label: 'HUD',
+        value: DEFAULT_SCENE_CONFIG.showHud
+      },
+      showMinimap: {
+        label: 'Minimap',
+        value: DEFAULT_SCENE_CONFIG.showMinimap
+      }
     },
-    showMinimap: {
-      label: 'Minimap',
-      value: DEFAULT_SCENE_CONFIG.showMinimap
+    {
+      collapsed: folderState.Debug ?? false
     }
-  }, {
-    collapsed: folderState.Debug ?? false
-  });
+  );
 
   useEffect(() => {
     sceneConfigStore.set(sceneConfigAtom, {
