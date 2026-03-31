@@ -5,7 +5,7 @@ import { Canvas } from '@react-three/fiber';
 
 import { type ZarchTileEditConfig, isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
 import { Provider as JotaiProvider } from 'jotai';
-import { Leva, button, useControls } from 'leva';
+import { Leva } from 'leva';
 import { createLog } from 'odgn-ts-helpers/log';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -24,6 +24,7 @@ import {
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
+import { ZarchEditHud } from './zarch/zarch-edit-hud';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
@@ -138,7 +139,6 @@ const MainInner = () => {
   const [isSavingEdits, setIsSavingEdits] = useState(false);
   const levaContainerRef = useRef<HTMLDivElement | null>(null);
   const initializedMapIdRef = useRef<string | null>(null);
-  const syncingEditControlsRef = useRef(false);
   const [editState, dispatchEdit] = useReducer(
     reduceZarchTileEditState,
     FALLBACK_TILE_EDIT_CONFIG,
@@ -155,7 +155,6 @@ const MainInner = () => {
   const { editConfig, error, isLoading, map, terrain } = useServerMapTerrain();
   const showHud = useSceneConfigValue('showHud');
   const showMinimap = useSceneConfigValue('showMinimap');
-  const activeEditConfig = editConfig ?? FALLBACK_TILE_EDIT_CONFIG;
   const activeTerrain = useMemo(() => {
     if (!terrain || !editConfig) {
       return terrain;
@@ -182,24 +181,6 @@ const MainInner = () => {
 
     return getTerrainTileState(activeTerrain, target.tileX, target.tileZ);
   }, [activeTerrain, editState.hoveredTile, editState.selectedTile]);
-  const dirtyEditCount = Object.keys(editState.edits).length;
-  const selectedColorValue =
-    editState.selectedColorIndex === null ? 'auto' : String(editState.selectedColorIndex);
-  const colorOptions = useMemo(
-    () =>
-      Object.fromEntries([
-        ['Auto', 'auto'],
-        ...activeEditConfig.palette.map((entry, index) => [entry.label, String(index)])
-      ]),
-    [activeEditConfig.palette]
-  );
-  const typeOptions = useMemo(
-    () =>
-      Object.fromEntries(
-        activeEditConfig.tileTypes.map(tileType => [tileType.label, tileType.id])
-      ),
-    [activeEditConfig.tileTypes]
-  );
 
   useEffect(() => {
     log.info('Carrier');
@@ -403,182 +384,16 @@ const MainInner = () => {
     }
   }, [editState, map, queryClient]);
 
-  const [editControls, setEditControls] = useControls(
-    'Edit',
-    () => ({
-      enabled: {
-        label: 'Enabled',
-        value: editState.enabled
-      },
-      tool: {
-        label: 'Tool',
-        options: {
-          Color: 'set-color',
-          Lower: 'lower',
-          Raise: 'raise',
-          Type: 'set-type'
-        },
-        value: editState.tool
-      },
-      selectedTypeId: {
-        label: 'Tile type',
-        options: typeOptions,
-        value: editState.selectedTypeId
-      },
-      selectedColorIndex: {
-        label: 'Palette',
-        options: colorOptions,
-        value: selectedColorValue
-      },
-      Undo: button(() => dispatchEdit({ type: 'undo' }), {
-        disabled: !editState.canUndo
-      }),
-      Redo: button(() => dispatchEdit({ type: 'redo' }), {
-        disabled: !editState.canRedo
-      }),
-      Save: button(() => void handleSaveTileEdits(), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      }),
-      Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      }),
-      dirty: {
-        disabled: true,
-        label: 'Dirty tiles',
-        value: dirtyEditCount
-      },
-      hoveredTile: {
-        disabled: true,
-        label: 'Tile',
-        value: inspectedTile
-          ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
-          : '--'
-      },
-      inspectedType: {
-        disabled: true,
-        label: 'Current type',
-        value: inspectedTile?.typeId ?? '--'
-      },
-      inspectedHeightSteps: {
-        disabled: true,
-        label: 'Height steps',
-        value: inspectedTile?.heightSteps ?? 0
-      },
-      inspectedColor: {
-        disabled: true,
-        label: 'Current color',
-        value:
-          inspectedTile?.colorIndex === null || inspectedTile === null
-            ? 'Auto'
-            : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ?? 'Custom')
-      },
-      saveError: {
-        disabled: true,
-        label: 'Status',
-        value: editState.saveError ?? 'Ready'
-      }
-    }),
-    {
-      collapsed: levaUiState.folderState.Edit ?? false
-    },
-    [
-      activeEditConfig.palette,
-      activeEditConfig.tileTypes,
-      colorOptions,
-      dirtyEditCount,
-      editState.canRedo,
-      editState.canUndo,
-      editState.enabled,
-      editState.saveError,
-      editState.selectedTypeId,
-      editState.tool,
-      inspectedTile,
-      isSavingEdits,
-      selectedColorValue,
-      typeOptions
-    ]
-  );
-
-  useEffect(() => {
-    syncingEditControlsRef.current = true;
-    setEditControls({
-      dirty: dirtyEditCount,
-      enabled: editState.enabled,
-      hoveredTile: inspectedTile
-        ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
-        : '--',
-      inspectedColor:
-        inspectedTile?.colorIndex === null || inspectedTile === null
-          ? 'Auto'
-          : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ?? 'Custom'),
-      inspectedHeightSteps: inspectedTile?.heightSteps ?? 0,
-      inspectedType: inspectedTile?.typeId ?? '--',
-      saveError: editState.saveError ?? 'Ready',
-      selectedColorIndex: selectedColorValue,
-      selectedTypeId: editState.selectedTypeId,
-      tool: editState.tool
-    });
-  }, [
-    activeEditConfig.palette,
-    dirtyEditCount,
-    editState.enabled,
-    editState.saveError,
-    editState.selectedTypeId,
-    editState.tool,
-    inspectedTile,
-    selectedColorValue,
-    setEditControls
-  ]);
-
-  useEffect(() => {
-    if (syncingEditControlsRef.current) {
-      syncingEditControlsRef.current = false;
-      return;
-    }
-
-    if (editControls.enabled !== editState.enabled) {
-      if (editControls.enabled && runtimeRef.current.mode === 'ship') {
+  const handleSetEditEnabled = useCallback(
+    (enabled: boolean) => {
+      if (enabled && runtimeRef.current.mode === 'ship') {
         exitShipMode();
       }
 
-      dispatchEdit({ enabled: editControls.enabled, type: 'set-enabled' });
-    }
-
-    if (editControls.tool !== editState.tool) {
-      dispatchEdit({
-        tool: editControls.tool as typeof editState.tool,
-        type: 'set-tool'
-      });
-    }
-
-    if (editControls.selectedTypeId !== editState.selectedTypeId) {
-      dispatchEdit({
-        selectedTypeId: editControls.selectedTypeId,
-        type: 'set-selected-type-id'
-      });
-    }
-
-    if (editControls.selectedColorIndex !== selectedColorValue) {
-      dispatchEdit({
-        selectedColorIndex:
-          editControls.selectedColorIndex === 'auto'
-            ? null
-            : Number(editControls.selectedColorIndex),
-        type: 'set-selected-color-index'
-      });
-    }
-  }, [
-    editControls.enabled,
-    editControls.selectedColorIndex,
-    editControls.selectedTypeId,
-    editControls.tool,
-    editState.enabled,
-    editState.selectedTypeId,
-    editState.tool,
-    exitShipMode,
-    runtimeRef,
-    selectedColorValue
-  ]);
+      dispatchEdit({ enabled, type: 'set-enabled' });
+    },
+    [exitShipMode, runtimeRef]
+  );
 
   if (isLoading) {
     return (
@@ -659,6 +474,24 @@ const MainInner = () => {
         {showMinimap && (
           <ZarchMinimap runtimeRef={runtimeRef} terrain={activeTerrain} />
         )}
+        <ZarchEditHud
+          editConfig={editConfig}
+          editState={editState}
+          inspectedTile={inspectedTile}
+          isSaving={isSavingEdits}
+          onCancel={() => dispatchEdit({ type: 'reset-draft' })}
+          onRedo={() => dispatchEdit({ type: 'redo' })}
+          onSave={() => void handleSaveTileEdits()}
+          onSetColorIndex={colorIndex =>
+            dispatchEdit({ selectedColorIndex: colorIndex, type: 'set-selected-color-index' })
+          }
+          onSetEnabled={handleSetEditEnabled}
+          onSetTool={tool => dispatchEdit({ tool, type: 'set-tool' })}
+          onSetTypeId={typeId =>
+            dispatchEdit({ selectedTypeId: typeId, type: 'set-selected-type-id' })
+          }
+          onUndo={() => dispatchEdit({ type: 'undo' })}
+        />
       </div>
       <ThemeTogglePortal />
     </>
