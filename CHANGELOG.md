@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Client Zarch minimap now keeps the terrain overview aligned with navigation controls, with corrected horizontal and vertical viewport movement plus a view-sized wrap-aware red footprint instead of a fixed marker
+
 ## [0.6.0] - 2026-03-27
 
 ### Added
