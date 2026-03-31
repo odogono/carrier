@@ -425,8 +425,13 @@ const getChunkHeightSamples = (
   };
 };
 
-export type GeneratedMapChunkRecord = Omit<MapChunk, 'heights' | 'layers'> & {
+export type GeneratedMapChunkRecord = Omit<
+  MapChunk,
+  'heights' | 'layers' | 'staticEntities'
+> & {
   heights: Float32Array;
+  layers?: MapChunk['layers'];
+  staticEntities?: MapChunk['staticEntities'];
 };
 
 const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
@@ -581,7 +586,8 @@ export const toMapChunkResponse = (
 ): MapChunk => ({
   ...record,
   heights: Array.from(record.heights),
-  layers: {
+  staticEntities: record.staticEntities ?? [],
+  layers: record.layers ?? {
     height: HEIGHT_LAYER
   }
 });

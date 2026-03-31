@@ -47,6 +47,10 @@ const infiniteMap: MapMetadata = {
 
 describe('main camera initialization', () => {
   test('centers finite maps from extent tile dimensions', () => {
+    if (finiteMap.extent.kind !== 'finite') {
+      throw new Error('expected finite map extent');
+    }
+
     expect(getInitialCameraState(finiteMap)).toEqual({
       camX: (finiteMap.extent.widthTiles * TILE) * 0.5,
       camZ: (finiteMap.extent.heightTiles * TILE) * 0.5

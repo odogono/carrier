@@ -74,6 +74,44 @@ import { ZarchStaticEntities } from './zarch-static-entities';
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
 
+const raycastToTile = (
+  pointer: { clientX: number; clientY: number },
+  rect: DOMRect,
+  raycaster: Raycaster,
+  ndc: Vector2,
+  camera: PerspectiveCamera,
+  tilePool: TileMesh[],
+  intersections: Intersection[]
+): { gx: number; gz: number } | null => {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+
+  ndc.set(
+    ((pointer.clientX - rect.left) / rect.width) * 2 - 1,
+    -(((pointer.clientY - rect.top) / rect.height) * 2 - 1)
+  );
+  intersections.length = 0;
+  raycaster.setFromCamera(ndc, camera);
+  raycaster.intersectObjects(tilePool, false, intersections);
+
+  const hit = intersections[0];
+
+  if (!hit) {
+    return null;
+  }
+
+  const tileMesh = hit.object as TileMesh;
+  const gx = tileMesh.userData.gridX as number | undefined;
+  const gz = tileMesh.userData.gridZ as number | undefined;
+
+  if (typeof gx !== 'number' || typeof gz !== 'number') {
+    return null;
+  }
+
+  return { gx, gz };
+};
+
 type TreeMeshEntry = {
   pine: Group;
   round: Group;
@@ -89,8 +127,11 @@ type ScenePools = {
 };
 
 type ZarchSceneProps = {
+  editEnabled: boolean;
   inputRef: RefObject<ZarchInputState>;
   map: MapMetadata;
+  onEditTileActivate: (tileX: number, tileZ: number) => void;
+  onEditTileHover: (tile: { tileX: number; tileZ: number } | null) => void;
   runtimeRef: RefObject<ZarchRuntimeState>;
   terrain: ZarchTerrain;
 };
@@ -414,8 +455,11 @@ const setTreeBrightness = (group: Group, brightness: number) => {
 };
 
 export const ZarchScene = ({
+  editEnabled,
   inputRef,
   map,
+  onEditTileActivate,
+  onEditTileHover,
   runtimeRef,
   terrain
 }: ZarchSceneProps) => {
@@ -673,6 +717,11 @@ export const ZarchScene = ({
         },
         state: runtime.ship,
         surface: {
+          getTileTypeIdAtWorld: (worldX, worldZ) =>
+            terrain.getTileTypeId(
+              Math.floor(worldX / TILE),
+              Math.floor(worldZ / TILE)
+            ),
           isWaterAtWorld: terrain.isWaterAtWorld,
           isWorldPointLoaded: terrain.isWorldPointLoaded,
           sampleHeightAtWorld: terrain.sampleHeightAtWorld,
@@ -710,6 +759,7 @@ export const ZarchScene = ({
 
       if (
         input.shipFireHeld &&
+        !runtime.ship.landed &&
         runtime.ship.respawnDelaySeconds <= 0 &&
         runtime.bullets.length < ZARCH_BULLET_CAPACITY &&
         runtime.shipFireCooldownSeconds <= 0
@@ -859,7 +909,9 @@ export const ZarchScene = ({
           continue;
         }
 
-        const elevation = (h00Raw + h10Raw + h01Raw + h11Raw) * 0.25;
+        const elevation =
+          terrain.getTileAverageHeight(gx, gz) ??
+          (h00Raw + h10Raw + h01Raw + h11Raw) * 0.25;
         const isWater = terrain.isWaterTile(gx, gz);
         const c00Water =
           terrain.isWaterTile(gx - 1, gz - 1) ||
@@ -881,10 +933,22 @@ export const ZarchScene = ({
           terrain.isWaterTile(gx + 1, gz) ||
           terrain.isWaterTile(gx, gz + 1) ||
           terrain.isWaterTile(gx + 1, gz + 1);
-        const h00 = isWater || c00Water ? config.seaY : h00Raw;
-        const h10 = isWater || c10Water ? config.seaY : h10Raw;
-        const h01 = isWater || c01Water ? config.seaY : h01Raw;
-        const h11 = isWater || c11Water ? config.seaY : h11Raw;
+        const h00 =
+          isWater || c00Water
+            ? config.seaY
+            : h00Raw;
+        const h10 =
+          isWater || c10Water
+            ? config.seaY
+            : h10Raw;
+        const h01 =
+          isWater || c01Water
+            ? config.seaY
+            : h01Raw;
+        const h11 =
+          isWater || c11Water
+            ? config.seaY
+            : h11Raw;
         const tileCenterX = worldX + TILE * 0.5;
         const tileCenterZ = worldZ + TILE * 0.5;
         const distance = Math.sqrt(
@@ -971,7 +1035,24 @@ export const ZarchScene = ({
     clipPlanes[2].setComponents(0, 0, 1, clipRadius);
     clipPlanes[3].setComponents(0, 0, -1, clipRadius);
 
-    if (input.queuedTap) {
+    if (editEnabled && input.hoverPointer) {
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+      onEditTileHover(tile && terrain.isTileLoaded(tile.gx, tile.gz) ? { tileX: tile.gx, tileZ: tile.gz } : null);
+    } else if (editEnabled) {
+      onEditTileHover(null);
+    }
+
+    if (editEnabled && input.queuedEditTap) {
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const tap = input.queuedEditTap;
+      input.queuedEditTap = null;
+      const tile = raycastToTile(tap, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+
+      if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
+        onEditTileActivate(tile.gx, tile.gz);
+      }
+    } else if (input.queuedTap) {
       const rect = state.gl.domElement.getBoundingClientRect();
       const tap = input.queuedTap;
       input.queuedTap = null;

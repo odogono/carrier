@@ -1,4 +1,4 @@
-import { TILE } from '@/helpers/zarch-terrain';
+import { LANDING_PAD_ZARCH_TILE_TYPE_ID, TILE } from '@/helpers/zarch-terrain';
 
 import type { ZarchShipState } from './use-zarch-runtime';
 
@@ -26,6 +26,10 @@ export type PlayerShipPose = Pick<
 export type PlayerShipSpec = {
   collisionRadius: number;
   gravity: number;
+  landingHorizontalSpeedMax: number;
+  landingPitchMax: number;
+  landingSupportHeightDeltaMax: number;
+  landingVerticalSpeedMax: number;
   linearDrag: number;
   maxPitch: number;
   pitchDamping: number;
@@ -40,6 +44,7 @@ export type PlayerShipSpec = {
 };
 
 export type PlayerShipSurface = {
+  getTileTypeIdAtWorld: (worldX: number, worldZ: number) => string;
   isWaterAtWorld: (worldX: number, worldZ: number) => boolean;
   isWorldPointLoaded: (worldX: number, worldZ: number) => boolean;
   sampleHeightAtWorld: (worldX: number, worldZ: number) => number | null;
@@ -66,6 +71,10 @@ export type PlayerShipStepResult = {
 export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
   collisionRadius: TILE * 0.28,
   gravity: 22,
+  landingHorizontalSpeedMax: 8,
+  landingPitchMax: 0.35,
+  landingSupportHeightDeltaMax: 2,
+  landingVerticalSpeedMax: 12,
   linearDrag: 0.45,
   maxPitch: 1.3,
   pitchDamping: 2.8,
@@ -178,6 +187,7 @@ export const createPlayerShipSpawnState = ({
     Math.max(terrainHeight, surface.waterHeight) + spec.respawnClearance;
 
   return {
+    landed: false,
     pitch: 0,
     respawnDelaySeconds: 0,
     respawnX: x,
@@ -241,6 +251,22 @@ export const stepPlayerShip = ({
     };
   }
 
+  if (next.landed) {
+    next.pitch = 0;
+    next.velX = 0;
+    next.velY = 0;
+    next.velZ = 0;
+
+    if (!input.thrust) {
+      return {
+        event: null,
+        state: next
+      };
+    }
+
+    next.landed = false;
+  }
+
   const pitchInput = (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0);
   const yawInput = (input.yawLeft ? 1 : 0) - (input.yawRight ? 1 : 0);
 
@@ -275,6 +301,16 @@ export const stepPlayerShip = ({
   next.y += next.velY * dt;
   next.z += next.velZ * dt;
   next.spawnGraceSeconds = Math.max(0, next.spawnGraceSeconds - dt);
+
+  let hasContact = false;
+  let firstContactWater = false;
+  let firstContactX = 0;
+  let firstContactY = 0;
+  let firstContactZ = 0;
+  let minSupport = Infinity;
+  let maxSupport = -Infinity;
+  let allContactDry = true;
+  let allProbeLandingPad = true;
 
   for (const probe of spec.probeOffsets) {
     const rotated = rotateLocalProbe(probe, next.yaw, next.pitch);
@@ -311,28 +347,73 @@ export const stepPlayerShip = ({
     const water = surface.isWaterAtWorld(probeX, probeZ);
     const collisionHeight = water ? surface.waterHeight : terrainHeight;
 
+    if (terrainHeight < minSupport) minSupport = terrainHeight;
+    if (terrainHeight > maxSupport) maxSupport = terrainHeight;
+    if (surface.getTileTypeIdAtWorld(probeX, probeZ) !== LANDING_PAD_ZARCH_TILE_TYPE_ID) {
+      allProbeLandingPad = false;
+    }
+
     if (next.spawnGraceSeconds <= 0 && probeY <= collisionHeight) {
+      if (!hasContact) {
+        firstContactWater = water;
+        firstContactX = probeX;
+        firstContactY = collisionHeight;
+        firstContactZ = probeZ;
+      }
+      hasContact = true;
+      if (water) allContactDry = false;
+    }
+  }
+
+  if (hasContact) {
+    const downwardSpeed = Math.max(0, -next.velY);
+    const horizontalSpeed = Math.hypot(next.velX, next.velZ);
+    const safeLanding =
+      allContactDry &&
+      allProbeLandingPad &&
+      maxSupport - minSupport <= spec.landingSupportHeightDeltaMax &&
+      downwardSpeed <= spec.landingVerticalSpeedMax &&
+      horizontalSpeed <= spec.landingHorizontalSpeedMax &&
+      Math.abs(next.pitch) <= spec.landingPitchMax;
+
+    if (safeLanding) {
+      const clearance = Math.abs(spec.probeOffsets[0]?.y ?? 0);
+
       return {
-        event: {
-          kind: 'crash',
-          water,
-          x: probeX,
-          y: collisionHeight,
-          z: probeZ
-        },
+        event: null,
         state: {
           ...next,
-          respawnDelaySeconds: spec.respawnDelaySeconds,
+          landed: true,
+          pitch: 0,
           spawnGraceSeconds: 0,
           velX: 0,
           velY: 0,
           velZ: 0,
-          x: probeX,
-          y: collisionHeight,
-          z: probeZ
+          y: (minSupport + maxSupport) * 0.5 + clearance
         }
       };
     }
+
+    return {
+      event: {
+        kind: 'crash',
+        water: firstContactWater,
+        x: firstContactX,
+        y: firstContactY,
+        z: firstContactZ
+      },
+      state: {
+        ...next,
+        respawnDelaySeconds: spec.respawnDelaySeconds,
+        spawnGraceSeconds: 0,
+        velX: 0,
+        velY: 0,
+        velZ: 0,
+        x: firstContactX,
+        y: firstContactY,
+        z: firstContactZ
+      }
+    };
   }
 
   return {

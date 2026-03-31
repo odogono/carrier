@@ -35,6 +35,7 @@ export type ZarchNavigationState = {
 };
 
 export type ZarchShipState = {
+  landed: boolean;
   pitch: number;
   respawnDelaySeconds: number;
   respawnX: number;
@@ -63,16 +64,19 @@ export type ZarchRuntimeState = {
 export type ZarchInputState = {
   codes: Record<string, boolean>;
   dragActive: boolean;
+  hoverPointer: PointerTapPayload | null;
   keys: Record<string, boolean>;
   lastPointerX: number;
   pointerCandidate: PointerTapCandidate | null;
   pointerId: number | null;
+  queuedEditTap: PointerTapPayload | null;
   queuedTap: PointerTapPayload | null;
   shipFireHeld: boolean;
 };
 
 type UseZarchRuntimeArgs = {
   containerElement: HTMLElement | null;
+  editEnabled: boolean;
 };
 
 const PREVENT_SCROLL_KEYS = new Set([
@@ -84,7 +88,8 @@ const PREVENT_SCROLL_KEYS = new Set([
 ]);
 
 export const useZarchRuntime = ({
-  containerElement
+  containerElement,
+  editEnabled
 }: UseZarchRuntimeArgs) => {
   const configRef = useSceneConfigRef();
   const runtimeRef = useRef<ZarchRuntimeState>({
@@ -111,10 +116,12 @@ export const useZarchRuntime = ({
   const inputRef = useRef<ZarchInputState>({
     codes: {},
     dragActive: false,
+    hoverPointer: null,
     keys: {},
     lastPointerX: 0,
     pointerCandidate: null,
     pointerId: null,
+    queuedEditTap: null,
     queuedTap: null,
     shipFireHeld: false
   });
@@ -171,11 +178,23 @@ export const useZarchRuntime = ({
 
     const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
       if (
-        runtimeRef.current.mode !== 'navigation' ||
         !event.isPrimary ||
         (event.pointerType === 'mouse' && event.button !== 0) ||
-        (event.target as HTMLElement | null)?.closest('button')
+        (event.target as HTMLElement | null)?.closest('button,select,option')
       ) {
+        return;
+      }
+
+      if (editEnabled) {
+        event.currentTarget.focus();
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
+
+      if (runtimeRef.current.mode !== 'navigation') {
         return;
       }
 
@@ -192,6 +211,14 @@ export const useZarchRuntime = ({
     };
 
     const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
+      if (editEnabled) {
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
+
       if (
         !inputRef.current.dragActive ||
         runtimeRef.current.mode !== 'navigation' ||
@@ -207,6 +234,23 @@ export const useZarchRuntime = ({
     };
 
     const handlePointerUp = (event: PointerEvent<HTMLElement>) => {
+      if (
+        editEnabled &&
+        event.isPrimary &&
+        (event.pointerType !== 'mouse' || event.button === 0) &&
+        !(event.target as HTMLElement | null)?.closest('button,select,option')
+      ) {
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        inputRef.current.queuedEditTap = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
+
       if (
         event.isPrimary &&
         (event.pointerType !== 'mouse' || event.button === 0) &&
@@ -246,10 +290,15 @@ export const useZarchRuntime = ({
       onKeyUp: handleKeyUp,
       onPointerCancel: handlePointerUp,
       onPointerDown: handlePointerDown,
+      onPointerLeave: () => {
+        if (editEnabled) {
+          inputRef.current.hoverPointer = null;
+        }
+      },
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp
     };
-  }, [configRef]);
+  }, [configRef, editEnabled]);
 
   return {
     containerProps,

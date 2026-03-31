@@ -12,7 +12,8 @@ import {
   type ZarchSceneConfig
 } from '@/helpers/zarch-scene-config';
 
-export const DEV_SCENE_CONTROL_FOLDERS = [
+export const LEVA_CONTROL_FOLDERS = [
+  'Edit',
   'Camera',
   'View',
   'Lighting',
@@ -22,10 +23,16 @@ export const DEV_SCENE_CONTROL_FOLDERS = [
   'Debug'
 ] as const;
 
-export type DevSceneControlFolder = (typeof DEV_SCENE_CONTROL_FOLDERS)[number];
+export const DEV_SCENE_CONTROL_FOLDERS = LEVA_CONTROL_FOLDERS.filter(
+  folderName => folderName !== 'Edit'
+) as DevSceneControlFolder[];
+
+export type LevaControlFolder = (typeof LEVA_CONTROL_FOLDERS)[number];
+
+export type DevSceneControlFolder = Exclude<LevaControlFolder, 'Edit'>;
 
 export type DevSceneControlFolderState = Partial<
-  Record<DevSceneControlFolder, boolean>
+  Record<LevaControlFolder, boolean>
 >;
 
 /**

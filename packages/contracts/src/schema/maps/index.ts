@@ -120,8 +120,67 @@ export const MapChunkLayersSchema = z.object({
       unit: z.literal("surface-material"),
     })
     .optional(),
+  tileColor: z
+    .object({
+      encoding: z.literal("uint8"),
+      sentinel: z.number().int().min(0).max(255),
+      unit: z.literal("tile-color-index"),
+    })
+    .optional(),
+  tileHeightStep: z
+    .object({
+      encoding: z.literal("int8"),
+      unit: z.literal("height-step"),
+    })
+    .optional(),
+  tileType: z
+    .object({
+      encoding: z.literal("uint8"),
+      sentinel: z.number().int().min(0).max(255),
+      unit: z.literal("tile-type-index"),
+    })
+    .optional(),
 });
 export type MapChunkLayers = z.infer<typeof MapChunkLayersSchema>;
+
+export const ZARCH_TILE_OVERRIDE_TYPE_SENTINEL = 255;
+export const ZARCH_TILE_OVERRIDE_COLOR_SENTINEL = 255;
+export const ZARCH_TILE_EDIT_HEIGHT_STEP_METERS = 4;
+export const ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS = 16;
+export const DEFAULT_ZARCH_TILE_TYPE_ID = 'normal';
+export const LANDING_PAD_ZARCH_TILE_TYPE_ID = 'landing-pad';
+
+export const ZarchTileTypeDefinitionSchema = z.object({
+  id: z.string().trim().min(1).max(120),
+  label: z.string().trim().min(1).max(120),
+});
+export type ZarchTileTypeDefinition = z.infer<
+  typeof ZarchTileTypeDefinitionSchema
+>;
+
+export const ZarchTilePaletteEntrySchema = z.object({
+  hex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  id: z.string().trim().min(1).max(120),
+  label: z.string().trim().min(1).max(120),
+});
+export type ZarchTilePaletteEntry = z.infer<typeof ZarchTilePaletteEntrySchema>;
+
+export const ZarchTileEditConfigSchema = z.object({
+  heightStepMeters: z.number().positive(),
+  maxAbsHeightSteps: z.number().int().positive(),
+  palette: z.array(ZarchTilePaletteEntrySchema).min(1),
+  tileTypes: z.array(ZarchTileTypeDefinitionSchema).min(1),
+});
+export type ZarchTileEditConfig = z.infer<typeof ZarchTileEditConfigSchema>;
+
+export const ZarchTileOverrideSchema = z.object({
+  colorIndex: z.number().int().min(0).max(254).nullable(),
+  heightSteps: z.number().int().min(-128).max(127),
+  tileX: z.number().int(),
+  tileZ: z.number().int(),
+  typeId: z.string().trim().min(1).max(120),
+});
+export type ZarchTileOverride = z.infer<typeof ZarchTileOverrideSchema>;
 
 export const StaticEntityExportManifestHashSchema = z
   .string()
@@ -301,7 +360,10 @@ export const MapChunkSchema = z.object({
   samplesHigh: z.number().int().min(2),
   samplesWide: z.number().int().min(2),
   staticEntities: z.array(StaticEntitySchema),
+  tileColorIndexes: z.array(z.number().int().min(0).max(255)).optional(),
   tileHeight: z.number().int().positive(),
+  tileHeightSteps: z.array(z.number().int().min(-128).max(127)).optional(),
+  tileTypeIndexes: z.array(z.number().int().min(0).max(255)).optional(),
   tileWidth: z.number().int().positive(),
 });
 export type MapChunk = z.infer<typeof MapChunkSchema>;
@@ -315,6 +377,9 @@ export const MapChunkBinarySchema = MapChunkMetadataSchema.extend({
   heights: oz.blob(),
   materials: oz.blob().optional(),
   staticEntitiesJson: z.string().optional(),
+  tileColorIndexes: oz.blob().optional(),
+  tileHeightSteps: oz.blob().optional(),
+  tileTypeIndexes: oz.blob().optional(),
 });
 export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
 
@@ -392,6 +457,16 @@ export type GetMapChunkOutput = z.infer<typeof GetMapChunkOutput>;
 export const GetMapChunkBinaryOutput = MapChunkBinarySchema;
 export type GetMapChunkBinaryOutput = z.infer<typeof GetMapChunkBinaryOutput>;
 
+export const GetZarchTileEditConfigInput = z.object({});
+export type GetZarchTileEditConfigInput = z.infer<
+  typeof GetZarchTileEditConfigInput
+>;
+
+export const GetZarchTileEditConfigOutput = ZarchTileEditConfigSchema;
+export type GetZarchTileEditConfigOutput = z.infer<
+  typeof GetZarchTileEditConfigOutput
+>;
+
 export const ListMapsInput = z.object({});
 export type ListMapsInput = z.infer<typeof ListMapsInput>;
 
@@ -442,6 +517,20 @@ export type UpdateMapInput = z.infer<typeof UpdateMapInput>;
 export const UpdateMapOutput = MapMetadataSchema;
 export type UpdateMapOutput = z.infer<typeof UpdateMapOutput>;
 
+export const UpdateMapTilesInput = z.object({
+  edits: z.array(ZarchTileOverrideSchema),
+  expectedRevision: z.number().int().nonnegative(),
+  mapId: z.string().min(1),
+});
+export type UpdateMapTilesInput = z.infer<typeof UpdateMapTilesInput>;
+
+export const UpdateMapTilesOutput = z.object({
+  appliedTileCount: z.number().int().nonnegative(),
+  dirtyBounds: WorldBoundsSchema,
+  mapRevision: z.number().int().nonnegative(),
+});
+export type UpdateMapTilesOutput = z.infer<typeof UpdateMapTilesOutput>;
+
 // --- Routes ---
 
 export const CreateMapRoute: Route = {
@@ -479,6 +568,13 @@ export const GetMapChunkBinaryRoute: Route = {
   tags: ["maps"],
 } as const;
 
+export const GetZarchTileEditConfigRoute: Route = {
+  description: "Retrieve the global Zarch tile edit configuration",
+  method: "GET",
+  path: "/zarch/tile-edit-config",
+  tags: ["zarch"],
+} as const;
+
 export const CreateMapExportRoute: Route = {
   description: "Create a finite exported slice from an infinite-vector map",
   method: "POST",
@@ -514,6 +610,13 @@ export const UpdateMapRoute: Route = {
   tags: ["maps"],
 } as const;
 
+export const UpdateMapTilesRoute: Route = {
+  description: "Apply a batch of authored tile override edits to a map",
+  method: "PATCH",
+  path: "/maps/{mapId}/tiles",
+  tags: ["maps"],
+} as const;
+
 export const mapsContract = {
   ...authoredMapsContract,
   create: oc
@@ -541,6 +644,10 @@ export const mapsContract = {
     .route(GetMapChunkBinaryRoute)
     .input(GetMapChunkInput)
     .output(GetMapChunkBinaryOutput),
+  getTileEditConfig: oc
+    .route(GetZarchTileEditConfigRoute)
+    .input(GetZarchTileEditConfigInput)
+    .output(GetZarchTileEditConfigOutput),
   listExports: oc
     .route(ListMapExportsRoute)
     .input(ListMapExportsInput)
@@ -550,6 +657,10 @@ export const mapsContract = {
     .route(UpdateMapRoute)
     .input(UpdateMapInput)
     .output(UpdateMapOutput),
+  updateTiles: oc
+    .route(UpdateMapTilesRoute)
+    .input(UpdateMapTilesInput)
+    .output(UpdateMapTilesOutput),
 };
 
 export {

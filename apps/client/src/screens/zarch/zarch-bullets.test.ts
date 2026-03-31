@@ -30,6 +30,7 @@ const makeSurface = (options?: {
 };
 
 const makeShip = (overrides?: Partial<ZarchShipState>): ZarchShipState => ({
+  landed: false,
   pitch: 0,
   respawnDelaySeconds: 0,
   respawnX: 0,

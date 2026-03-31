@@ -62,6 +62,13 @@ export const useServerMapTerrain = () => {
     ? normalizeMapMetadata(selectedMapQuery.data ?? null)
     : fallbackMap;
 
+  const tileEditConfigQuery = useQuery({
+    gcTime: MAP_METADATA_GC_MS,
+    queryFn: () => client.maps.getTileEditConfig({}),
+    queryKey: ['zarch', 'tile-edit-config'] as const,
+    staleTime: MAP_METADATA_CACHE_MS
+  });
+
   const prefetchChunk = useEffectEvent((activeMap: MapMetadata, chunkX: number, chunkZ: number) => {
     void queryClient.prefetchQuery({
       gcTime: MAP_CHUNK_GC_MS,
@@ -75,22 +82,25 @@ export const useServerMapTerrain = () => {
   });
 
   const terrain = useMemo(() => {
-    if (!map) {
+    if (!map || !tileEditConfigQuery.data) {
       return null;
     }
 
     return createServerMapTerrain({
+      editConfig: tileEditConfigQuery.data,
       map,
       prefetchChunk: (chunkX, chunkZ) => prefetchChunk(map, chunkX, chunkZ),
       queryClient
     });
-  }, [map, prefetchChunk, queryClient]);
+  }, [map, prefetchChunk, queryClient, tileEditConfigQuery.data]);
 
   return {
-    error: mapsQuery.error ?? selectedMapQuery.error ?? null,
+    editConfig: tileEditConfigQuery.data ?? null,
+    error: mapsQuery.error ?? selectedMapQuery.error ?? tileEditConfigQuery.error ?? null,
     isLoading:
       mapsQuery.isLoading ||
-      (!!requestedMapId && !!selectedMapId && selectedMapQuery.isLoading),
+      (!!requestedMapId && !!selectedMapId && selectedMapQuery.isLoading) ||
+      tileEditConfigQuery.isLoading,
     map,
     terrain
   };

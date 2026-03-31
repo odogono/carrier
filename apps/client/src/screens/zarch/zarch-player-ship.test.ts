@@ -9,18 +9,21 @@ import {
 
 const makeSurface = (options?: {
   loaded?: boolean;
+  tileTypeId?: string;
   terrainHeight?: number;
   water?: boolean;
   waterHeight?: number;
 }) => {
   const {
     loaded = true,
+    tileTypeId = 'normal',
     terrainHeight = 12,
     water = false,
     waterHeight = -12
   } = options ?? {};
 
   return {
+    getTileTypeIdAtWorld: () => tileTypeId,
     isWaterAtWorld: () => water,
     isWorldPointLoaded: () => loaded,
     sampleHeightAtWorld: () => terrainHeight,
@@ -40,6 +43,7 @@ describe('zarch player ship simulation', () => {
     expect(state.z).toBe(72);
     expect(state.y).toBeGreaterThan(20);
     expect(state.respawnY).toBe(state.y);
+    expect(state.landed).toBe(false);
   });
 
   test('applies level thrust upward during a step', () => {
@@ -107,6 +111,10 @@ describe('zarch player ship simulation', () => {
       y: 10,
       z: expect.any(Number)
     });
+    expect(result.event?.kind).toBe('crash');
+    if (!result.event || result.event.kind !== 'crash') {
+      throw new Error('expected crash event');
+    }
     expect(result.state.x).toBe(result.event.x);
     expect(result.state.z).toBe(result.event.z);
     expect(result.state.y).toBe(result.event.y);
@@ -152,6 +160,54 @@ describe('zarch player ship simulation', () => {
     expect(respawned.state.z).toBe(initial.respawnZ);
     expect(respawned.state.y).toBe(initial.respawnY);
     expect(respawned.state.respawnDelaySeconds).toBe(0);
+    expect(respawned.state.landed).toBe(false);
+  });
+
+  test('lands safely on a landing pad and relaunches on thrust', () => {
+    const initial = createPlayerShipSpawnState({
+      surface: makeSurface({ terrainHeight: 10 }),
+      x: 48,
+      z: 72
+    });
+
+    const landed = stepPlayerShip({
+      deltaSeconds: 1 / 60,
+      input: {
+        pitchDown: false,
+        pitchUp: false,
+        thrust: false,
+        yawLeft: false,
+        yawRight: false
+      },
+      state: {
+        ...initial,
+        spawnGraceSeconds: 0,
+        y: 11.15
+      },
+      surface: makeSurface({ terrainHeight: 10, tileTypeId: 'landing-pad' })
+    });
+
+    expect(landed.event).toBeNull();
+    expect(landed.state.landed).toBe(true);
+    expect(landed.state.velX).toBe(0);
+    expect(landed.state.velY).toBe(0);
+    expect(landed.state.velZ).toBe(0);
+
+    const relaunched = stepPlayerShip({
+      deltaSeconds: 1 / 60,
+      input: {
+        pitchDown: false,
+        pitchUp: false,
+        thrust: true,
+        yawLeft: false,
+        yawRight: false
+      },
+      state: landed.state,
+      surface: makeSurface({ terrainHeight: 10, tileTypeId: 'landing-pad' })
+    });
+
+    expect(relaunched.state.landed).toBe(false);
+    expect(relaunched.state.velY).toBeGreaterThan(0);
   });
 
   test('blocks movement when terrain samples are unavailable', () => {

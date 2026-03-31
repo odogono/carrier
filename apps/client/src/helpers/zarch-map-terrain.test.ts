@@ -1,7 +1,11 @@
 /* eslint-disable perfectionist/sort-objects */
 /* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
-import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
+import type {
+  MapMetadata,
+  RuntimeMapChunk,
+  ZarchTileEditConfig
+} from 'carrier-contracts/types';
 
 import {
   createServerMapTerrain,
@@ -20,6 +24,16 @@ import {
   tileHash
 } from '@/helpers/zarch-terrain';
 import { QueryClient } from '@tanstack/react-query';
+
+const editConfig: ZarchTileEditConfig = {
+  heightStepMeters: 4,
+  maxAbsHeightSteps: 16,
+  palette: [{ hex: '#d6c64a', id: 'pad-yellow', label: 'Pad Yellow' }],
+  tileTypes: [
+    { id: 'normal', label: 'Normal' },
+    { id: 'landing-pad', label: 'Landing Pad' }
+  ]
+};
 
 const map: MapMetadata = {
   id: 'map-1',
@@ -139,6 +153,7 @@ describe('server-backed zarch terrain', () => {
     queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map,
       prefetchChunk: () => {},
       queryClient
@@ -158,6 +173,7 @@ describe('server-backed zarch terrain', () => {
     queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map,
       prefetchChunk: () => {},
       queryClient
@@ -173,12 +189,40 @@ describe('server-backed zarch terrain', () => {
     expect(terrain.isWaterAtWorld(12, 12)).toBe(false);
   });
 
+  test('blends tile height edits across shared corners so adjacent tiles stay connected', () => {
+    const queryClient = new QueryClient();
+    const tileHeightSteps = new Int8Array(32 * 32);
+    tileHeightSteps[1 + 32] = 2;
+
+    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), {
+      ...chunk00,
+      heights: new Float32Array(33 * 33),
+      tileHeightSteps
+    } satisfies RuntimeMapChunk);
+
+    const terrain = createServerMapTerrain({
+      editConfig,
+      map,
+      prefetchChunk: () => {},
+      queryClient
+    });
+
+    expect(terrain.sampleHeight(1, 1)).toBe(2);
+    expect(terrain.sampleHeight(2, 1)).toBe(2);
+    expect(terrain.sampleHeight(1, 2)).toBe(2);
+    expect(terrain.sampleHeight(2, 2)).toBe(2);
+    expect(terrain.getTileAverageHeight(1, 1)).toBe(2);
+    expect(terrain.getTileAverageHeight(0, 1)).toBe(1);
+    expect(terrain.sampleHeightAtWorld(36, 36)).toBe(2);
+  });
+
   test('requests visible chunks with a one-ring prefetch window', () => {
     const requested: string[] = [];
     const queryClient = new QueryClient();
     queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map,
       prefetchChunk: (chunkX, chunkZ) => requested.push(`${chunkX},${chunkZ}`),
       queryClient
@@ -201,6 +245,7 @@ describe('server-backed zarch terrain', () => {
     queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map,
       prefetchChunk: () => {},
       queryClient
@@ -221,6 +266,7 @@ describe('server-backed zarch terrain', () => {
     queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 1, 1), chunk11);
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map: wrappedMap,
       prefetchChunk: () => {},
       queryClient
@@ -239,6 +285,7 @@ describe('server-backed zarch terrain', () => {
     const queryClient = new QueryClient();
 
     const terrain = createServerMapTerrain({
+      editConfig,
       map: wrappedMap,
       prefetchChunk: (chunkX, chunkZ) => requested.push(`${chunkX},${chunkZ}`),
       queryClient

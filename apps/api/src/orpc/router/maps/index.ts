@@ -12,17 +12,22 @@ import {
   GetMapChunkRoute,
   GetMapInput,
   GetMapRoute,
+  GetZarchTileEditConfigInput,
+  GetZarchTileEditConfigRoute,
   ListMapExportsInput,
   ListMapExportsRoute,
   ListMapsInput,
   ListMapsRoute,
   UpdateMapInput,
-  UpdateMapRoute
+  UpdateMapRoute,
+  UpdateMapTilesInput,
+  UpdateMapTilesRoute
 } from '../../../../../../packages/contracts/src/schema/maps';
 
 import { ORPCError, os } from '@orpc/server';
 
 import { getMapRepository } from '@/maps/repository';
+import { ZARCH_TILE_EDIT_CONFIG } from '@/maps/tile-edit-config';
 
 import { authored } from './authored';
 import { asOrpcError } from './errors';
@@ -134,9 +139,29 @@ const getChunkBinary = os
             type: 'application/octet-stream'
           })
         : undefined,
-      staticEntitiesJson: JSON.stringify(chunk.staticEntities)
+      staticEntitiesJson: JSON.stringify(chunk.staticEntities),
+      tileColorIndexes: chunk.tileColorIndexes
+        ? new Blob([chunk.tileColorIndexes], {
+            type: 'application/octet-stream'
+          })
+        : undefined,
+      tileHeightSteps: chunk.tileHeightSteps
+        ? new Blob([chunk.tileHeightSteps], {
+            type: 'application/octet-stream'
+          })
+        : undefined,
+      tileTypeIndexes: chunk.tileTypeIndexes
+        ? new Blob([chunk.tileTypeIndexes], {
+            type: 'application/octet-stream'
+          })
+        : undefined
     };
   });
+
+const getTileEditConfig = os
+  .route(GetZarchTileEditConfigRoute)
+  .input(GetZarchTileEditConfigInput)
+  .handler(async () => ZARCH_TILE_EDIT_CONFIG);
 
 const list = os
   .route(ListMapsRoute)
@@ -171,6 +196,17 @@ const update = os
     return map;
   });
 
+const updateTiles = os
+  .route(UpdateMapTilesRoute)
+  .input(UpdateMapTilesInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().updateMapTiles(input);
+    } catch (error) {
+      return asOrpcError(error);
+    }
+  });
+
 export const maps = {
   ...authored,
   create,
@@ -180,7 +216,9 @@ export const maps = {
   findExport,
   getChunk,
   getChunkBinary,
+  getTileEditConfig,
   listExports,
   list,
-  update
+  update,
+  updateTiles
 };

@@ -26,11 +26,16 @@ import type {
   StaticEntityExportManifestEntry,
   StaticEntityArchetypeSummary,
   StaticEntityListItem,
+  UpdateMapTilesOutput,
   WorldBounds,
   WorldPoint,
+  ZarchTileOverride,
   ZarchRuntimeEntity
 } from 'carrier-contracts';
 import {
+  ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS,
+  ZARCH_TILE_OVERRIDE_COLOR_SENTINEL,
+  ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
   normalizeStaticEntityExportManifest,
   slugify
 } from 'carrier-contracts';
@@ -65,6 +70,11 @@ import {
   generateVectorChunk,
   getCompiledVectorTerrainArtifact
 } from './vector-generation';
+import {
+  DEFAULT_ZARCH_TILE_TYPE_ID,
+  ZARCH_TILE_EDIT_CONFIG,
+  getTileTypeIndex
+} from './tile-edit-config';
 
 type MapRow = {
   chunkSizeTiles: number;
@@ -107,6 +117,15 @@ type ChunkRow = {
   samplesWide: number;
   tileHeight: number;
   tileWidth: number;
+};
+
+type TileOverrideRow = {
+  colorIndex: number | null;
+  heightSteps: number;
+  mapId: string;
+  tileX: number;
+  tileZ: number;
+  typeId: string;
 };
 
 type SourcePolygonRow = {
@@ -445,6 +464,32 @@ const STATIC_ENTITY_COLUMNS = `
   yaw
 `;
 
+const TILE_OVERRIDE_COLUMNS = `
+  color_index AS colorIndex,
+  height_steps AS heightSteps,
+  map_id AS mapId,
+  tile_x AS tileX,
+  tile_z AS tileZ,
+  type_id AS typeId
+`;
+
+const TILE_OVERRIDE_LAYER_DESCRIPTORS = {
+  tileColor: {
+    encoding: 'uint8' as const,
+    sentinel: ZARCH_TILE_OVERRIDE_COLOR_SENTINEL,
+    unit: 'tile-color-index' as const
+  },
+  tileHeightStep: {
+    encoding: 'int8' as const,
+    unit: 'height-step' as const
+  },
+  tileType: {
+    encoding: 'uint8' as const,
+    sentinel: ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
+    unit: 'tile-type-index' as const
+  }
+};
+
 const deriveTileCountFromMeters = (meters: number, metersPerTile: number) => {
   const tiles = meters / metersPerTile;
 
@@ -477,6 +522,9 @@ const getChunkCount = (tileCount: number, chunkSizeTiles: number) =>
 
 const toCanonicalChunkCoordinate = (chunk: number, chunkCount: number) =>
   ((chunk % chunkCount) + chunkCount) % chunkCount;
+
+const toCanonicalTileCoordinate = (tile: number, tileCount: number) =>
+  ((tile % tileCount) + tileCount) % tileCount;
 
 const rotateWorldOffset = (x: number, z: number, yawDegrees: number) => {
   const yawRadians = (yawDegrees * Math.PI) / 180;
@@ -620,6 +668,17 @@ const rowToBounds = (
   maxZ: row.bboxMaxZ,
   minX: row.bboxMinX,
   minZ: row.bboxMinZ
+});
+
+const tileBoundsToWorldBounds = (
+  tileX: number,
+  tileZ: number,
+  metersPerTile: number
+): WorldBounds => ({
+  maxX: (tileX + 1) * metersPerTile,
+  maxZ: (tileZ + 1) * metersPerTile,
+  minX: tileX * metersPerTile,
+  minZ: tileZ * metersPerTile
 });
 
 const worldBoundsToPolygon = (bounds: WorldBounds): WorldPoint[] => [
@@ -989,6 +1048,117 @@ export class MapRepository {
       `
       )
       .get(mapId, chunkX, chunkZ);
+  }
+
+  private normalizeTileCoordinate(
+    row: MapRow,
+    tileX: number,
+    tileZ: number
+  ) {
+    if (row.widthTiles !== null) {
+      if (row.wrapX === 1) {
+        tileX = toCanonicalTileCoordinate(tileX, row.widthTiles);
+      } else if (tileX < 0 || tileX >= row.widthTiles) {
+        throw new MapRepositoryError(
+          'BAD_REQUEST',
+          `Tile x ${tileX} is outside map ${row.id}`
+        );
+      }
+    }
+
+    if (row.heightTiles !== null) {
+      if (row.wrapZ === 1) {
+        tileZ = toCanonicalTileCoordinate(tileZ, row.heightTiles);
+      } else if (tileZ < 0 || tileZ >= row.heightTiles) {
+        throw new MapRepositoryError(
+          'BAD_REQUEST',
+          `Tile z ${tileZ} is outside map ${row.id}`
+        );
+      }
+    }
+
+    return { tileX, tileZ };
+  }
+
+  private listTileOverrideRowsForChunk(
+    mapId: string,
+    originTileX: number,
+    originTileZ: number,
+    tileWidth: number,
+    tileHeight: number
+  ) {
+    return this.db
+      .query<TileOverrideRow, [string, number, number, number, number]>(
+        `
+        SELECT ${TILE_OVERRIDE_COLUMNS}
+        FROM map_tile_overrides
+        WHERE
+          map_id = ? AND
+          tile_x >= ? AND tile_x < ? AND
+          tile_z >= ? AND tile_z < ?
+      `
+      )
+      .all(
+        mapId,
+        originTileX,
+        originTileX + tileWidth,
+        originTileZ,
+        originTileZ + tileHeight
+      );
+  }
+
+  private buildTileOverrideLayers(
+    chunk: Pick<ChunkRow, 'mapId' | 'originTileX' | 'originTileZ' | 'tileWidth' | 'tileHeight'>
+  ) {
+    const rows = this.listTileOverrideRowsForChunk(
+      chunk.mapId,
+      chunk.originTileX,
+      chunk.originTileZ,
+      chunk.tileWidth,
+      chunk.tileHeight
+    );
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const tileCount = chunk.tileWidth * chunk.tileHeight;
+    const tileHeightSteps = new Int8Array(tileCount);
+    const tileTypeIndexes = new Uint8Array(tileCount).fill(
+      ZARCH_TILE_OVERRIDE_TYPE_SENTINEL
+    );
+    const tileColorIndexes = new Uint8Array(tileCount).fill(
+      ZARCH_TILE_OVERRIDE_COLOR_SENTINEL
+    );
+
+    for (const row of rows) {
+      const localX = row.tileX - chunk.originTileX;
+      const localZ = row.tileZ - chunk.originTileZ;
+
+      if (
+        localX < 0 ||
+        localZ < 0 ||
+        localX >= chunk.tileWidth ||
+        localZ >= chunk.tileHeight
+      ) {
+        continue;
+      }
+
+      const index = localZ * chunk.tileWidth + localX;
+      tileHeightSteps[index] = row.heightSteps;
+      tileColorIndexes[index] =
+        row.colorIndex === null
+          ? ZARCH_TILE_OVERRIDE_COLOR_SENTINEL
+          : row.colorIndex;
+      tileTypeIndexes[index] =
+        getTileTypeIndex(row.typeId) ?? ZARCH_TILE_OVERRIDE_TYPE_SENTINEL;
+    }
+
+    return {
+      tileColorIndexes,
+      tileHeightSteps,
+      tileTypeIndexes
+    };
   }
 
   private resolveStoredFiniteChunkRow(
@@ -3120,10 +3290,30 @@ export class MapRepository {
       row.chunkX,
       row.chunkZ
     );
+    const tileOverrideLayers = this.buildTileOverrideLayers({
+      mapId: row.mapId,
+      originTileX: row.originTileX,
+      originTileZ: row.originTileZ,
+      tileHeight: row.tileHeight,
+      tileWidth: row.tileWidth
+    });
 
     return toMapChunkResponse({
       ...chunkRowToRecord(row),
-      staticEntities
+      layers: {
+        height: HEIGHT_LAYER,
+        ...(tileOverrideLayers ? TILE_OVERRIDE_LAYER_DESCRIPTORS : undefined)
+      },
+      staticEntities,
+      tileColorIndexes: tileOverrideLayers
+        ? Array.from(tileOverrideLayers.tileColorIndexes)
+        : undefined,
+      tileHeightSteps: tileOverrideLayers
+        ? Array.from(tileOverrideLayers.tileHeightSteps)
+        : undefined,
+      tileTypeIndexes: tileOverrideLayers
+        ? Array.from(tileOverrideLayers.tileTypeIndexes)
+        : undefined
     });
   }
 
@@ -3171,6 +3361,13 @@ export class MapRepository {
       row.chunkX,
       row.chunkZ
     );
+    const tileOverrideLayers = this.buildTileOverrideLayers({
+      mapId: row.mapId,
+      originTileX: row.originTileX,
+      originTileZ: row.originTileZ,
+      tileHeight: row.tileHeight,
+      tileWidth: row.tileWidth
+    });
 
     return {
       chunkX: row.chunkX,
@@ -3181,7 +3378,8 @@ export class MapRepository {
         material: {
           encoding: 'uint8' as const,
           unit: 'surface-material' as const
-        }
+        },
+        ...(tileOverrideLayers ? TILE_OVERRIDE_LAYER_DESCRIPTORS : undefined)
       },
       mapId: row.mapId,
       materials: encodeMaterialIds(materials),
@@ -3190,9 +3388,143 @@ export class MapRepository {
       samplesHigh: row.samplesHigh,
       samplesWide: row.samplesWide,
       staticEntities,
+      tileColorIndexes: tileOverrideLayers?.tileColorIndexes,
+      tileHeightSteps: tileOverrideLayers?.tileHeightSteps,
+      tileTypeIndexes: tileOverrideLayers?.tileTypeIndexes,
       tileHeight: row.tileHeight,
       tileWidth: row.tileWidth
     };
+  }
+
+  updateMapTiles(input: {
+    edits: ZarchTileOverride[];
+    expectedRevision: number;
+    mapId: string;
+  }): UpdateMapTilesOutput {
+    return this.runInTransaction(() => {
+      const mapRow = this.getMapRowOrThrow(input.mapId);
+      this.assertExpectedRevision(mapRow, input.expectedRevision);
+
+      if (input.edits.length === 0) {
+        return {
+          appliedTileCount: 0,
+          dirtyBounds: {
+            maxX: 0,
+            maxZ: 0,
+            minX: 0,
+            minZ: 0
+          },
+          mapRevision: mapRow.revision
+        };
+      }
+
+      const deduped = new Map<string, ZarchTileOverride>();
+
+      for (const edit of input.edits) {
+        const normalized = this.normalizeTileCoordinate(
+          mapRow,
+          edit.tileX,
+          edit.tileZ
+        );
+        deduped.set(`${normalized.tileX}:${normalized.tileZ}`, {
+          ...edit,
+          tileX: normalized.tileX,
+          tileZ: normalized.tileZ
+        });
+      }
+
+      const upsertTileOverride = this.db.prepare(
+        `
+        INSERT INTO map_tile_overrides (
+          map_id, tile_x, tile_z, height_steps, type_id, color_index
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(map_id, tile_x, tile_z)
+        DO UPDATE SET
+          height_steps = excluded.height_steps,
+          type_id = excluded.type_id,
+          color_index = excluded.color_index
+      `
+      );
+      const deleteTileOverride = this.db.prepare(
+        `
+        DELETE FROM map_tile_overrides
+        WHERE map_id = ? AND tile_x = ? AND tile_z = ?
+      `
+      );
+
+      let dirtyBounds: WorldBounds | null = null;
+
+      for (const edit of deduped.values()) {
+        if (Math.abs(edit.heightSteps) > ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS) {
+          throw new MapRepositoryError(
+            'BAD_REQUEST',
+            `Tile heightSteps ${edit.heightSteps} exceeds the configured limit`
+          );
+        }
+
+        if (getTileTypeIndex(edit.typeId) === null) {
+          throw new MapRepositoryError(
+            'BAD_REQUEST',
+            `Unknown tile type ${edit.typeId}`
+          );
+        }
+
+        if (
+          edit.colorIndex !== null &&
+          (edit.colorIndex < 0 ||
+            edit.colorIndex >= ZARCH_TILE_EDIT_CONFIG.palette.length)
+        ) {
+          throw new MapRepositoryError(
+            'BAD_REQUEST',
+            `Tile colorIndex ${edit.colorIndex} is invalid`
+          );
+        }
+
+        const isDefaultOverride =
+          edit.heightSteps === 0 &&
+          edit.typeId === DEFAULT_ZARCH_TILE_TYPE_ID &&
+          edit.colorIndex === null;
+
+        if (isDefaultOverride) {
+          deleteTileOverride.run(input.mapId, edit.tileX, edit.tileZ);
+        } else {
+          upsertTileOverride.run(
+            input.mapId,
+            edit.tileX,
+            edit.tileZ,
+            edit.heightSteps,
+            edit.typeId,
+            edit.colorIndex
+          );
+        }
+
+        dirtyBounds = dirtyBounds
+          ? mergeBounds(
+              dirtyBounds,
+              tileBoundsToWorldBounds(
+                edit.tileX,
+                edit.tileZ,
+                mapRow.metersPerTile
+              )
+            )
+          : tileBoundsToWorldBounds(edit.tileX, edit.tileZ, mapRow.metersPerTile);
+      }
+
+      const updatedMapRow = this.bumpMapRevisions(input.mapId, {
+        terrainAffecting: true
+      });
+
+      return {
+        appliedTileCount: deduped.size,
+        dirtyBounds: dirtyBounds ?? {
+          maxX: 0,
+          maxZ: 0,
+          minX: 0,
+          minZ: 0
+        },
+        mapRevision: updatedMapRow.revision
+      };
+    });
   }
 
   createStaticEntity(input: CreateStaticEntityInput) {
@@ -4065,6 +4397,17 @@ export class MapRepository {
         samples_high INTEGER NOT NULL,
         heights BLOB NOT NULL,
         PRIMARY KEY (map_id, chunk_x, chunk_z),
+        FOREIGN KEY (map_id) REFERENCES maps(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS map_tile_overrides (
+        map_id TEXT NOT NULL,
+        tile_x INTEGER NOT NULL,
+        tile_z INTEGER NOT NULL,
+        height_steps INTEGER NOT NULL DEFAULT 0,
+        type_id TEXT NOT NULL DEFAULT 'normal',
+        color_index INTEGER,
+        PRIMARY KEY (map_id, tile_x, tile_z),
         FOREIGN KEY (map_id) REFERENCES maps(id) ON DELETE CASCADE
       );
 

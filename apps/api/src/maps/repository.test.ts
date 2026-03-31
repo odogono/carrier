@@ -188,6 +188,156 @@ describe('map repository', () => {
     }
   });
 
+  test('stores wrapped tile overrides in canonical coordinates and removes default resets', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const map = repository.createMap({
+        kind: 'wrapped-classic',
+        generator: 'diamond-square',
+        heightMeters: 640,
+        seed: 'wrapped-edits',
+        widthMeters: 960
+      });
+
+      const updated = repository.updateMapTiles({
+        edits: [
+          {
+            colorIndex: 0,
+            heightSteps: 2,
+            tileX: -1,
+            tileZ: 1,
+            typeId: 'landing-pad'
+          }
+        ],
+        expectedRevision: 0,
+        mapId: map.id
+      });
+
+      expect(updated.mapRevision).toBe(1);
+      expect(updated.dirtyBounds).toEqual({
+        maxX: 960,
+        maxZ: 20,
+        minX: 950,
+        minZ: 10
+      });
+
+      const chunk = repository.getMapChunk(map.id, 2, 0);
+      expect(chunk?.layers.tileHeightStep?.encoding).toBe('int8');
+      expect(chunk?.layers.tileType?.encoding).toBe('uint8');
+      expect(chunk?.layers.tileColor?.encoding).toBe('uint8');
+      expect(chunk?.tileHeightSteps?.[63]).toBe(2);
+      expect(chunk?.tileTypeIndexes?.[63]).toBe(1);
+      expect(chunk?.tileColorIndexes?.[63]).toBe(0);
+
+      const reset = repository.updateMapTiles({
+        edits: [
+          {
+            colorIndex: null,
+            heightSteps: 0,
+            tileX: -1,
+            tileZ: 1,
+            typeId: 'normal'
+          }
+        ],
+        expectedRevision: 1,
+        mapId: map.id
+      });
+
+      expect(reset.mapRevision).toBe(2);
+      expect(repository.getMapChunk(map.id, 2, 0)?.tileHeightSteps).toBeUndefined();
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('supports tile overrides for infinite maps and exported finite slices', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const infinite = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Infinite Tiles',
+        seed: 'infinite-tiles'
+      });
+
+      const updatedInfinite = repository.updateMapTiles({
+        edits: [
+          {
+            colorIndex: null,
+            heightSteps: -1,
+            tileX: -3,
+            tileZ: 4,
+            typeId: 'landing-pad'
+          }
+        ],
+        expectedRevision: 0,
+        mapId: infinite.id
+      });
+
+      expect(updatedInfinite.mapRevision).toBe(1);
+      const infiniteChunk = repository.getMapChunk(infinite.id, -1, 0);
+      expect(infiniteChunk?.tileHeightSteps?.[157]).toBe(-1);
+      expect(infiniteChunk?.tileTypeIndexes?.[157]).toBe(1);
+
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 32,
+        expectedRevision: 1,
+        kind: 'finite-vector-slice',
+        mapId: infinite.id,
+        metersPerTile: 10,
+        name: 'Slice'
+      });
+
+      const updatedSlice = repository.updateMapTiles({
+        edits: [
+          {
+            colorIndex: 0,
+            heightSteps: 1,
+            tileX: 0,
+            tileZ: 0,
+            typeId: 'landing-pad'
+          }
+        ],
+        expectedRevision: 0,
+        mapId: exported.id
+      });
+
+      expect(updatedSlice.mapRevision).toBe(1);
+      expect(updatedSlice.dirtyBounds).toEqual({
+        maxX: 10,
+        maxZ: 10,
+        minX: 0,
+        minZ: 0
+      });
+      expect(repository.getMapChunk(exported.id, 0, 0)?.tileHeightSteps?.[0]).toBe(1);
+
+      expect(() =>
+        repository.updateMapTiles({
+          edits: [
+            {
+              colorIndex: null,
+              heightSteps: 0,
+              tileX: 40,
+              tileZ: 0,
+              typeId: 'normal'
+            }
+          ],
+          expectedRevision: 1,
+          mapId: exported.id
+        })
+      ).toThrow(MapRepositoryError);
+    } finally {
+      repository.close();
+    }
+  });
+
   test('supports boolean xor fan-out and rejects hole-producing results atomically', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 

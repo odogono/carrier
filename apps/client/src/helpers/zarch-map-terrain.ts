@@ -1,15 +1,20 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import {
+  ZARCH_TILE_OVERRIDE_COLOR_SENTINEL,
+  ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
   isFiniteMap,
   resolveSurfaceMaterial,
   type MapMetadata,
-  type RuntimeMapChunk
+  type RuntimeMapChunk,
+  type ZarchTileEditConfig
 } from 'carrier-contracts/types';
 
 import {
+  DEFAULT_ZARCH_TILE_TYPE_ID,
   WATER_LEVEL,
   applyTileColor,
   getTreeType,
+  sampleConnectedHeightFromGrid,
   sampleHeightAtWorldFromGrid,
   sampleNormalAtWorldFromGrid,
   shouldHaveTree,
@@ -181,17 +186,42 @@ const getMaterialFromChunk = (
   return chunk.materials[localZ * chunk.tileWidth + localX] ?? null;
 };
 
+const getTileLayerIndexFromChunk = (
+  chunk: Pick<RuntimeMapChunk, 'originTileX' | 'originTileZ' | 'tileWidth' | 'tileHeight'>,
+  gx: number,
+  gz: number
+) => {
+  const localX = gx - chunk.originTileX;
+  const localZ = gz - chunk.originTileZ;
+
+  if (
+    localX < 0 ||
+    localZ < 0 ||
+    localX >= chunk.tileWidth ||
+    localZ >= chunk.tileHeight
+  ) {
+    return null;
+  }
+
+  return localZ * chunk.tileWidth + localX;
+};
+
 export const createServerMapTerrain = ({
+  editConfig,
   map,
   prefetchChunk,
   queryClient
 }: {
+  editConfig: ZarchTileEditConfig;
   map: MapMetadata;
   prefetchChunk: ChunkPrefetcher;
   queryClient: QueryClient;
 }): ZarchTerrain => {
   const chunkLookupCache = new Map<string, RuntimeMapChunk | null>();
-  const heightLookupCache = new Map<string, number | null>();
+  const baseHeightLookupCache = new Map<string, number | null>();
+  const connectedHeightLookupCache = new Map<string, number | null>();
+  const tileAverageHeightLookupCache = new Map<string, number | null>();
+  const tileHeightStepLookupCache = new Map<string, number>();
   const mapWidthTiles = isFiniteMap(map) ? map.extent.widthTiles : null;
   const mapHeightTiles = isFiniteMap(map) ? map.extent.heightTiles : null;
   const chunkSize = map.resolution.chunkSizeTiles;
@@ -216,10 +246,10 @@ export const createServerMapTerrain = ({
     };
   };
 
-  const sampleHeight = (sampleX: number, sampleZ: number) => {
+  const sampleBaseHeight = (sampleX: number, sampleZ: number) => {
     const c = canonicalize(sampleX, sampleZ);
     const heightKey = `${c.x}:${c.z}`;
-    const cachedHeight = heightLookupCache.get(heightKey);
+    const cachedHeight = baseHeightLookupCache.get(heightKey);
 
     if (cachedHeight !== undefined) {
       return cachedHeight;
@@ -234,16 +264,67 @@ export const createServerMapTerrain = ({
     }
 
     if (!chunk) {
-      heightLookupCache.set(heightKey, null);
+      baseHeightLookupCache.set(heightKey, null);
       return null;
     }
 
     const value = sampleHeightFromChunk(chunk, c.x, c.z);
-    heightLookupCache.set(heightKey, value);
+    baseHeightLookupCache.set(heightKey, value);
+    return value;
+  };
+
+  const getTileHeightSteps = (gx: number, gz: number) => {
+    const c = canonicalize(gx, gz);
+    const tileKey = `${c.x}:${c.z}`;
+    const cachedHeightStep = tileHeightStepLookupCache.get(tileKey);
+
+    if (cachedHeightStep !== undefined) {
+      return cachedHeightStep;
+    }
+
+    const chunk = getChunkForSample(queryClient, map, c.x, c.z);
+
+    if (!chunk?.tileHeightSteps) {
+      tileHeightStepLookupCache.set(tileKey, 0);
+      return 0;
+    }
+
+    const index = getTileLayerIndexFromChunk(chunk, c.x, c.z);
+    const value = index === null ? 0 : (chunk.tileHeightSteps[index] ?? 0);
+    tileHeightStepLookupCache.set(tileKey, value);
+    return value;
+  };
+
+  const sampleHeight = (sampleX: number, sampleZ: number) => {
+    const c = canonicalize(sampleX, sampleZ);
+    const heightKey = `${c.x}:${c.z}`;
+    const cachedHeight = connectedHeightLookupCache.get(heightKey);
+
+    if (cachedHeight !== undefined) {
+      return cachedHeight;
+    }
+
+    const value = sampleConnectedHeightFromGrid({
+      containsTile,
+      getTileHeightSteps,
+      gx: c.x,
+      gz: c.z,
+      heightStepMeters: editConfig.heightStepMeters,
+      sampleBaseHeight
+    });
+    connectedHeightLookupCache.set(heightKey, value);
     return value;
   };
 
   const getTileAverageHeight = (gx: number, gz: number) => {
+    const c = canonicalize(gx, gz);
+    const tileKey = `${c.x}:${c.z}`;
+    const cachedAverage = tileAverageHeightLookupCache.get(tileKey);
+
+    if (cachedAverage !== undefined) {
+      return cachedAverage;
+    }
+
     const h00 = sampleHeight(gx, gz);
     const h10 = sampleHeight(gx + 1, gz);
     const h01 = sampleHeight(gx, gz + 1);
@@ -255,10 +336,62 @@ export const createServerMapTerrain = ({
       h01 === null ||
       h11 === null
     ) {
+      tileAverageHeightLookupCache.set(tileKey, null);
       return null;
     }
 
-    return (h00 + h10 + h01 + h11) * 0.25;
+    const value = (h00 + h10 + h01 + h11) * 0.25;
+    tileAverageHeightLookupCache.set(tileKey, value);
+    return value;
+  };
+
+  const getTileTypeId = (gx: number, gz: number) => {
+    const c = canonicalize(gx, gz);
+    const chunk = getChunkForSample(queryClient, map, c.x, c.z);
+
+    if (!chunk?.tileTypeIndexes) {
+      return DEFAULT_ZARCH_TILE_TYPE_ID;
+    }
+
+    const index = getTileLayerIndexFromChunk(chunk, c.x, c.z);
+    const typeIndex =
+      index === null ? ZARCH_TILE_OVERRIDE_TYPE_SENTINEL : chunk.tileTypeIndexes[index];
+
+    if (
+      typeIndex === undefined ||
+      typeIndex === ZARCH_TILE_OVERRIDE_TYPE_SENTINEL
+    ) {
+      return DEFAULT_ZARCH_TILE_TYPE_ID;
+    }
+
+    return editConfig.tileTypes[typeIndex]?.id ?? DEFAULT_ZARCH_TILE_TYPE_ID;
+  };
+
+  const getTileColorIndex = (gx: number, gz: number) => {
+    const c = canonicalize(gx, gz);
+    const chunk = getChunkForSample(queryClient, map, c.x, c.z);
+
+    if (!chunk?.tileColorIndexes) {
+      return null;
+    }
+
+    const index = getTileLayerIndexFromChunk(chunk, c.x, c.z);
+    const colorIndex =
+      index === null ? ZARCH_TILE_OVERRIDE_COLOR_SENTINEL : chunk.tileColorIndexes[index];
+
+    if (
+      colorIndex === undefined ||
+      colorIndex === ZARCH_TILE_OVERRIDE_COLOR_SENTINEL
+    ) {
+      return null;
+    }
+
+    return colorIndex;
+  };
+
+  const getTileColorHex = (gx: number, gz: number) => {
+    const colorIndex = getTileColorIndex(gx, gz);
+    return colorIndex === null ? null : (editConfig.palette[colorIndex]?.hex ?? null);
   };
 
   const resolveTileMaterial = (gx: number, gz: number, elevation: number) => {
@@ -303,6 +436,9 @@ export const createServerMapTerrain = ({
     }
 
     const c = canonicalize(gx, gz);
+    if (getTileTypeId(c.x, c.z) !== DEFAULT_ZARCH_TILE_TYPE_ID) {
+      return false;
+    }
     return shouldHaveTree(c.x, c.z);
   };
 
@@ -310,6 +446,10 @@ export const createServerMapTerrain = ({
     chunkSizeTiles: chunkSize,
     containsTile,
     getTileAverageHeight,
+    getTileColorHex,
+    getTileColorIndex,
+    getTileHeightSteps,
+    getTileTypeId,
     heightTiles: mapHeightTiles,
     id: map.id,
     isTileLoaded,
@@ -318,7 +458,10 @@ export const createServerMapTerrain = ({
     isWorldPointLoaded,
     requestVisibleChunks: (centerTileX, centerTileZ, viewRadiusTiles) => {
       chunkLookupCache.clear();
-      heightLookupCache.clear();
+      baseHeightLookupCache.clear();
+      connectedHeightLookupCache.clear();
+      tileAverageHeightLookupCache.clear();
+      tileHeightStepLookupCache.clear();
 
       const window = getVisibleChunkWindow(
         map,
@@ -361,6 +504,12 @@ export const createServerMapTerrain = ({
     shouldHaveTree: shouldHaveTreeAt,
     tileColor: (gx, gz, elevation, target) => {
       const c = canonicalize(gx, gz);
+      const colorHex = getTileColorHex(c.x, c.z);
+
+      if (colorHex) {
+        return (target ?? applyTileColor(undefined, c.x, c.z, elevation)).set(colorHex);
+      }
+
       return applyTileColor(
         target,
         c.x,

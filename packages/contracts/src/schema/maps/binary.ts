@@ -1,8 +1,8 @@
 import {
   getSurfaceMaterialById,
   type MapChunkMetadata,
-  type StaticEntity,
-  type MapSurfaceMaterial
+  type MapSurfaceMaterial,
+  type StaticEntity
 } from './index';
 
 export const decodeFloat32HeightsBlob = async (blob: Blob) => {
@@ -10,25 +10,53 @@ export const decodeFloat32HeightsBlob = async (blob: Blob) => {
   return new Float32Array(arrayBuffer);
 };
 
-type RuntimeChunkMetadata = Omit<MapChunkMetadata, 'materials'>;
+type RuntimeChunkMetadata = Omit<
+  MapChunkMetadata,
+  | 'materials'
+  | 'staticEntities'
+  | 'tileColorIndexes'
+  | 'tileHeightSteps'
+  | 'tileTypeIndexes'
+>;
 
-type BinaryMapChunkInput = Omit<MapChunkMetadata, 'materials'> & {
+type BinaryMapChunkInput = Omit<
+  MapChunkMetadata,
+  | 'materials'
+  | 'staticEntities'
+  | 'tileColorIndexes'
+  | 'tileHeightSteps'
+  | 'tileTypeIndexes'
+> & {
   heights: unknown;
   materials?: unknown;
+  staticEntities?: unknown;
   staticEntitiesJson?: unknown;
+  tileColorIndexes?: unknown;
+  tileHeightSteps?: unknown;
+  tileTypeIndexes?: unknown;
 };
 
 export type RuntimeMapChunk = RuntimeChunkMetadata & {
   heights: Float32Array;
   materials?: MapSurfaceMaterial[];
+  staticEntities: StaticEntity[];
+  tileColorIndexes?: Uint8Array;
+  tileHeightSteps?: Int8Array;
+  tileTypeIndexes?: Uint8Array;
 };
 
 const asNumber = (value: number | string) =>
   typeof value === 'number' ? value : Number(value);
 
 const normalizeMetadata = (
-  chunk: Omit<MapChunkMetadata, 'materials'> & { heights: Blob }
-): Omit<MapChunkMetadata, 'materials'> => ({
+  chunk: Omit<
+    MapChunkMetadata,
+    'materials' | 'staticEntities' | 'tileColorIndexes' | 'tileHeightSteps' | 'tileTypeIndexes'
+  > & { heights: Blob }
+): Omit<
+  MapChunkMetadata,
+  'materials' | 'staticEntities' | 'tileColorIndexes' | 'tileHeightSteps' | 'tileTypeIndexes'
+> => ({
   ...chunk,
   chunkX: asNumber(chunk.chunkX),
   chunkZ: asNumber(chunk.chunkZ),
@@ -52,7 +80,7 @@ const normalizeMetadata = (
 });
 
 const decodeStaticEntities = (
-  staticEntities: StaticEntity[] | undefined,
+  staticEntities: unknown,
   staticEntitiesJson: unknown
 ) => {
   if (typeof staticEntitiesJson === 'string') {
@@ -99,6 +127,16 @@ export const decodeMaterialBlob = async (blob: Blob) => {
   return Array.from(ids, materialId => getSurfaceMaterialById(materialId));
 };
 
+export const decodeInt8Blob = async (blob: Blob) => {
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Int8Array(arrayBuffer);
+};
+
+export const decodeUint8Blob = async (blob: Blob) => {
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+};
+
 const expectBlob = (value: unknown, field: string) => {
   if (!(value instanceof Blob)) {
     throw new TypeError(`${field} must be a Blob`);
@@ -113,6 +151,18 @@ export const decodeMapChunkBinary = async (
   const heightsBlob = expectBlob(chunk.heights, 'heights');
   const materialsBlob =
     chunk.materials === undefined ? undefined : expectBlob(chunk.materials, 'materials');
+  const tileColorIndexesBlob =
+    chunk.tileColorIndexes === undefined
+      ? undefined
+      : expectBlob(chunk.tileColorIndexes, 'tileColorIndexes');
+  const tileHeightStepsBlob =
+    chunk.tileHeightSteps === undefined
+      ? undefined
+      : expectBlob(chunk.tileHeightSteps, 'tileHeightSteps');
+  const tileTypeIndexesBlob =
+    chunk.tileTypeIndexes === undefined
+      ? undefined
+      : expectBlob(chunk.tileTypeIndexes, 'tileTypeIndexes');
   const metadata = normalizeMetadata({
     ...chunk,
     heights: heightsBlob
@@ -133,6 +183,15 @@ export const decodeMapChunkBinary = async (
           )
         : await decodeFloat32HeightsBlob(heightsBlob),
     staticEntities,
-    materials: materialsBlob ? await decodeMaterialBlob(materialsBlob) : undefined
+    materials: materialsBlob ? await decodeMaterialBlob(materialsBlob) : undefined,
+    tileColorIndexes: tileColorIndexesBlob
+      ? await decodeUint8Blob(tileColorIndexesBlob)
+      : undefined,
+    tileHeightSteps: tileHeightStepsBlob
+      ? await decodeInt8Blob(tileHeightStepsBlob)
+      : undefined,
+    tileTypeIndexes: tileTypeIndexesBlob
+      ? await decodeUint8Blob(tileTypeIndexesBlob)
+      : undefined
   };
 };

@@ -1,13 +1,15 @@
 import { Color } from 'three';
 
 import {
+  DEFAULT_ZARCH_TILE_TYPE_ID,
+  LANDING_PAD_ZARCH_TILE_TYPE_ID,
   getSurfaceMaterialColorRgb,
   resolveSurfaceMaterial,
   tileHash,
   type MapSurfaceMaterial
 } from 'carrier-contracts';
 
-export { tileHash } from 'carrier-contracts';
+export { DEFAULT_ZARCH_TILE_TYPE_ID, LANDING_PAD_ZARCH_TILE_TYPE_ID, tileHash } from 'carrier-contracts';
 
 export const TILE = 24;
 export const GRID = 32;
@@ -34,6 +36,10 @@ export type ZarchTerrain = {
   chunkSizeTiles: number;
   containsTile: (gx: number, gz: number) => boolean;
   getTileAverageHeight: (gx: number, gz: number) => number | null;
+  getTileColorHex: (gx: number, gz: number) => string | null;
+  getTileColorIndex: (gx: number, gz: number) => number | null;
+  getTileHeightSteps: (gx: number, gz: number) => number;
+  getTileTypeId: (gx: number, gz: number) => string;
   heightTiles: number | null;
   id: string;
   isTileLoaded: (gx: number, gz: number) => boolean;
@@ -106,6 +112,72 @@ export const sampleHeightFromHeights = (
   grid = GRID
 ) => heights[toroidalIndex(gx, gz, grid)];
 
+export const getHeightStepOffsetAtGrid = ({
+  containsTile,
+  getTileHeightSteps,
+  gx,
+  gz,
+  heightStepMeters
+}: {
+  containsTile: (gx: number, gz: number) => boolean;
+  getTileHeightSteps: (gx: number, gz: number) => number;
+  gx: number;
+  gz: number;
+  heightStepMeters: number;
+}) => {
+  let totalOffset = 0;
+  let count = 0;
+
+  for (const [tileX, tileZ] of [
+    [gx - 1, gz - 1],
+    [gx, gz - 1],
+    [gx - 1, gz],
+    [gx, gz]
+  ]) {
+    if (!containsTile(tileX, tileZ)) {
+      continue;
+    }
+
+    totalOffset += getTileHeightSteps(tileX, tileZ) * heightStepMeters;
+    count += 1;
+  }
+
+  return count === 0 ? 0 : totalOffset / count;
+};
+
+export const sampleConnectedHeightFromGrid = ({
+  containsTile,
+  getTileHeightSteps,
+  gx,
+  gz,
+  heightStepMeters,
+  sampleBaseHeight
+}: {
+  containsTile: (gx: number, gz: number) => boolean;
+  getTileHeightSteps: (gx: number, gz: number) => number;
+  gx: number;
+  gz: number;
+  heightStepMeters: number;
+  sampleBaseHeight: (gx: number, gz: number) => number | null;
+}) => {
+  const baseHeight = sampleBaseHeight(gx, gz);
+
+  if (baseHeight === null) {
+    return null;
+  }
+
+  return (
+    baseHeight +
+    getHeightStepOffsetAtGrid({
+      containsTile,
+      getTileHeightSteps,
+      gx,
+      gz,
+      heightStepMeters
+    })
+  );
+};
+
 export const getTileAverageHeightFromHeights = (
   heights: Float32Array,
   gx: number,
@@ -153,6 +225,21 @@ export const sampleHeightAtWorldFromGrid = (
   const top = h00 * (1 - tx) + h10 * tx;
   const bottom = h01 * (1 - tx) + h11 * tx;
   return top * (1 - tz) + bottom * tz;
+};
+
+export const createSampleHeightAtWorld = (
+  getTileHeightSteps: (gx: number, gz: number) => number,
+  getTileAverageHeight: (gx: number, gz: number) => number | null,
+  sampleHeight: (gx: number, gz: number) => number | null
+) => (worldX: number, worldZ: number) => {
+  const gx = Math.floor(worldX / TILE);
+  const gz = Math.floor(worldZ / TILE);
+
+  if (getTileHeightSteps(gx, gz) !== 0) {
+    return getTileAverageHeight(gx, gz);
+  }
+
+  return sampleHeightAtWorldFromGrid(sampleHeight, worldX, worldZ);
 };
 
 export const sampleNormalAtWorldFromGrid = (

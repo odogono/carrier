@@ -11,6 +11,7 @@ import {
 import type { ZarchRuntimeState } from './use-zarch-runtime';
 
 type ZarchHudProps = {
+  editEnabled: boolean;
   onToggleMode: () => void;
   runtimeRef: RefObject<ZarchRuntimeState>;
   terrain: ZarchTerrain;
@@ -27,6 +28,7 @@ type ViewCenterState = {
 };
 
 export const ZarchHud = ({
+  editEnabled,
   onToggleMode,
   runtimeRef,
   terrain
@@ -86,6 +88,7 @@ export const ZarchHud = ({
         <span>💣</span>
         <span>Wave: {DEFAULT_WAVE}</span>
         <span>Mode: {viewCenter.mode === 'ship' ? 'Ship' : 'Navigate'}</span>
+        {editEnabled ? <span>Edit: On</span> : null}
         <span>
           Centre: {viewCenter.worldX.toFixed(1)}, {viewCenter.worldZ.toFixed(1)}
         </span>
@@ -101,7 +104,8 @@ export const ZarchHud = ({
         ) : null}
         <span className="ml-auto">Best: {DEFAULT_BEST}</span>
         <button
-          className="pointer-events-auto rounded border border-[#c8a000] bg-[#2a2200] px-2 py-1 text-[#ffe58a] transition hover:bg-[#403400]"
+          className="pointer-events-auto rounded border border-[#c8a000] bg-[#2a2200] px-2 py-1 text-[#ffe58a] transition hover:bg-[#403400] disabled:opacity-40"
+          disabled={editEnabled}
           onClick={onToggleMode}
           onMouseDown={event => event.preventDefault()}
           type="button"
