@@ -200,6 +200,35 @@ describe('zarch tile edit reducer', () => {
     expect(state.edits['1:1']?.typeId).toBe('landing-pad');
     expect(state.edits['2:1']?.typeId).toBe('landing-pad');
   });
+
+  test('applies color batch edits using an explicit tool override', () => {
+    let state = createZarchTileEditState(editConfig);
+
+    state = reduceZarchTileEditState(state, {
+      tileX: 1,
+      tileZ: 1,
+      type: 'begin-height-selection-box'
+    });
+    state = reduceZarchTileEditState(state, {
+      tileX: 2,
+      tileZ: 1,
+      type: 'update-height-selection-box'
+    });
+    state = reduceZarchTileEditState(state, {
+      current: getMergedTileState(terrain, state.edits, 1, 1),
+      selectedColorIndexOverride: 0,
+      tileEdits: getHeightSelectionTiles(state).map(tile => ({
+        current: getMergedTileState(terrain, state.edits, tile.tileX, tile.tileZ)
+      })),
+      tileX: 1,
+      tileZ: 1,
+      toolOverride: 'set-color',
+      type: 'apply-tool'
+    });
+
+    expect(state.edits['1:1']?.colorIndex).toBe(0);
+    expect(state.edits['2:1']?.colorIndex).toBe(0);
+  });
 });
 
 const collectSelectionHeights = (
@@ -354,6 +383,197 @@ describe('computeAreaHeightEdits', () => {
     expect(result.targetHeight).toBe(14);
     expect(Math.min(...heights)).toBe(14);
     expect(Math.max(...heights)).toBe(14);
+  });
+
+  test('raise keeps a flattened multi-tile selection on one exact plane', () => {
+    const baseHeights: Record<string, number> = {
+      '5:5': 8, '6:5': 11, '7:5': 14,
+      '5:6': 9, '6:6': 12, '7:6': 15,
+      '5:7': 10, '6:7': 13, '7:7': 16
+    };
+    const unevenTerrain: ZarchTerrain = {
+      ...terrain,
+      sampleHeight: (gx, gz) => baseHeights[`${gx}:${gz}`] ?? 10
+    };
+    const selection = [
+      { tileX: 5, tileZ: 5 },
+      { tileX: 6, tileZ: 5 },
+      { tileX: 5, tileZ: 6 },
+      { tileX: 6, tileZ: 6 }
+    ];
+
+    const flattened = computeAreaHeightEdits({
+      edits: {},
+      editConfig,
+      mode: 'flatten',
+      selection,
+      terrain: unevenTerrain
+    });
+    const flattenedEdits = Object.fromEntries(
+      flattened.heightEdits.map(entry => [
+        `${entry.current.tileX}:${entry.current.tileZ}`,
+        {
+          ...entry.current,
+          heightSteps: entry.heightSteps
+        }
+      ])
+    );
+    const raised = computeAreaHeightEdits({
+      currentPlaneHeight: flattened.targetHeight,
+      edits: flattenedEdits,
+      editConfig,
+      mode: 'raise',
+      selection,
+      terrain: unevenTerrain
+    });
+    const raisedEdits = Object.fromEntries(
+      raised.heightEdits.map(entry => [
+        `${entry.current.tileX}:${entry.current.tileZ}`,
+        {
+          ...entry.current,
+          heightSteps: entry.heightSteps
+        }
+      ])
+    );
+    const edited = createEditedTerrain({
+      editConfig,
+      edits: raisedEdits,
+      terrain: unevenTerrain
+    });
+    const heights = collectSelectionHeights(edited, selection);
+
+    expect(raised.targetHeight).toBe((flattened.targetHeight ?? 0) + editConfig.heightStepMeters);
+    expect(new Set(heights)).toEqual(new Set([raised.targetHeight]));
+  });
+
+  test('repeated raise keeps an uneven rectangular selection on a uniform interior plane', () => {
+    const baseHeights: Record<string, number> = {
+      '10:10': 6, '11:10': 8, '12:10': 10, '13:10': 13,
+      '10:11': 7, '11:11': 9, '12:11': 12, '13:11': 14,
+      '10:12': 8, '11:12': 11, '12:12': 13, '13:12': 16,
+      '10:13': 9, '11:13': 12, '12:13': 15, '13:13': 17
+    };
+    const unevenTerrain: ZarchTerrain = {
+      ...terrain,
+      sampleHeight: (gx, gz) => baseHeights[`${gx}:${gz}`] ?? 10
+    };
+    const selection = [
+      { tileX: 10, tileZ: 10 },
+      { tileX: 11, tileZ: 10 },
+      { tileX: 12, tileZ: 10 },
+      { tileX: 10, tileZ: 11 },
+      { tileX: 11, tileZ: 11 },
+      { tileX: 12, tileZ: 11 },
+      { tileX: 10, tileZ: 12 },
+      { tileX: 11, tileZ: 12 },
+      { tileX: 12, tileZ: 12 }
+    ];
+
+    let edits = {};
+    let currentPlaneHeight: number | null = null;
+
+    for (let index = 0; index < 3; index += 1) {
+      const result = computeAreaHeightEdits({
+        currentPlaneHeight,
+        edits,
+        editConfig,
+        mode: 'raise',
+        selection,
+        terrain: unevenTerrain
+      });
+
+      edits = Object.fromEntries(
+        result.heightEdits.map(entry => [
+          `${entry.current.tileX}:${entry.current.tileZ}`,
+          {
+            ...entry.current,
+            heightSteps: entry.heightSteps
+          }
+        ])
+      );
+      currentPlaneHeight = result.targetHeight;
+    }
+
+    const edited = createEditedTerrain({
+      editConfig,
+      edits,
+      terrain: unevenTerrain
+    });
+    const heights = collectSelectionHeights(edited, selection);
+
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(0.01);
+  });
+
+  test('lower stops at water level instead of crossing below zero', () => {
+    const selection = [{ tileX: 2, tileZ: 2 }];
+    const shallowTerrain: ZarchTerrain = {
+      ...terrain,
+      getTileAverageHeight: () => 2,
+      sampleHeight: () => 2,
+      sampleHeightAtWorld: () => 2
+    };
+    const result = computeAreaHeightEdits({
+      edits: {},
+      editConfig,
+      mode: 'lower',
+      selection,
+      terrain: shallowTerrain
+    });
+    const nextEdits = Object.fromEntries(
+      result.heightEdits.map(entry => [
+        `${entry.current.tileX}:${entry.current.tileZ}`,
+        {
+          ...entry.current,
+          heightSteps: entry.heightSteps
+        }
+      ])
+    );
+    const edited = createEditedTerrain({
+      editConfig,
+      edits: nextEdits,
+      terrain: shallowTerrain
+    });
+    const heights = collectSelectionHeights(edited, selection);
+
+    expect(result.targetHeight).toBe(0);
+    expect(Math.min(...heights)).toBe(0);
+    expect(Math.max(...heights)).toBe(0);
+  });
+
+  test('lower at water level does not create negative terrain', () => {
+    const selection = [{ tileX: 2, tileZ: 2 }];
+    const seaLevelTerrain: ZarchTerrain = {
+      ...terrain,
+      getTileAverageHeight: () => 0,
+      sampleHeight: () => 0,
+      sampleHeightAtWorld: () => 0
+    };
+    const result = computeAreaHeightEdits({
+      edits: {},
+      editConfig,
+      mode: 'lower',
+      selection,
+      terrain: seaLevelTerrain
+    });
+    const nextEdits = Object.fromEntries(
+      result.heightEdits.map(entry => [
+        `${entry.current.tileX}:${entry.current.tileZ}`,
+        {
+          ...entry.current,
+          heightSteps: entry.heightSteps
+        }
+      ])
+    );
+    const edited = createEditedTerrain({
+      editConfig,
+      edits: nextEdits,
+      terrain: seaLevelTerrain
+    });
+    const heights = collectSelectionHeights(edited, selection);
+
+    expect(result.targetHeight).toBe(0);
+    expect(Math.min(...heights)).toBe(0);
+    expect(Math.max(...heights)).toBe(0);
   });
 });
 

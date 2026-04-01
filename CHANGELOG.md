@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-01
+
+### Changed
+
+- Client Zarch tile color editing now applies palette changes directly to the current rectangular selection without a separate apply step, with a new white palette swatch and lighter road color tuning
+
+### Fixed
+
+- Client Zarch tile edit mode now keeps raised/lowered rectangular selections visually flat, stitches halo borders cleanly to the selected plateau, clamps selection highlights to the rendered water surface, and reduces minimap update work that was causing browser performance violation warnings
+- Admin map detail terrain preview now renders saved tile overrides for color and height steps so authored client edits appear in the admin map viewer as well as the gameplay client
+
 ## [0.7.0] - 2026-03-27
 
 ### Added

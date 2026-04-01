@@ -66,7 +66,8 @@ export const useServerMapTerrain = () => {
     gcTime: MAP_METADATA_GC_MS,
     queryFn: () => client.maps.getTileEditConfig({}),
     queryKey: ['zarch', 'tile-edit-config'] as const,
-    staleTime: MAP_METADATA_CACHE_MS
+    refetchOnMount: 'always',
+    staleTime: 0
   });
 
   const prefetchChunk = useEffectEvent((activeMap: MapMetadata, chunkX: number, chunkZ: number) => {

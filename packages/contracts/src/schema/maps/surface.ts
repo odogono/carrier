@@ -21,7 +21,7 @@ const LOW_GRASS_COLOR: readonly [number, number, number] = [0x88, 0xb8, 0x50];
 const MID_GRASS_COLOR: readonly [number, number, number] = [0x6a, 0xaa, 0x38];
 const HIGH_GRASS_COLOR: readonly [number, number, number] = [0x7a, 0x98, 0x48];
 const ROCK_COLOR: readonly [number, number, number] = [0x8c, 0x7a, 0x58];
-const ROAD_COLOR: readonly [number, number, number] = [0x60, 0x5a, 0x54];
+const ROAD_COLOR: readonly [number, number, number] = [0xd4, 0xd6, 0xd8];
 const DAMAGE_COLOR: readonly [number, number, number] = [0xa2, 0x4d, 0x2c];
 
 export type RgbTuple = [r: number, g: number, b: number];

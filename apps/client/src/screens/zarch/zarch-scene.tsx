@@ -141,6 +141,7 @@ type ZarchSceneProps = {
   onEditTileSelectionUpdate: (tileX: number, tileZ: number) => void;
   previewHaloTiles: { tileX: number; tileZ: number }[];
   runtimeRef: RefObject<ZarchRuntimeState>;
+  selectedHeightPlane: number | null;
   selectedHeightTiles: { tileX: number; tileZ: number }[];
   terrain: ZarchTerrain;
 };
@@ -235,6 +236,110 @@ const buildTileHighlight = (clipPlanes: Plane[], color = 0xff_ff_ff) => {
   return mesh;
 };
 
+const getRenderedTileHeights = ({
+  selectedHeightPlane,
+  selectedTileKeys,
+  terrain,
+  tileX,
+  tileZ
+}: {
+  selectedHeightPlane: number | null;
+  selectedTileKeys: Set<string>;
+  terrain: ZarchTerrain;
+  tileX: number;
+  tileZ: number;
+}): readonly [number, number, number, number] | null => {
+  const sampleRenderedVertexHeight = (vertexX: number, vertexZ: number) => {
+    if (selectedHeightPlane !== null) {
+      for (const [incidentTileX, incidentTileZ] of [
+        [vertexX - 1, vertexZ - 1],
+        [vertexX, vertexZ - 1],
+        [vertexX - 1, vertexZ],
+        [vertexX, vertexZ]
+      ]) {
+        if (selectedTileKeys.has(`${incidentTileX}:${incidentTileZ}`)) {
+          return selectedHeightPlane;
+        }
+      }
+    }
+
+    return terrain.sampleHeight(vertexX, vertexZ);
+  };
+
+  const h00 = sampleRenderedVertexHeight(tileX, tileZ);
+  const h10 = sampleRenderedVertexHeight(tileX + 1, tileZ);
+  const h01 = sampleRenderedVertexHeight(tileX, tileZ + 1);
+  const h11 = sampleRenderedVertexHeight(tileX + 1, tileZ + 1);
+
+  if (h00 === null || h10 === null || h01 === null || h11 === null) {
+    return null;
+  }
+
+  return [h00, h10, h01, h11];
+};
+
+const getDisplayTileHeights = ({
+  seaY,
+  selectedHeightPlane,
+  selectedTileKeys,
+  terrain,
+  tileX,
+  tileZ
+}: {
+  seaY: number;
+  selectedHeightPlane: number | null;
+  selectedTileKeys: Set<string>;
+  terrain: ZarchTerrain;
+  tileX: number;
+  tileZ: number;
+}) => {
+  const rawHeights = getRenderedTileHeights({
+    selectedHeightPlane,
+    selectedTileKeys,
+    terrain,
+    tileX,
+    tileZ
+  });
+
+  if (!rawHeights) {
+    return null;
+  }
+
+  const [h00Raw, h10Raw, h01Raw, h11Raw] = rawHeights;
+  const isWater = terrain.isWaterTile(tileX, tileZ);
+  const c00Water =
+    terrain.isWaterTile(tileX - 1, tileZ - 1) ||
+    terrain.isWaterTile(tileX, tileZ - 1) ||
+    terrain.isWaterTile(tileX - 1, tileZ) ||
+    terrain.isWaterTile(tileX, tileZ);
+  const c10Water =
+    terrain.isWaterTile(tileX, tileZ - 1) ||
+    terrain.isWaterTile(tileX + 1, tileZ - 1) ||
+    terrain.isWaterTile(tileX, tileZ) ||
+    terrain.isWaterTile(tileX + 1, tileZ);
+  const c01Water =
+    terrain.isWaterTile(tileX - 1, tileZ) ||
+    terrain.isWaterTile(tileX, tileZ) ||
+    terrain.isWaterTile(tileX - 1, tileZ + 1) ||
+    terrain.isWaterTile(tileX, tileZ + 1);
+  const c11Water =
+    terrain.isWaterTile(tileX, tileZ) ||
+    terrain.isWaterTile(tileX + 1, tileZ) ||
+    terrain.isWaterTile(tileX, tileZ + 1) ||
+    terrain.isWaterTile(tileX + 1, tileZ + 1);
+
+  return {
+    heights: [
+      isWater || c00Water ? seaY : h00Raw,
+      isWater || c10Water ? seaY : h10Raw,
+      isWater || c01Water ? seaY : h01Raw,
+      isWater || c11Water ? seaY : h11Raw
+    ] as const,
+    isWater,
+    touchesWater: c00Water || c10Water || c01Water || c11Water
+  };
+};
+
 const ensureHighlightPoolMesh = (
   pool: LineSegments[],
   root: Group,
@@ -253,22 +358,18 @@ const ensureHighlightPoolMesh = (
 
 const setHighlightTileGeometry = (
   mesh: LineSegments,
-  terrain: ZarchTerrain,
+  heights: readonly [number, number, number, number] | null,
   runtime: ZarchRuntimeState,
   tileX: number,
   tileZ: number,
   yOffset: number
 ) => {
-  const h00 = terrain.sampleHeight(tileX, tileZ);
-  const h10 = terrain.sampleHeight(tileX + 1, tileZ);
-  const h01 = terrain.sampleHeight(tileX, tileZ + 1);
-  const h11 = terrain.sampleHeight(tileX + 1, tileZ + 1);
-
-  if (h00 === null || h10 === null || h01 === null || h11 === null) {
+  if (!heights) {
     mesh.visible = false;
     return false;
   }
 
+  const [h00, h10, h01, h11] = heights;
   const worldX = tileX * TILE - runtime.camera.x;
   const worldZ = tileZ * TILE - runtime.camera.z;
   const positions = mesh.geometry.attributes.position as BufferAttribute;
@@ -547,6 +648,7 @@ export const ZarchScene = ({
   onEditTileSelectionUpdate,
   previewHaloTiles,
   runtimeRef,
+  selectedHeightPlane,
   selectedHeightTiles,
   terrain
 }: ZarchSceneProps) => {
@@ -607,6 +709,10 @@ export const ZarchScene = ({
       Math.max(loadedModel.size.x, 0.001)
     );
   }, [shipModelQuery.data, shipRuntimeEntityQuery.data]);
+  const selectedTileKeys = useMemo(
+    () => new Set(selectedHeightTiles.map(tile => `${tile.tileX}:${tile.tileZ}`)),
+    [selectedHeightTiles]
+  );
   const particleSurface = useMemo(
     () => ({
       getHeightAt: (x: number, z: number) => {
@@ -982,60 +1088,28 @@ export const ZarchScene = ({
         }
 
         const tileMesh = ensureTilePoolMesh(pools, clipPlanes, tileIndex);
-        const h00Raw = terrain.sampleHeight(gx, gz);
-        const h10Raw = terrain.sampleHeight(gx + 1, gz);
-        const h01Raw = terrain.sampleHeight(gx, gz + 1);
-        const h11Raw = terrain.sampleHeight(gx + 1, gz + 1);
+        const displayTile = getDisplayTileHeights({
+          seaY: config.seaY,
+          selectedHeightPlane,
+          selectedTileKeys,
+          terrain,
+          tileX: gx,
+          tileZ: gz
+        });
 
-        if (
-          h00Raw === null ||
-          h10Raw === null ||
-          h01Raw === null ||
-          h11Raw === null
-        ) {
+        if (!displayTile) {
           continue;
         }
 
+        const {
+          heights: [h00, h10, h01, h11],
+          isWater,
+          touchesWater
+        } = displayTile;
+
         const elevation =
           terrain.getTileAverageHeight(gx, gz) ??
-          (h00Raw + h10Raw + h01Raw + h11Raw) * 0.25;
-        const isWater = terrain.isWaterTile(gx, gz);
-        const c00Water =
-          terrain.isWaterTile(gx - 1, gz - 1) ||
-          terrain.isWaterTile(gx, gz - 1) ||
-          terrain.isWaterTile(gx - 1, gz) ||
-          terrain.isWaterTile(gx, gz);
-        const c10Water =
-          terrain.isWaterTile(gx, gz - 1) ||
-          terrain.isWaterTile(gx + 1, gz - 1) ||
-          terrain.isWaterTile(gx, gz) ||
-          terrain.isWaterTile(gx + 1, gz);
-        const c01Water =
-          terrain.isWaterTile(gx - 1, gz) ||
-          terrain.isWaterTile(gx, gz) ||
-          terrain.isWaterTile(gx - 1, gz + 1) ||
-          terrain.isWaterTile(gx, gz + 1);
-        const c11Water =
-          terrain.isWaterTile(gx, gz) ||
-          terrain.isWaterTile(gx + 1, gz) ||
-          terrain.isWaterTile(gx, gz + 1) ||
-          terrain.isWaterTile(gx + 1, gz + 1);
-        const h00 =
-          isWater || c00Water
-            ? config.seaY
-            : h00Raw;
-        const h10 =
-          isWater || c10Water
-            ? config.seaY
-            : h10Raw;
-        const h01 =
-          isWater || c01Water
-            ? config.seaY
-            : h01Raw;
-        const h11 =
-          isWater || c11Water
-            ? config.seaY
-            : h11Raw;
+          (h00 + h10 + h01 + h11) * 0.25;
         const tileCenterX = worldX + TILE * 0.5;
         const tileCenterZ = worldZ + TILE * 0.5;
         const distance = Math.sqrt(
@@ -1083,7 +1157,7 @@ export const ZarchScene = ({
         const canPlaceTree =
           config.showTrees &&
           !isWater &&
-          !(c00Water || c10Water || c01Water || c11Water) &&
+          !touchesWater &&
           terrain.isTileLoaded(gx, gz) &&
           terrain.shouldHaveTree(gx, gz);
 
@@ -1131,7 +1205,23 @@ export const ZarchScene = ({
         0x4a_d7_ff
       );
 
-      if (setHighlightTileGeometry(mesh, terrain, runtime, tile.tileX, tile.tileZ, 0.25)) {
+      if (
+        setHighlightTileGeometry(
+          mesh,
+          getDisplayTileHeights({
+            seaY: config.seaY,
+            selectedHeightPlane,
+            selectedTileKeys,
+            terrain,
+            tileX: tile.tileX,
+            tileZ: tile.tileZ
+          })?.heights ?? null,
+          runtime,
+          tile.tileX,
+          tile.tileZ,
+          0.25
+        )
+      ) {
         selectionHighlightIndex += 1;
       }
     }
@@ -1158,7 +1248,23 @@ export const ZarchScene = ({
         0xff_b347
       );
 
-      if (setHighlightTileGeometry(mesh, terrain, runtime, tile.tileX, tile.tileZ, 0.2)) {
+      if (
+        setHighlightTileGeometry(
+          mesh,
+          getDisplayTileHeights({
+            seaY: config.seaY,
+            selectedHeightPlane,
+            selectedTileKeys,
+            terrain,
+            tileX: tile.tileX,
+            tileZ: tile.tileZ
+          })?.heights ?? null,
+          runtime,
+          tile.tileX,
+          tile.tileZ,
+          0.2
+        )
+      ) {
         haloHighlightIndex += 1;
       }
     }
@@ -1189,16 +1295,21 @@ export const ZarchScene = ({
 
       if (validTile) {
         const { gx, gz } = validTile;
-        const hh00 = terrain.sampleHeight(gx, gz);
-        const hh10 = terrain.sampleHeight(gx + 1, gz);
-        const hh01 = terrain.sampleHeight(gx, gz + 1);
-        const hh11 = terrain.sampleHeight(gx + 1, gz + 1);
+        const highlightHeights = getDisplayTileHeights({
+          seaY: config.seaY,
+          selectedHeightPlane,
+          selectedTileKeys,
+          terrain,
+          tileX: gx,
+          tileZ: gz
+        })?.heights ?? null;
 
-        if (hh00 !== null && hh10 !== null && hh01 !== null && hh11 !== null) {
+        if (highlightHeights) {
           const hlX = gx * TILE - runtime.camera.x;
           const hlZ = gz * TILE - runtime.camera.z;
           const hlPositions = pools.tileHighlight.geometry.attributes.position as BufferAttribute;
           const yOffset = 0.15;
+          const [hh00, hh10, hh01, hh11] = highlightHeights;
           hlPositions.setXYZ(0, hlX, hh00 + yOffset, hlZ);
           hlPositions.setXYZ(1, hlX + TILE, hh10 + yOffset, hlZ);
           hlPositions.setXYZ(2, hlX, hh01 + yOffset, hlZ + TILE);

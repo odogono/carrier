@@ -442,38 +442,6 @@ const MainInner = () => {
     [containerElement, editConfig, terrain]
   );
 
-  const applySelectionTool = useCallback(() => {
-    if (!terrain || selectedHeightTiles.length === 0 || editState.tool === 'height') {
-      return;
-    }
-
-    const tileEdits = selectedHeightTiles.map(tile => ({
-      current: getMergedTileState(terrain, editState.edits, tile.tileX, tile.tileZ)
-    }));
-
-    if (tileEdits.length === 0) {
-      return;
-    }
-
-    const anchorTile = editState.selectedTile ?? selectedHeightTiles[0]!;
-
-    dispatchEdit({
-      current: tileEdits[0]!.current,
-      tileEdits,
-      tileX: anchorTile.tileX,
-      tileZ: anchorTile.tileZ,
-      type: 'apply-tool'
-    });
-    containerElement?.focus();
-  }, [
-    containerElement,
-    editState.edits,
-    editState.selectedTile,
-    editState.tool,
-    selectedHeightTiles,
-    terrain
-  ]);
-
   const applySelectionToolOverride = useCallback(
     ({
       selectedColorIndexOverride,
@@ -482,7 +450,7 @@ const MainInner = () => {
       selectedColorIndexOverride?: number | null;
       selectedTypeIdOverride?: string;
     }) => {
-      if (!terrain || selectedHeightTiles.length === 0 || editState.tool === 'height') {
+      if (!terrain || selectedHeightTiles.length === 0) {
         return;
       }
 
@@ -500,6 +468,12 @@ const MainInner = () => {
         current: tileEdits[0]!.current,
         selectedColorIndexOverride,
         selectedTypeIdOverride,
+        toolOverride:
+          selectedColorIndexOverride !== undefined
+            ? 'set-color'
+            : selectedTypeIdOverride !== undefined
+              ? 'set-type'
+              : undefined,
         tileEdits,
         tileX: anchorTile.tileX,
         tileZ: anchorTile.tileZ,
@@ -515,6 +489,24 @@ const MainInner = () => {
       selectedHeightTiles,
       terrain
     ]
+  );
+
+  const handlePaletteSelection = useCallback(
+    (value: string) => {
+      const selectedColorIndex = value === 'auto' ? null : Number(value);
+
+      dispatchEdit({
+        selectedColorIndex,
+        type: 'set-selected-color-index'
+      });
+
+      if (selectedHeightTiles.length > 0) {
+        applySelectionToolOverride({
+          selectedColorIndexOverride: selectedColorIndex
+        });
+      }
+    },
+    [applySelectionToolOverride, editState.tool, selectedHeightTiles.length]
   );
 
   const applyHeightSelection = useCallback(
@@ -676,7 +668,7 @@ const MainInner = () => {
             type: 'set-selected-type-id'
           });
 
-          if (selectedHeightTiles.length > 0 && editState.tool === 'set-type') {
+          if (selectedHeightTiles.length > 0) {
             applySelectionToolOverride({
               selectedTypeIdOverride: value
             });
@@ -690,6 +682,7 @@ const MainInner = () => {
         ...palette({
           colors: paletteColors,
           label: 'Palette',
+          onSelect: handlePaletteSelection,
           selected: selectedColorValue
         }),
         onChange: (value: string, _path: string, context: { initial: boolean }) => {
@@ -704,7 +697,7 @@ const MainInner = () => {
             type: 'set-selected-color-index'
           });
 
-          if (selectedHeightTiles.length > 0 && editState.tool === 'set-color') {
+          if (selectedHeightTiles.length > 0) {
             applySelectionToolOverride({
               selectedColorIndexOverride: selectedColorIndex
             });
@@ -717,11 +710,6 @@ const MainInner = () => {
       }),
       Redo: button(() => dispatchEdit({ type: 'redo' }), {
         disabled: !editState.canRedo
-      }),
-      ApplySelection: button(() => applySelectionTool(), {
-        disabled:
-          editState.tool === 'height' ||
-          selectedHeightTiles.length === 0
       }),
       Flatten: button(() => applyHeightSelection('flatten'), {
         disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
@@ -773,7 +761,7 @@ const MainInner = () => {
         label: 'Height steps',
         value: inspectedTile?.heightSteps ?? 0
       },
-      inspectedColor: {
+      currentColorLabel: {
         disabled: true,
         label: 'Current color',
         value:
@@ -794,10 +782,19 @@ const MainInner = () => {
       activeEditConfig.tileTypes,
       applyHeightSelection,
       applySelectionToolOverride,
-      applySelectionTool,
+      dirtyEditCount,
+      editState.canRedo,
+      editState.canUndo,
+      editState.enabled,
+      editState.saveError,
+      editState.selectedColorIndex,
+      editState.selectedTypeId,
       editState.tool,
       handleSetEditEnabled,
+      handlePaletteSelection,
+      isSavingEdits,
       paletteColors,
+      selectedColorValue,
       selectedHeightTiles.length,
       typeOptions
     ]
@@ -826,7 +823,7 @@ const MainInner = () => {
       hoveredTile: inspectedTile
         ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
         : '--',
-      inspectedColor:
+      currentColorLabel:
         inspectedTile?.colorIndex === null || inspectedTile === null
           ? 'Auto'
           : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ??
@@ -835,49 +832,13 @@ const MainInner = () => {
       inspectedType: inspectedTile?.typeId ?? '--',
       haloCount: previewHaloTiles.length,
       heightSelection: selectedHeightTiles.length,
-      saveError: editState.saveError ?? 'Ready',
-      Undo: button(() => dispatchEdit({ type: 'undo' }), {
-        disabled: !editState.canUndo
-      }),
-      Redo: button(() => dispatchEdit({ type: 'redo' }), {
-        disabled: !editState.canRedo
-      }),
-      ApplySelection: button(() => applySelectionTool(), {
-        disabled:
-          editState.tool === 'height' ||
-          selectedHeightTiles.length === 0
-      }),
-      Flatten: button(() => applyHeightSelection('flatten'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      Raise: button(() => applyHeightSelection('raise'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      Lower: button(() => applyHeightSelection('lower'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      ClearSelection: button(() => dispatchEdit({ type: 'clear-height-selection' }), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      Save: button(() => void handleSaveTileEdits(), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      }),
-      Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      })
+      saveError: editState.saveError ?? 'Ready'
     });
   }, [
     activeEditConfig.palette,
-    applySelectionTool,
     dirtyEditCount,
-    editState.canRedo,
-    editState.canUndo,
     editState.saveError,
-    editState.tool,
-    applyHeightSelection,
-    handleSaveTileEdits,
     inspectedTile,
-    isSavingEdits,
     previewHaloTiles.length,
     selectedHeightTiles.length,
     setEditControls
@@ -950,6 +911,7 @@ const MainInner = () => {
             onEditTileSelectionUpdate={handleEditTileSelectionUpdate}
             previewHaloTiles={previewHaloTiles}
             runtimeRef={runtimeRef}
+            selectedHeightPlane={editState.lastSolvedPlaneHeight}
             selectedHeightTiles={selectedHeightTiles}
             terrain={activeTerrain}
           />

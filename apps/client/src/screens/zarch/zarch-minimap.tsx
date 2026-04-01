@@ -203,7 +203,8 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
 
     const backgroundCanvas = document.createElement('canvas');
     let animationFrameId = 0;
-    let lastBackgroundRefresh = -Infinity;
+    let backgroundRefreshId = 0;
+    let backgroundRenderBatchId = 0;
 
     canvas.width = MINIMAP_DRAW_SIZE;
     canvas.height = MINIMAP_DRAW_SIZE;
@@ -218,13 +219,14 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
       return;
     }
 
-    const renderBackground = () => {
-      const image = backgroundContext.createImageData(
-        MINIMAP_DRAW_SIZE,
-        MINIMAP_DRAW_SIZE
-      );
+    const backgroundImage = backgroundContext.createImageData(
+      MINIMAP_DRAW_SIZE,
+      MINIMAP_DRAW_SIZE
+    );
+    let nextBackgroundRow = 0;
 
-      for (let pixelY = 0; pixelY < MINIMAP_DRAW_SIZE; pixelY += 1) {
+    const renderBackgroundRows = (rowStart: number, rowEnd: number) => {
+      for (let pixelY = rowStart; pixelY < rowEnd; pixelY += 1) {
         const gz = Math.min(
           Math.floor(
             ((MINIMAP_DRAW_SIZE - 1 - pixelY) / MINIMAP_DRAW_SIZE) * heightTiles
@@ -244,28 +246,45 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
           const index = (pixelY * MINIMAP_DRAW_SIZE + pixelX) * 4;
 
           if (elevation === null) {
-            image.data[index] = 8;
-            image.data[index + 1] = 19;
-            image.data[index + 2] = 31;
+            backgroundImage.data[index] = 8;
+            backgroundImage.data[index + 1] = 19;
+            backgroundImage.data[index + 2] = 31;
           } else {
             terrain.tileColor(gx, gz, elevation, minimapColor);
-            image.data[index] = Math.round(minimapColor.r * 255);
-            image.data[index + 1] = Math.round(minimapColor.g * 255);
-            image.data[index + 2] = Math.round(minimapColor.b * 255);
+            backgroundImage.data[index] = Math.round(minimapColor.r * 255);
+            backgroundImage.data[index + 1] = Math.round(minimapColor.g * 255);
+            backgroundImage.data[index + 2] = Math.round(minimapColor.b * 255);
           }
 
-          image.data[index + 3] = 255;
+          backgroundImage.data[index + 3] = 255;
         }
       }
-      backgroundContext.putImageData(image, 0, 0);
+
+      backgroundContext.putImageData(backgroundImage, 0, 0);
+    };
+
+    const renderBackgroundBatch = () => {
+      const rowEnd = Math.min(nextBackgroundRow + 8, MINIMAP_DRAW_SIZE);
+      renderBackgroundRows(nextBackgroundRow, rowEnd);
+      nextBackgroundRow = rowEnd;
+
+      if (nextBackgroundRow < MINIMAP_DRAW_SIZE) {
+        backgroundRenderBatchId = window.setTimeout(renderBackgroundBatch, 0);
+      } else {
+        backgroundRenderBatchId = 0;
+      }
+    };
+
+    const queueBackgroundRender = () => {
+      if (backgroundRenderBatchId !== 0) {
+        return;
+      }
+
+      nextBackgroundRow = 0;
+      backgroundRenderBatchId = window.setTimeout(renderBackgroundBatch, 0);
     };
 
     const draw = (now: number) => {
-      if (now - lastBackgroundRefresh >= MINIMAP_POLL_MS * 4) {
-        renderBackground();
-        lastBackgroundRefresh = now;
-      }
-
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(backgroundCanvas, 0, 0);
       const runtime = runtimeRef.current;
@@ -313,11 +332,14 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
       animationFrameId = window.requestAnimationFrame(draw);
     };
 
-    renderBackground();
+    queueBackgroundRender();
+    backgroundRefreshId = window.setInterval(queueBackgroundRender, MINIMAP_POLL_MS * 4);
     animationFrameId = window.requestAnimationFrame(draw);
 
     return () => {
       window.cancelAnimationFrame(animationFrameId);
+      window.clearInterval(backgroundRefreshId);
+      window.clearTimeout(backgroundRenderBatchId);
     };
   }, [runtimeRef, terrain]);
 

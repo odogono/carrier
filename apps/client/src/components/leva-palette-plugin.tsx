@@ -9,10 +9,12 @@ type PaletteColor = {
 
 type PaletteSettings = {
   colors: PaletteColor[];
+  onSelect?: (value: string) => void;
 };
 
 type PaletteInput = {
   colors: PaletteColor[];
+  onSelect?: (value: string) => void;
   selected: string;
 };
 
@@ -91,17 +93,27 @@ const AutoSwatch = styled('button', {
 });
 
 const PaletteComponent = () => {
-  const { label, onUpdate, settings, value } =
+  const { displayValue, label, onUpdate, settings, value } =
     useInputContext<LevaInputProps<string, PaletteSettings>>();
   const colors = settings?.colors ?? [];
+  const handleExternalSelect = settings?.onSelect;
+  const selectedValue = String(displayValue ?? value ?? AUTO_VALUE);
+
+  const handleSelect = (nextValue: string) => (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    handleExternalSelect?.(nextValue);
+    onUpdate(nextValue);
+  };
 
   return (
     <PaletteRow>
       <PaletteLabel>{label}</PaletteLabel>
       <SwatchContainer>
         <AutoSwatch
-          onClick={() => onUpdate(AUTO_VALUE)}
-          selected={value === AUTO_VALUE}
+          onMouseDown={handleSelect(AUTO_VALUE)}
+          selected={selectedValue === AUTO_VALUE}
           title="Auto"
           type="button"
         >
@@ -113,8 +125,8 @@ const PaletteComponent = () => {
           return (
             <Swatch
               key={color.label}
-              onClick={() => onUpdate(colorValue)}
-              selected={value === colorValue}
+              onMouseDown={handleSelect(colorValue)}
+              selected={selectedValue === colorValue}
               style={{ background: color.hex }}
               title={color.label}
               type="button"
@@ -128,8 +140,8 @@ const PaletteComponent = () => {
 
 export const palette = createPlugin<PaletteInput, string, PaletteSettings>({
   component: PaletteComponent,
-  normalize: ({ colors, selected }) => ({
-    settings: { colors },
+  normalize: ({ colors, onSelect, selected }) => ({
+    settings: { colors, onSelect },
     value: selected ?? AUTO_VALUE
   }),
   sanitize: (value: unknown) => String(value)

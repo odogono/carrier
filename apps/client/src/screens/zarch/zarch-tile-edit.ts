@@ -51,6 +51,7 @@ type ApplyTileEditAction = {
   previewHaloTiles?: { tileX: number; tileZ: number }[];
   selectedColorIndexOverride?: number | null;
   selectedTypeIdOverride?: string;
+  toolOverride?: Exclude<ZarchTileEditTool, 'height'>;
   tileEdits?: { current: ZarchTileState }[];
   tileX: number;
   tileZ: number;
@@ -139,14 +140,16 @@ const applyToolToTile = (
   overrides?: {
     selectedColorIndexOverride?: number | null;
     selectedTypeIdOverride?: string;
+    toolOverride?: Exclude<ZarchTileEditTool, 'height'>;
   }
 ): ZarchTileState => {
+  const tool = overrides?.toolOverride ?? state.tool;
   const selectedColorIndex =
     overrides?.selectedColorIndexOverride ?? state.selectedColorIndex;
   const selectedTypeId =
     overrides?.selectedTypeIdOverride ?? state.selectedTypeId;
 
-  if (state.tool === 'set-color') {
+  if (tool === 'set-color') {
     return {
       ...current,
       colorIndex: selectedColorIndex
@@ -427,7 +430,8 @@ export const reduceZarchTileEditState = (
     for (const entry of action.tileEdits) {
       const nextTile = applyToolToTile(state, entry.current, {
         selectedColorIndexOverride: action.selectedColorIndexOverride,
-        selectedTypeIdOverride: action.selectedTypeIdOverride
+        selectedTypeIdOverride: action.selectedTypeIdOverride,
+        toolOverride: action.toolOverride
       });
       const key = tileEditKey(entry.current.tileX, entry.current.tileZ);
 
@@ -468,7 +472,8 @@ export const reduceZarchTileEditState = (
 
   const nextTile = applyToolToTile(state, action.current, {
     selectedColorIndexOverride: action.selectedColorIndexOverride,
-    selectedTypeIdOverride: action.selectedTypeIdOverride
+    selectedTypeIdOverride: action.selectedTypeIdOverride,
+    toolOverride: action.toolOverride
   });
   const key = tileEditKey(action.tileX, action.tileZ);
 
@@ -515,7 +520,7 @@ export const getPreviewHaloTiles = (state: ZarchTileEditState) =>
 
 const FLAT_TOLERANCE = 0.01;
 const SOLVER_REGULARIZATION = 0.02;
-const SOLVER_ITERATIONS = 8;
+const SOLVER_ITERATIONS = 16;
 
 const isTileFlat = (cornerHeights: (number | null)[]): boolean => {
   const valid = cornerHeights.filter((h): h is number => h !== null);
@@ -792,7 +797,7 @@ const optimizeRoundedSolution = ({
       let bestValue = candidate[index]!;
       let bestScore = objective(candidate);
 
-      for (const delta of [-2, -1, 1, 2]) {
+      for (const delta of [-4, -3, -2, -1, 1, 2, 3, 4]) {
         const nextValue = Math.max(
           -maxAbsHeightSteps,
           Math.min(maxAbsHeightSteps, bestValue + delta)
@@ -1040,6 +1045,14 @@ const solveAreaHeightEditsForTarget = ({
         (heights.length === 0
           ? 0
           : heights.reduce((total, height) => total + height, 0) / heights.length);
+      const minHeight =
+        heights.length === 0 ? targetHeight : Math.min(...heights);
+      const maxHeight =
+        heights.length === 0 ? targetHeight : Math.max(...heights);
+      const primaryFlatnessPenalty =
+        explicitTargetHeight === undefined || explicitTargetHeight === null
+          ? maxHeight - minHeight
+          : Math.max(...heights.map(height => Math.abs(height - targetHeight)), 0);
       let score = 0;
 
       for (const height of heights) {
@@ -1052,7 +1065,7 @@ const solveAreaHeightEditsForTarget = ({
         score += delta * delta * SOLVER_REGULARIZATION;
       }
 
-      return score;
+      return primaryFlatnessPenalty * 1_000_000 + score;
     }
   });
 
@@ -1110,6 +1123,68 @@ const getSelectionAverageHeight = ({
   }
 
   return heights.reduce((total, height) => total + height, 0) / heights.length;
+};
+
+const shiftFlatAreaHeightEdits = ({
+  currentPlaneHeight,
+  edits,
+  editConfig,
+  mode,
+  selection,
+  terrain
+}: {
+  currentPlaneHeight: number;
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  mode: 'lower' | 'raise';
+  selection: readonly { tileX: number; tileZ: number }[];
+  terrain: ZarchTerrain;
+}) => {
+  const { haloTiles, selectedTiles } = getSelectionAndHaloTiles(terrain, selection);
+  const affectedTiles = [...selectedTiles, ...haloTiles];
+  const requestedHeight =
+    currentPlaneHeight + (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters;
+  const targetHeight = Math.max(WATER_LEVEL, requestedHeight);
+  const stepDelta = Math.round(
+    (targetHeight - currentPlaneHeight) / editConfig.heightStepMeters
+  );
+
+  if (stepDelta === 0 || affectedTiles.length === 0) {
+    return {
+      haloTiles,
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: currentPlaneHeight
+    };
+  }
+
+  const heightEdits = affectedTiles.map(tile => {
+    const current = getMergedTileState(terrain, edits, tile.tileX, tile.tileZ);
+
+    return {
+      current,
+      heightSteps: current.heightSteps + stepDelta
+    };
+  });
+
+  if (
+    heightEdits.some(
+      entry =>
+        entry.heightSteps < -editConfig.maxAbsHeightSteps ||
+        entry.heightSteps > editConfig.maxAbsHeightSteps
+    )
+  ) {
+    return {
+      haloTiles,
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: currentPlaneHeight
+    };
+  }
+
+  return {
+    haloTiles,
+    heightEdits,
+    targetHeight
+  };
 };
 
 const isSelectionFlat = ({
@@ -1217,11 +1292,39 @@ export const computeAreaHeightEdits = ({
     };
   }
 
+  if (
+    mode !== 'flatten' &&
+    isSelectionFlat({
+      edits,
+      editConfig,
+      selection,
+      terrain
+    })
+  ) {
+    const resolvedPlaneHeight = currentPlaneHeight ?? averageHeight;
+    const requestedHeight =
+      resolvedPlaneHeight + (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters;
+
+    if (requestedHeight >= WATER_LEVEL) {
+      return shiftFlatAreaHeightEdits({
+        currentPlaneHeight: resolvedPlaneHeight,
+        edits,
+        editConfig,
+        mode,
+        selection,
+        terrain
+      });
+    }
+  }
+
   const explicitTargetHeight =
     mode === 'flatten'
       ? null
-      : (currentPlaneHeight ?? averageHeight) +
-        (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters;
+      : Math.max(
+          WATER_LEVEL,
+          (currentPlaneHeight ?? averageHeight) +
+            (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters
+        );
 
   const { haloTiles, heightEdits, targetHeight } = solveAreaHeightEditsForTarget({
     edits,

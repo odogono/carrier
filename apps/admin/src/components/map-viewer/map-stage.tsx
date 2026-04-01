@@ -1,7 +1,8 @@
 import {
   isFiniteMap,
   type MapMetadata,
-  type RuntimeMapChunk
+  type RuntimeMapChunk,
+  type ZarchTileEditConfig
 } from 'carrier-contracts/types';
 import Konva from 'konva';
 import { useEffect, useMemo, useRef } from 'react';
@@ -18,6 +19,7 @@ type MapStageProps = {
   canvasHeight: number;
   canvasWidth: number;
   chunks: Map<string, RuntimeMapChunk>;
+  editConfig: ZarchTileEditConfig | null;
   map: MapMetadata;
   viewport: Viewport;
 };
@@ -26,6 +28,7 @@ export function MapStage({
   canvasHeight,
   canvasWidth,
   chunks,
+  editConfig,
   map,
   viewport
 }: MapStageProps) {
@@ -47,12 +50,12 @@ export function MapStage({
 
   const chunkImages = useMemo(() => Array.from(chunks.values()).map(chunk => ({
       height: chunk.tileHeight,
-      image: getChunkBitmap(chunk),
+      image: getChunkBitmap(chunk, chunks, editConfig),
       key: `${chunk.chunkX}:${chunk.chunkZ}`,
       width: chunk.tileWidth,
       x: chunk.originTileX,
       y: chunk.originTileZ
-    })), [chunks]);
+    })), [chunks, editConfig]);
 
   return (
     <Stage

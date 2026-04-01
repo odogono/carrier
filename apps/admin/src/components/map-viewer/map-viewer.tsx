@@ -10,6 +10,8 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { useMapChunks } from '@/hooks/use-map-chunks';
+import { client } from '@/lib/api-client';
+import { useQuery } from '@tanstack/react-query';
 import { getVisibleChunkRange, useMapViewport } from '@/hooks/use-map-viewport';
 
 import { MapStage } from './map-stage';
@@ -95,6 +97,10 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
     map
   );
   const chunks = useMapChunks(mapId, chunkRange);
+  const tileEditConfigQuery = useQuery({
+    queryFn: () => client.maps.getTileEditConfig({}),
+    queryKey: ['zarch', 'tile-edit-config']
+  });
 
   const zoomPercent = Math.round(viewport.zoom * 100);
 
@@ -130,6 +136,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
               canvasHeight={size.height}
               canvasWidth={size.width}
               chunks={chunks}
+              editConfig={tileEditConfigQuery.data ?? null}
               map={map}
               viewport={viewport}
             />

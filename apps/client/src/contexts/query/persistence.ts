@@ -3,7 +3,7 @@ export type PersistedQueryDescriptor = {
   state: { status: string };
 };
 
-export const QUERY_CACHE_BUSTER = 'carrier-client-2026-03-27-zarch-model-cache';
+export const QUERY_CACHE_BUSTER = 'carrier-client-2026-04-01-zarch-tile-edit-config-refresh';
 
 export const shouldPersistQuery = (query: PersistedQueryDescriptor) => {
   if (query.state.status !== 'success') {
@@ -17,6 +17,10 @@ export const shouldPersistQuery = (query: PersistedQueryDescriptor) => {
   }
 
   if (queryRoot === 'zarch-runtime-entity-model') {
+    return false;
+  }
+
+  if (queryRoot === 'zarch' && query.queryKey[1] === 'tile-edit-config') {
     return false;
   }
 
