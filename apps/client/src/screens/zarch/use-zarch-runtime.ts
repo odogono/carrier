@@ -64,12 +64,14 @@ export type ZarchRuntimeState = {
 export type ZarchInputState = {
   codes: Record<string, boolean>;
   dragActive: boolean;
+  editBrushActive: boolean;
+  editBrushStarted: boolean;
   hoverPointer: PointerTapPayload | null;
   keys: Record<string, boolean>;
   lastPointerX: number;
   pointerCandidate: PointerTapCandidate | null;
   pointerId: number | null;
-  queuedEditTap: PointerTapPayload | null;
+  queuedEditTap: (PointerTapPayload & { shiftKey: boolean }) | null;
   queuedTap: PointerTapPayload | null;
   shipFireHeld: boolean;
 };
@@ -77,6 +79,7 @@ export type ZarchInputState = {
 type UseZarchRuntimeArgs = {
   containerElement: HTMLElement | null;
   editEnabled: boolean;
+  editTool: 'height' | 'set-color' | 'set-type';
 };
 
 const PREVENT_SCROLL_KEYS = new Set([
@@ -89,7 +92,8 @@ const PREVENT_SCROLL_KEYS = new Set([
 
 export const useZarchRuntime = ({
   containerElement,
-  editEnabled
+  editEnabled,
+  editTool
 }: UseZarchRuntimeArgs) => {
   const configRef = useSceneConfigRef();
   const runtimeRef = useRef<ZarchRuntimeState>({
@@ -116,6 +120,8 @@ export const useZarchRuntime = ({
   const inputRef = useRef<ZarchInputState>({
     codes: {},
     dragActive: false,
+    editBrushActive: false,
+    editBrushStarted: false,
     hoverPointer: null,
     keys: {},
     lastPointerX: 0,
@@ -187,6 +193,14 @@ export const useZarchRuntime = ({
 
       if (editEnabled) {
         event.currentTarget.focus();
+        inputRef.current.editBrushActive = true;
+        inputRef.current.editBrushStarted = false;
+        inputRef.current.pointerCandidate = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          timeStamp: event.timeStamp
+        };
+        inputRef.current.pointerId = event.pointerId;
         inputRef.current.hoverPointer = {
           clientX: event.clientX,
           clientY: event.clientY
@@ -240,14 +254,37 @@ export const useZarchRuntime = ({
         (event.pointerType !== 'mouse' || event.button === 0) &&
         !(event.target as HTMLElement | null)?.closest('button,select,option')
       ) {
+        inputRef.current.editBrushActive = false;
+        inputRef.current.editBrushStarted = false;
         inputRef.current.hoverPointer = {
           clientX: event.clientX,
           clientY: event.clientY
         };
-        inputRef.current.queuedEditTap = {
-          clientX: event.clientX,
-          clientY: event.clientY
-        };
+
+        if (
+          inputRef.current.pointerId === event.pointerId &&
+          inputRef.current.pointerCandidate &&
+          isQuickTapGesture(
+            inputRef.current.pointerCandidate,
+            {
+              clientX: event.clientX,
+              clientY: event.clientY
+            },
+            event.timeStamp,
+            configRef.current.particleTapMaxDurationMs,
+            configRef.current.particleTapMaxMovementPx
+          )
+        ) {
+          inputRef.current.queuedEditTap = {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            shiftKey: event.shiftKey
+          };
+        }
+
+        inputRef.current.pointerCandidate = null;
+        inputRef.current.pointerId = null;
+
         return;
       }
 
@@ -292,13 +329,17 @@ export const useZarchRuntime = ({
       onPointerDown: handlePointerDown,
       onPointerLeave: () => {
         if (editEnabled) {
+          inputRef.current.editBrushActive = false;
+          inputRef.current.editBrushStarted = false;
           inputRef.current.hoverPointer = null;
+          inputRef.current.pointerCandidate = null;
+          inputRef.current.pointerId = null;
         }
       },
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp
     };
-  }, [configRef, editEnabled]);
+  }, [configRef, editEnabled, editTool]);
 
   return {
     containerProps,

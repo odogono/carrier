@@ -14,7 +14,7 @@ export { DEFAULT_ZARCH_TILE_TYPE_ID, LANDING_PAD_ZARCH_TILE_TYPE_ID, tileHash } 
 export const TILE = 24;
 export const GRID = 32;
 export const VIEW_R_BASE = 6;
-export const WATER_LEVEL = -10;
+export const WATER_LEVEL = 0;
 export const SEA_Y = -12;
 export const ZOOM_MIN = 0.4;
 export const ZOOM_MAX = 2.5;
@@ -195,7 +195,7 @@ export const isWaterTileFromHeights = (
   gx: number,
   gz: number,
   grid = GRID
-) => getTileAverageHeightFromHeights(heights, gx, gz, grid) < WATER_LEVEL;
+) => getTileAverageHeightFromHeights(heights, gx, gz, grid) <= WATER_LEVEL;
 
 export const shouldHaveTree = (gx: number, gz: number) =>
   tileHash(gx, gz) < 0.1;

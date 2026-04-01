@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} from 'react';
 
 import { BasicShadowMap } from 'three';
 import { Canvas } from '@react-three/fiber';
 
-import { type ZarchTileEditConfig, isFiniteMap, type MapMetadata } from 'carrier-contracts/types';
+import {
+  isFiniteMap,
+  type MapMetadata,
+  type ZarchTileEditConfig
+} from 'carrier-contracts/types';
 import { Provider as JotaiProvider } from 'jotai';
-import { Leva } from 'leva';
+import { Leva, LevaPanel, button, useControls, useCreateStore } from 'leva';
 import { createLog } from 'odgn-ts-helpers/log';
-import { useQueryClient } from '@tanstack/react-query';
 
-import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
+import { palette } from '@/components/leva-palette-plugin';
+// import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { client, connectApi } from '@/helpers/api-link';
 import { ensurePlaneToArrayCompat } from '@/helpers/three-plane-compat';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
@@ -17,22 +28,26 @@ import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DevSceneControls,
   LEVA_CONTROL_FOLDERS,
-  type LevaControlFolder,
   useSceneConfigValue,
-  type DevSceneControlFolderState
+  type DevSceneControlFolderState,
+  type LevaControlFolder
 } from '@/hooks/use-scene-controls';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
-import { ZarchEditHud } from './zarch/zarch-edit-hud';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
 import { ZarchScene } from './zarch/zarch-scene';
 import {
+  computeAreaHeightEdits,
   createEditedTerrain,
   createZarchTileEditState,
   getDraftEdits,
+  getAreaHeightPreview,
+  getHeightSelectionTiles,
+  getPreviewHaloTiles,
   getMergedTileState,
   getTerrainTileState,
   reduceZarchTileEditState
@@ -150,11 +165,14 @@ const MainInner = () => {
   const { containerProps, enterShipMode, exitShipMode, inputRef, runtimeRef } =
     useZarchRuntime({
       containerElement,
-      editEnabled: editState.enabled
+      editEnabled: editState.enabled,
+      editTool: editState.tool
     });
   const { editConfig, error, isLoading, map, terrain } = useServerMapTerrain();
   const showHud = useSceneConfigValue('showHud');
   const showMinimap = useSceneConfigValue('showMinimap');
+  const activeEditConfig = editConfig ?? FALLBACK_TILE_EDIT_CONFIG;
+  const editLevaStore = useCreateStore();
   const activeTerrain = useMemo(() => {
     if (!terrain || !editConfig) {
       return terrain;
@@ -181,7 +199,62 @@ const MainInner = () => {
 
     return getTerrainTileState(activeTerrain, target.tileX, target.tileZ);
   }, [activeTerrain, editState.hoveredTile, editState.selectedTile]);
+  const dirtyEditCount = Object.keys(editState.edits).length;
+  const selectedHeightTiles = useMemo(
+    () => getHeightSelectionTiles(editState),
+    [editState]
+  );
+  const previewHaloTiles = useMemo(
+    () => getPreviewHaloTiles(editState),
+    [editState]
+  );
+  const selectedHeightValue = useMemo(() => {
+    if (!activeTerrain) {
+      return '--';
+    }
 
+    if (selectedHeightTiles.length > 0) {
+      const value = editState.lastSolvedPlaneHeight;
+      return value === null ? '--' : value.toFixed(2);
+    }
+
+    const target = editState.selectedTile ?? editState.hoveredTile;
+
+    if (!target) {
+      return '--';
+    }
+
+    const value = activeTerrain.getTileAverageHeight(target.tileX, target.tileZ);
+    return value === null ? '--' : value.toFixed(2);
+  }, [
+    activeTerrain,
+    editState.hoveredTile,
+    editState.lastSolvedPlaneHeight,
+    editState.selectedTile,
+    selectedHeightTiles.length
+  ]);
+  const selectedColorValue =
+    editState.selectedColorIndex === null
+      ? 'auto'
+      : String(editState.selectedColorIndex);
+  const paletteColors = useMemo(
+    () =>
+      activeEditConfig.palette.map(entry => ({
+        hex: entry.hex,
+        label: entry.label
+      })),
+    [activeEditConfig.palette]
+  );
+  const typeOptions = useMemo(
+    () =>
+      Object.fromEntries(
+        activeEditConfig.tileTypes.map(tileType => [
+          tileType.label,
+          tileType.id
+        ])
+      ),
+    [activeEditConfig.tileTypes]
+  );
   useEffect(() => {
     log.info('Carrier');
 
@@ -313,28 +386,177 @@ const MainInner = () => {
       })
     );
     containerElement?.focus();
-  }, [activeTerrain, containerElement, editState.enabled, enterShipMode, exitShipMode, map, runtimeRef]);
+  }, [
+    activeTerrain,
+    containerElement,
+    editState.enabled,
+    enterShipMode,
+    exitShipMode,
+    map,
+    runtimeRef
+  ]);
 
-  const handleEditTileHover = useCallback((tile: { tileX: number; tileZ: number } | null) => {
-    dispatchEdit({ hoveredTile: tile, type: 'set-hovered-tile' });
-  }, []);
+  const handleSetEditEnabled = useCallback(
+    (enabled: boolean) => {
+      if (enabled && runtimeRef.current.mode === 'ship') {
+        exitShipMode();
+      }
+
+      dispatchEdit({ enabled, type: 'set-enabled' });
+    },
+    [exitShipMode, runtimeRef]
+  );
+
+  const handleEditTileHover = useCallback(
+    (tile: { tileX: number; tileZ: number } | null) => {
+      dispatchEdit({ hoveredTile: tile, type: 'set-hovered-tile' });
+    },
+    []
+  );
+
+  const handleEditTileSelectionStart = useCallback(
+    (tileX: number, tileZ: number) => {
+      dispatchEdit({ tileX, tileZ, type: 'begin-height-selection-box' });
+    },
+    []
+  );
+
+  const handleEditTileSelectionUpdate = useCallback(
+    (tileX: number, tileZ: number) => {
+      dispatchEdit({ tileX, tileZ, type: 'update-height-selection-box' });
+    },
+    []
+  );
 
   const handleEditTileActivate = useCallback(
-    (tileX: number, tileZ: number) => {
-      if (!terrain) {
+    (tileX: number, tileZ: number, shiftKey: boolean) => {
+      if (!terrain || !editConfig) {
         return;
       }
 
       dispatchEdit({ saveError: null, type: 'set-save-error' });
+
+      dispatchEdit({ tileX, tileZ, type: 'begin-height-selection-box' });
+      containerElement?.focus();
+    },
+    [containerElement, editConfig, terrain]
+  );
+
+  const applySelectionTool = useCallback(() => {
+    if (!terrain || selectedHeightTiles.length === 0 || editState.tool === 'height') {
+      return;
+    }
+
+    const tileEdits = selectedHeightTiles.map(tile => ({
+      current: getMergedTileState(terrain, editState.edits, tile.tileX, tile.tileZ)
+    }));
+
+    if (tileEdits.length === 0) {
+      return;
+    }
+
+    const anchorTile = editState.selectedTile ?? selectedHeightTiles[0]!;
+
+    dispatchEdit({
+      current: tileEdits[0]!.current,
+      tileEdits,
+      tileX: anchorTile.tileX,
+      tileZ: anchorTile.tileZ,
+      type: 'apply-tool'
+    });
+    containerElement?.focus();
+  }, [
+    containerElement,
+    editState.edits,
+    editState.selectedTile,
+    editState.tool,
+    selectedHeightTiles,
+    terrain
+  ]);
+
+  const applySelectionToolOverride = useCallback(
+    ({
+      selectedColorIndexOverride,
+      selectedTypeIdOverride
+    }: {
+      selectedColorIndexOverride?: number | null;
+      selectedTypeIdOverride?: string;
+    }) => {
+      if (!terrain || selectedHeightTiles.length === 0 || editState.tool === 'height') {
+        return;
+      }
+
+      const tileEdits = selectedHeightTiles.map(tile => ({
+        current: getMergedTileState(terrain, editState.edits, tile.tileX, tile.tileZ)
+      }));
+
+      if (tileEdits.length === 0) {
+        return;
+      }
+
+      const anchorTile = editState.selectedTile ?? selectedHeightTiles[0]!;
+
       dispatchEdit({
-        current: getMergedTileState(terrain, editState.edits, tileX, tileZ),
-        tileX,
-        tileZ,
+        current: tileEdits[0]!.current,
+        selectedColorIndexOverride,
+        selectedTypeIdOverride,
+        tileEdits,
+        tileX: anchorTile.tileX,
+        tileZ: anchorTile.tileZ,
         type: 'apply-tool'
       });
       containerElement?.focus();
     },
-    [containerElement, editState.edits, terrain]
+    [
+      containerElement,
+      editState.edits,
+      editState.selectedTile,
+      editState.tool,
+      selectedHeightTiles,
+      terrain
+    ]
+  );
+
+  const applyHeightSelection = useCallback(
+    (mode: 'flatten' | 'raise' | 'lower') => {
+      if (!terrain || !editConfig || selectedHeightTiles.length === 0) {
+        return;
+      }
+
+      const result = computeAreaHeightEdits({
+        currentPlaneHeight: editState.lastSolvedPlaneHeight,
+        edits: editState.edits,
+        editConfig,
+        mode,
+        selection: selectedHeightTiles,
+        terrain
+      });
+
+      if (result.heightEdits.length === 0) {
+        return;
+      }
+
+      const anchorTile = editState.selectedTile ?? selectedHeightTiles[0]!;
+
+      dispatchEdit({
+        current: getMergedTileState(terrain, editState.edits, anchorTile.tileX, anchorTile.tileZ),
+        heightEdits: result.heightEdits,
+        lastSolvedPlaneHeight: result.targetHeight,
+        previewHaloTiles: result.haloTiles,
+        tileX: anchorTile.tileX,
+        tileZ: anchorTile.tileZ,
+        type: 'apply-tool'
+      });
+      containerElement?.focus();
+    },
+    [
+      containerElement,
+      editConfig,
+      editState.edits,
+      editState.selectedTile,
+      selectedHeightTiles,
+      terrain
+    ]
   );
 
   const handleSaveTileEdits = useCallback(async () => {
@@ -384,16 +606,283 @@ const MainInner = () => {
     }
   }, [editState, map, queryClient]);
 
-  const handleSetEditEnabled = useCallback(
-    (enabled: boolean) => {
-      if (enabled && runtimeRef.current.mode === 'ship') {
-        exitShipMode();
-      }
+  useEffect(() => {
+    if (!terrain || !editConfig || editState.tool !== 'height') {
+      dispatchEdit({
+        lastSolvedPlaneHeight: null,
+        previewHaloTiles: [],
+        type: 'set-height-preview'
+      });
+      return;
+    }
 
-      dispatchEdit({ enabled, type: 'set-enabled' });
-    },
-    [exitShipMode, runtimeRef]
+    const preview = getAreaHeightPreview({
+      edits: editState.edits,
+      editConfig,
+      selection: selectedHeightTiles,
+      terrain
+    });
+
+    dispatchEdit({
+      lastSolvedPlaneHeight: preview.targetHeight,
+      previewHaloTiles: preview.haloTiles,
+      type: 'set-height-preview'
+    });
+  }, [editConfig, editState.edits, editState.tool, selectedHeightTiles, terrain]);
+
+  const [editControls, setEditControls] = useControls(
+    () => ({
+      enabled: {
+        label: 'Enabled',
+        onChange: (value: boolean, _path: string, context: { initial: boolean }) => {
+          if (context.initial) {
+            return;
+          }
+
+          handleSetEditEnabled(value);
+        },
+        transient: false,
+        value: editState.enabled
+      },
+      tool: {
+        label: 'Tool',
+        onChange: (value: typeof editState.tool, _path: string, context: { initial: boolean }) => {
+          if (context.initial) {
+            return;
+          }
+
+          dispatchEdit({
+            tool: value,
+            type: 'set-tool'
+          });
+        },
+        options: {
+          Color: 'set-color',
+          Height: 'height',
+          Type: 'set-type'
+        },
+        transient: false,
+        value: editState.tool
+      },
+      selectedTypeId: {
+        label: 'Tile type',
+        onChange: (value: string, _path: string, context: { initial: boolean }) => {
+          if (context.initial) {
+            return;
+          }
+
+          dispatchEdit({
+            selectedTypeId: value,
+            type: 'set-selected-type-id'
+          });
+
+          if (selectedHeightTiles.length > 0 && editState.tool === 'set-type') {
+            applySelectionToolOverride({
+              selectedTypeIdOverride: value
+            });
+          }
+        },
+        options: typeOptions,
+        transient: false,
+        value: editState.selectedTypeId
+      },
+      selectedColorIndex: {
+        ...palette({
+          colors: paletteColors,
+          label: 'Palette',
+          selected: selectedColorValue
+        }),
+        onChange: (value: string, _path: string, context: { initial: boolean }) => {
+          if (context.initial) {
+            return;
+          }
+
+          const selectedColorIndex = value === 'auto' ? null : Number(value);
+
+          dispatchEdit({
+            selectedColorIndex,
+            type: 'set-selected-color-index'
+          });
+
+          if (selectedHeightTiles.length > 0 && editState.tool === 'set-color') {
+            applySelectionToolOverride({
+              selectedColorIndexOverride: selectedColorIndex
+            });
+          }
+        },
+        transient: false
+      },
+      Undo: button(() => dispatchEdit({ type: 'undo' }), {
+        disabled: !editState.canUndo
+      }),
+      Redo: button(() => dispatchEdit({ type: 'redo' }), {
+        disabled: !editState.canRedo
+      }),
+      ApplySelection: button(() => applySelectionTool(), {
+        disabled:
+          editState.tool === 'height' ||
+          selectedHeightTiles.length === 0
+      }),
+      Flatten: button(() => applyHeightSelection('flatten'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Raise: button(() => applyHeightSelection('raise'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Lower: button(() => applyHeightSelection('lower'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      ClearSelection: button(() => dispatchEdit({ type: 'clear-height-selection' }), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Save: button(() => void handleSaveTileEdits(), {
+        disabled: dirtyEditCount === 0 || isSavingEdits
+      }),
+      Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
+        disabled: dirtyEditCount === 0 || isSavingEdits
+      }),
+      dirty: {
+        disabled: true,
+        label: 'Dirty tiles',
+        value: dirtyEditCount
+      },
+      heightSelection: {
+        disabled: true,
+        label: 'Selection',
+        value: selectedHeightTiles.length
+      },
+      haloCount: {
+        disabled: true,
+        label: 'Halo tiles',
+        value: previewHaloTiles.length
+      },
+      hoveredTile: {
+        disabled: true,
+        label: 'Tile',
+        value: inspectedTile
+          ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
+          : '--'
+      },
+      inspectedType: {
+        disabled: true,
+        label: 'Current type',
+        value: inspectedTile?.typeId ?? '--'
+      },
+      inspectedHeightSteps: {
+        disabled: true,
+        label: 'Height steps',
+        value: inspectedTile?.heightSteps ?? 0
+      },
+      inspectedColor: {
+        disabled: true,
+        label: 'Current color',
+        value:
+          inspectedTile?.colorIndex === null || inspectedTile === null
+            ? 'Auto'
+            : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ??
+              'Custom')
+      },
+      saveError: {
+        disabled: true,
+        label: 'Status',
+        value: editState.saveError ?? 'Ready'
+      }
+    }),
+    { store: editLevaStore },
+    [
+      activeEditConfig.palette,
+      activeEditConfig.tileTypes,
+      applyHeightSelection,
+      applySelectionToolOverride,
+      applySelectionTool,
+      editState.tool,
+      handleSetEditEnabled,
+      paletteColors,
+      selectedHeightTiles.length,
+      typeOptions
+    ]
   );
+  const [, setEditReadoutControls] = useControls(
+    () => ({
+      selectedHeightValue: {
+        disabled: true,
+        label: 'Selected height',
+        value: selectedHeightValue
+      }
+    }),
+    { store: editLevaStore },
+    []
+  );
+
+  useEffect(() => {
+    setEditReadoutControls({
+      selectedHeightValue
+    });
+  }, [selectedHeightValue, setEditReadoutControls]);
+
+  useEffect(() => {
+    setEditControls({
+      dirty: dirtyEditCount,
+      hoveredTile: inspectedTile
+        ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
+        : '--',
+      inspectedColor:
+        inspectedTile?.colorIndex === null || inspectedTile === null
+          ? 'Auto'
+          : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ??
+            'Custom'),
+      inspectedHeightSteps: inspectedTile?.heightSteps ?? 0,
+      inspectedType: inspectedTile?.typeId ?? '--',
+      haloCount: previewHaloTiles.length,
+      heightSelection: selectedHeightTiles.length,
+      saveError: editState.saveError ?? 'Ready',
+      Undo: button(() => dispatchEdit({ type: 'undo' }), {
+        disabled: !editState.canUndo
+      }),
+      Redo: button(() => dispatchEdit({ type: 'redo' }), {
+        disabled: !editState.canRedo
+      }),
+      ApplySelection: button(() => applySelectionTool(), {
+        disabled:
+          editState.tool === 'height' ||
+          selectedHeightTiles.length === 0
+      }),
+      Flatten: button(() => applyHeightSelection('flatten'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Raise: button(() => applyHeightSelection('raise'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Lower: button(() => applyHeightSelection('lower'), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      ClearSelection: button(() => dispatchEdit({ type: 'clear-height-selection' }), {
+        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+      }),
+      Save: button(() => void handleSaveTileEdits(), {
+        disabled: dirtyEditCount === 0 || isSavingEdits
+      }),
+      Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
+        disabled: dirtyEditCount === 0 || isSavingEdits
+      })
+    });
+  }, [
+    activeEditConfig.palette,
+    applySelectionTool,
+    dirtyEditCount,
+    editState.canRedo,
+    editState.canUndo,
+    editState.saveError,
+    editState.tool,
+    applyHeightSelection,
+    handleSaveTileEdits,
+    inspectedTile,
+    isSavingEdits,
+    previewHaloTiles.length,
+    selectedHeightTiles.length,
+    setEditControls
+  ]);
+
 
   if (isLoading) {
     return (
@@ -428,7 +917,6 @@ const MainInner = () => {
             onChange: handleLevaCollapsedChange
           }}
           hidden={false}
-          oneLineLabels
           titleBar={{
             onDragEnd: handleLevaDrag,
             position: levaUiState.position
@@ -458,7 +946,11 @@ const MainInner = () => {
             map={map}
             onEditTileActivate={handleEditTileActivate}
             onEditTileHover={handleEditTileHover}
+            onEditTileSelectionStart={handleEditTileSelectionStart}
+            onEditTileSelectionUpdate={handleEditTileSelectionUpdate}
+            previewHaloTiles={previewHaloTiles}
             runtimeRef={runtimeRef}
+            selectedHeightTiles={selectedHeightTiles}
             terrain={activeTerrain}
           />
         </Canvas>
@@ -474,26 +966,9 @@ const MainInner = () => {
         {showMinimap && (
           <ZarchMinimap runtimeRef={runtimeRef} terrain={activeTerrain} />
         )}
-        <ZarchEditHud
-          editConfig={editConfig}
-          editState={editState}
-          inspectedTile={inspectedTile}
-          isSaving={isSavingEdits}
-          onCancel={() => dispatchEdit({ type: 'reset-draft' })}
-          onRedo={() => dispatchEdit({ type: 'redo' })}
-          onSave={() => void handleSaveTileEdits()}
-          onSetColorIndex={colorIndex =>
-            dispatchEdit({ selectedColorIndex: colorIndex, type: 'set-selected-color-index' })
-          }
-          onSetEnabled={handleSetEditEnabled}
-          onSetTool={tool => dispatchEdit({ tool, type: 'set-tool' })}
-          onSetTypeId={typeId =>
-            dispatchEdit({ selectedTypeId: typeId, type: 'set-selected-type-id' })
-          }
-          onUndo={() => dispatchEdit({ type: 'undo' })}
-        />
       </div>
-      <ThemeTogglePortal />
+      <LevaPanel store={editLevaStore} titleBar={{ title: 'Edit' }} />
+      {/* <ThemeTogglePortal /> */}
     </>
   );
 };

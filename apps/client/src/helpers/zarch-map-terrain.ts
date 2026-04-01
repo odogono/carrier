@@ -427,7 +427,7 @@ export const createServerMapTerrain = ({
 
   const isWaterTile = (gx: number, gz: number) => {
     const average = getTileAverageHeight(gx, gz);
-    return average !== null && average < WATER_LEVEL;
+    return average !== null && average <= WATER_LEVEL;
   };
 
   const shouldHaveTreeAt = (gx: number, gz: number) => {

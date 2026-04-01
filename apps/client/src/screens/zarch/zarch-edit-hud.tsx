@@ -9,10 +9,15 @@ import type {
 type ZarchEditHudProps = {
   editConfig: ZarchTileEditConfig;
   editState: ZarchTileEditState;
+  haloTileCount: number;
   inspectedTile: ZarchTileState | null;
   isSaving: boolean;
   onCancel: () => void;
+  onClearSelection: () => void;
+  onFlattenSelection: () => void;
+  onLowerSelection: () => void;
   onRedo: () => void;
+  onRaiseSelection: () => void;
   onSave: () => void;
   onSetColorIndex: (colorIndex: number | null) => void;
   onSetEnabled: (enabled: boolean) => void;
@@ -22,8 +27,7 @@ type ZarchEditHudProps = {
 };
 
 const TOOL_LABELS: Record<ZarchTileEditTool, string> = {
-  lower: 'Lower',
-  raise: 'Raise',
+  height: 'Height',
   'set-color': 'Color',
   'set-type': 'Type'
 };
@@ -31,10 +35,15 @@ const TOOL_LABELS: Record<ZarchTileEditTool, string> = {
 export const ZarchEditHud = ({
   editConfig,
   editState,
+  haloTileCount,
   inspectedTile,
   isSaving,
   onCancel,
+  onClearSelection,
+  onFlattenSelection,
+  onLowerSelection,
   onRedo,
+  onRaiseSelection,
   onSave,
   onSetColorIndex,
   onSetEnabled,
@@ -43,6 +52,7 @@ export const ZarchEditHud = ({
   onUndo
 }: ZarchEditHudProps) => {
   const dirtyCount = Object.keys(editState.edits).length;
+  const selectionCount = Object.keys(editState.heightSelection).length;
 
   return (
     <div className="pointer-events-auto absolute left-3 top-10 z-20 flex max-w-[min(56rem,calc(100vw-1.5rem))] flex-col gap-2 rounded border border-[#c8a000] bg-[#111] px-3 py-2 font-mono text-[12px] text-[#e8d060] shadow-[0_0_0_1px_rgba(0,0,0,0.45)]">
@@ -54,7 +64,7 @@ export const ZarchEditHud = ({
         >
           {editState.enabled ? 'Exit Edit' : 'Enter Edit'}
         </button>
-        {(['set-type', 'set-color', 'raise', 'lower'] as const).map(tool => (
+        {(['height', 'set-color', 'set-type'] as const).map(tool => (
           <button
             className={`rounded border px-2 py-1 transition ${
               editState.tool === tool
@@ -84,6 +94,42 @@ export const ZarchEditHud = ({
         >
           Redo
         </button>
+        {editState.tool === 'height' ? (
+          <>
+            <button
+              className="rounded border border-[#4e7e9f] bg-[#10212b] px-2 py-1 text-[#9edcff] transition hover:bg-[#173142] disabled:opacity-40"
+              disabled={selectionCount === 0}
+              onClick={onFlattenSelection}
+              type="button"
+            >
+              Flatten
+            </button>
+            <button
+              className="rounded border border-[#4e7e9f] bg-[#10212b] px-2 py-1 text-[#9edcff] transition hover:bg-[#173142] disabled:opacity-40"
+              disabled={selectionCount === 0}
+              onClick={onRaiseSelection}
+              type="button"
+            >
+              Raise
+            </button>
+            <button
+              className="rounded border border-[#4e7e9f] bg-[#10212b] px-2 py-1 text-[#9edcff] transition hover:bg-[#173142] disabled:opacity-40"
+              disabled={selectionCount === 0}
+              onClick={onLowerSelection}
+              type="button"
+            >
+              Lower
+            </button>
+            <button
+              className="rounded border border-[#6d5800] bg-[#1d1800] px-2 py-1 text-[#d6bf68] transition hover:bg-[#2a2200] disabled:opacity-40"
+              disabled={selectionCount === 0}
+              onClick={onClearSelection}
+              type="button"
+            >
+              Clear Selection
+            </button>
+          </>
+        ) : null}
         <button
           className="rounded border border-[#3f8c4a] bg-[#0d2612] px-2 py-1 text-[#8ee69b] transition hover:bg-[#14381b] disabled:opacity-40"
           disabled={dirtyCount === 0 || isSaving}
@@ -149,6 +195,12 @@ export const ZarchEditHud = ({
 
       <div className="flex flex-wrap items-center gap-4 text-[#d6bf68]">
         <span>Dirty: {dirtyCount}</span>
+        {editState.tool === 'height' ? (
+          <>
+            <span>Selection: {selectionCount}</span>
+            <span>Halo: {haloTileCount}</span>
+          </>
+        ) : null}
         {inspectedTile ? (
           <>
             <span>
@@ -167,6 +219,12 @@ export const ZarchEditHud = ({
           <span>Move the pointer over terrain to inspect a tile.</span>
         )}
       </div>
+
+      {editState.tool === 'height' ? (
+        <div className="text-[#a09050]">
+          Drag to paint a height selection, then flatten, raise, or lower the selected area. Exact flattening may also edit a one-tile halo.
+        </div>
+      ) : null}
 
       {editState.saveError ? (
         <div className="text-[#ff9090]">{editState.saveError}</div>

@@ -13,7 +13,7 @@ export const MAP_SURFACE_MATERIALS = [
 export type MapSurfaceMaterial = (typeof MAP_SURFACE_MATERIALS)[number];
 export type MapSurfaceMaterialId = number;
 
-const WATER_LEVEL = -10;
+const WATER_LEVEL = 0;
 
 const BASE_WATER_COLOR: readonly [number, number, number] = [0x18, 0x58, 0xa0];
 const SHORE_COLOR: readonly [number, number, number] = [0xc8, 0xb8, 0x78];
@@ -102,7 +102,7 @@ export const classifySurfaceMaterialFromElevation = (
   gz: number,
   elevation: number
 ): MapSurfaceMaterial => {
-  if (elevation < WATER_LEVEL) {
+  if (elevation <= WATER_LEVEL) {
     return 'water';
   }
 

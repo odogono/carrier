@@ -10,6 +10,8 @@ import {
   FrontSide,
   Group,
   InstancedMesh,
+  LineBasicMaterial,
+  LineSegments,
   MathUtils,
   Mesh,
   MeshBasicMaterial,
@@ -119,9 +121,12 @@ type TreeMeshEntry = {
 
 type ScenePools = {
   bulletMesh: ParticleMesh;
+  haloHighlightPool: LineSegments[];
   particleMesh: ParticleMesh;
   particleShadowMesh: ParticleMesh;
   root: Group;
+  selectionHighlightPool: LineSegments[];
+  tileHighlight: LineSegments;
   tilePool: TileMesh[];
   treePool: TreeMeshEntry[];
 };
@@ -130,9 +135,13 @@ type ZarchSceneProps = {
   editEnabled: boolean;
   inputRef: RefObject<ZarchInputState>;
   map: MapMetadata;
-  onEditTileActivate: (tileX: number, tileZ: number) => void;
+  onEditTileActivate: (tileX: number, tileZ: number, shiftKey: boolean) => void;
   onEditTileHover: (tile: { tileX: number; tileZ: number } | null) => void;
+  onEditTileSelectionStart: (tileX: number, tileZ: number) => void;
+  onEditTileSelectionUpdate: (tileX: number, tileZ: number) => void;
+  previewHaloTiles: { tileX: number; tileZ: number }[];
   runtimeRef: RefObject<ZarchRuntimeState>;
+  selectedHeightTiles: { tileX: number; tileZ: number }[];
   terrain: ZarchTerrain;
 };
 
@@ -204,6 +213,73 @@ const buildTileMesh = (clipPlanes: Plane[]) => {
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
   return mesh;
+};
+
+const buildTileHighlight = (clipPlanes: Plane[], color = 0xff_ff_ff) => {
+  const geometry = new BufferGeometry();
+  const positions = new Float32Array(12);
+
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setIndex([0, 1, 1, 3, 3, 2, 2, 0]);
+
+  const material = new LineBasicMaterial({
+    clippingPlanes: clipPlanes,
+    color,
+    depthTest: true
+  });
+
+  const mesh = new LineSegments(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 1;
+  mesh.visible = false;
+  return mesh;
+};
+
+const ensureHighlightPoolMesh = (
+  pool: LineSegments[],
+  root: Group,
+  clipPlanes: Plane[],
+  index: number,
+  color: number
+) => {
+  while (pool.length <= index) {
+    const mesh = buildTileHighlight(clipPlanes, color);
+    pool.push(mesh);
+    root.add(mesh);
+  }
+
+  return pool[index]!;
+};
+
+const setHighlightTileGeometry = (
+  mesh: LineSegments,
+  terrain: ZarchTerrain,
+  runtime: ZarchRuntimeState,
+  tileX: number,
+  tileZ: number,
+  yOffset: number
+) => {
+  const h00 = terrain.sampleHeight(tileX, tileZ);
+  const h10 = terrain.sampleHeight(tileX + 1, tileZ);
+  const h01 = terrain.sampleHeight(tileX, tileZ + 1);
+  const h11 = terrain.sampleHeight(tileX + 1, tileZ + 1);
+
+  if (h00 === null || h10 === null || h01 === null || h11 === null) {
+    mesh.visible = false;
+    return false;
+  }
+
+  const worldX = tileX * TILE - runtime.camera.x;
+  const worldZ = tileZ * TILE - runtime.camera.z;
+  const positions = mesh.geometry.attributes.position as BufferAttribute;
+  positions.setXYZ(0, worldX, h00 + yOffset, worldZ);
+  positions.setXYZ(1, worldX + TILE, h10 + yOffset, worldZ);
+  positions.setXYZ(2, worldX, h01 + yOffset, worldZ + TILE);
+  positions.setXYZ(3, worldX + TILE, h11 + yOffset, worldZ + TILE);
+  positions.needsUpdate = true;
+  mesh.geometry.computeBoundingSphere();
+  mesh.visible = true;
+  return true;
 };
 
 const buildParticleMesh = (clipPlanes: Plane[]) => {
@@ -345,20 +421,27 @@ const buildRoundTree = (clipPlanes: Plane[]) => {
 const createScenePools = (clipPlanes: Plane[]): ScenePools => {
   const root = new Group();
   const bulletMesh = buildBulletMesh(clipPlanes);
+  const haloHighlightPool: LineSegments[] = [];
   const particleMesh = buildParticleMesh(clipPlanes);
   const particleShadowMesh = buildParticleShadowMesh(clipPlanes);
+  const selectionHighlightPool: LineSegments[] = [];
+  const tileHighlight = buildTileHighlight(clipPlanes);
   const tilePool: TileMesh[] = [];
   const treePool: TreeMeshEntry[] = [];
 
   root.add(bulletMesh);
   root.add(particleShadowMesh);
   root.add(particleMesh);
+  root.add(tileHighlight);
 
   return {
     bulletMesh,
+    haloHighlightPool,
     particleMesh,
     particleShadowMesh,
     root,
+    selectionHighlightPool,
+    tileHighlight,
     tilePool,
     treePool
   };
@@ -460,7 +543,11 @@ export const ZarchScene = ({
   map,
   onEditTileActivate,
   onEditTileHover,
+  onEditTileSelectionStart,
+  onEditTileSelectionUpdate,
+  previewHaloTiles,
   runtimeRef,
+  selectedHeightTiles,
   terrain
 }: ZarchSceneProps) => {
   const configRef = useSceneConfigRef();
@@ -1030,6 +1117,56 @@ export const ZarchScene = ({
       pools.treePool[index].round.visible = false;
     }
 
+    let selectionHighlightIndex = 0;
+    for (const tile of selectedHeightTiles) {
+      if (!terrain.containsTile(tile.tileX, tile.tileZ) || !terrain.isTileLoaded(tile.tileX, tile.tileZ)) {
+        continue;
+      }
+
+      const mesh = ensureHighlightPoolMesh(
+        pools.selectionHighlightPool,
+        pools.root,
+        clipPlanes,
+        selectionHighlightIndex,
+        0x4a_d7_ff
+      );
+
+      if (setHighlightTileGeometry(mesh, terrain, runtime, tile.tileX, tile.tileZ, 0.25)) {
+        selectionHighlightIndex += 1;
+      }
+    }
+
+    for (
+      let index = selectionHighlightIndex;
+      index < pools.selectionHighlightPool.length;
+      index += 1
+    ) {
+      pools.selectionHighlightPool[index]!.visible = false;
+    }
+
+    let haloHighlightIndex = 0;
+    for (const tile of previewHaloTiles) {
+      if (!terrain.containsTile(tile.tileX, tile.tileZ) || !terrain.isTileLoaded(tile.tileX, tile.tileZ)) {
+        continue;
+      }
+
+      const mesh = ensureHighlightPoolMesh(
+        pools.haloHighlightPool,
+        pools.root,
+        clipPlanes,
+        haloHighlightIndex,
+        0xff_b347
+      );
+
+      if (setHighlightTileGeometry(mesh, terrain, runtime, tile.tileX, tile.tileZ, 0.2)) {
+        haloHighlightIndex += 1;
+      }
+    }
+
+    for (let index = haloHighlightIndex; index < pools.haloHighlightPool.length; index += 1) {
+      pools.haloHighlightPool[index]!.visible = false;
+    }
+
     clipPlanes[0].setComponents(1, 0, 0, clipRadius);
     clipPlanes[1].setComponents(-1, 0, 0, clipRadius);
     clipPlanes[2].setComponents(0, 0, 1, clipRadius);
@@ -1038,9 +1175,49 @@ export const ZarchScene = ({
     if (editEnabled && input.hoverPointer) {
       const rect = state.gl.domElement.getBoundingClientRect();
       const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
-      onEditTileHover(tile && terrain.isTileLoaded(tile.gx, tile.gz) ? { tileX: tile.gx, tileZ: tile.gz } : null);
-    } else if (editEnabled) {
-      onEditTileHover(null);
+      const validTile = tile && terrain.isTileLoaded(tile.gx, tile.gz) ? tile : null;
+      onEditTileHover(validTile ? { tileX: validTile.gx, tileZ: validTile.gz } : null);
+
+      if (validTile && input.editBrushActive) {
+        if (input.editBrushStarted) {
+          onEditTileSelectionUpdate(validTile.gx, validTile.gz);
+        } else {
+          onEditTileSelectionStart(validTile.gx, validTile.gz);
+          input.editBrushStarted = true;
+        }
+      }
+
+      if (validTile) {
+        const { gx, gz } = validTile;
+        const hh00 = terrain.sampleHeight(gx, gz);
+        const hh10 = terrain.sampleHeight(gx + 1, gz);
+        const hh01 = terrain.sampleHeight(gx, gz + 1);
+        const hh11 = terrain.sampleHeight(gx + 1, gz + 1);
+
+        if (hh00 !== null && hh10 !== null && hh01 !== null && hh11 !== null) {
+          const hlX = gx * TILE - runtime.camera.x;
+          const hlZ = gz * TILE - runtime.camera.z;
+          const hlPositions = pools.tileHighlight.geometry.attributes.position as BufferAttribute;
+          const yOffset = 0.15;
+          hlPositions.setXYZ(0, hlX, hh00 + yOffset, hlZ);
+          hlPositions.setXYZ(1, hlX + TILE, hh10 + yOffset, hlZ);
+          hlPositions.setXYZ(2, hlX, hh01 + yOffset, hlZ + TILE);
+          hlPositions.setXYZ(3, hlX + TILE, hh11 + yOffset, hlZ + TILE);
+          hlPositions.needsUpdate = true;
+          pools.tileHighlight.geometry.computeBoundingSphere();
+          pools.tileHighlight.visible = true;
+        } else {
+          pools.tileHighlight.visible = false;
+        }
+      } else {
+        pools.tileHighlight.visible = false;
+      }
+    } else {
+      if (editEnabled) {
+        onEditTileHover(null);
+      }
+
+      pools.tileHighlight.visible = false;
     }
 
     if (editEnabled && input.queuedEditTap) {
@@ -1050,7 +1227,7 @@ export const ZarchScene = ({
       const tile = raycastToTile(tap, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
 
       if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
-        onEditTileActivate(tile.gx, tile.gz);
+        onEditTileActivate(tile.gx, tile.gz, tap.shiftKey);
       }
     } else if (input.queuedTap) {
       const rect = state.gl.domElement.getBoundingClientRect();
