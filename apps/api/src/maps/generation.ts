@@ -1,10 +1,12 @@
 import {
+  DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
   MAP_CHUNK_SIZE_TILES,
   MAP_GENERATOR,
   MAP_GENERATOR_ISLANDS,
   MAP_METERS_PER_TILE,
   classifySurfaceMaterialFromElevation,
   getSurfaceMaterialId,
+  type IslandClusterGeneratorParams,
   type MapChunk,
   type MapGenerator
 } from '../../../../packages/contracts/src/schema/maps';
@@ -12,6 +14,7 @@ import {
 type ChunkSeed = {
   chunkSizeTiles: number;
   generator: MapGenerator;
+  generatorParams?: IslandClusterGeneratorParams;
   heightTiles: number;
   id: string;
   metersPerTile: number;
@@ -58,7 +61,6 @@ const ROUGHNESS = 0.62;
 const HEIGHT_BIAS = -2;
 export const MAP_WATER_LEVEL = -10;
 
-const ISLAND_TARGET_WATER_RATIO = 0.62;
 const ISLAND_HEIGHT_SCALE = 36;
 
 type RandomSource = () => number;
@@ -74,6 +76,7 @@ type HeightSampler = (sampleX: number, sampleZ: number) => number;
 type WrappedClassicMapSeed = {
   chunkSizeTiles: number;
   generator: MapGenerator;
+  generatorParams?: IslandClusterGeneratorParams;
   heightTiles: number;
   id: string;
   metersPerTile: number;
@@ -256,19 +259,24 @@ const createDiamondSquareCompatibilitySampler = (
 const createIslandAttractors = (
   seed: string,
   widthTiles: number,
-  heightTiles: number
+  heightTiles: number,
+  params: IslandClusterGeneratorParams
 ) => {
   const random = createSeededRandom(seed);
   const maxDimension = Math.max(widthTiles, heightTiles, 1);
-  const major = Array.from({ length: 2 + Math.floor(random() * 3) }, () => ({
+  const major = Array.from({ length: params.majorAttractorCount }, () => ({
     amplitude: lerp(0.75, 1.25, random()),
-    radius: lerp(maxDimension * 0.12, maxDimension * 0.22, random()),
+    radius:
+      lerp(maxDimension * 0.12, maxDimension * 0.22, random()) *
+      params.radiusScale,
     x: random() * widthTiles,
     z: random() * heightTiles
   }));
-  const medium = Array.from({ length: 5 + Math.floor(random() * 5) }, () => ({
+  const medium = Array.from({ length: params.mediumAttractorCount }, () => ({
     amplitude: lerp(0.22, 0.5, random()),
-    radius: lerp(maxDimension * 0.05, maxDimension * 0.11, random()),
+    radius:
+      lerp(maxDimension * 0.05, maxDimension * 0.11, random()) *
+      params.radiusScale,
     x: random() * widthTiles,
     z: random() * heightTiles
   }));
@@ -309,12 +317,18 @@ const sampleAttractors = (
 const createIslandSampler = (
   widthTiles: number,
   heightTiles: number,
-  seed: string
+  seed: string,
+  params: IslandClusterGeneratorParams = DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS
 ): HeightSampler => {
   const harmonics = createWrappedHarmonics(`${seed}:archipelago`, 5, 1, 8);
   const breakup = createWrappedHarmonics(`${seed}:breakup`, 4, 6, 18);
   const ridge = createWrappedHarmonics(`${seed}:ridge`, 3, 2, 6);
-  const attractors = createIslandAttractors(`${seed}:islands`, widthTiles, heightTiles);
+  const attractors = createIslandAttractors(
+    `${seed}:islands`,
+    widthTiles,
+    heightTiles,
+    params
+  );
 
   return (sampleX, sampleZ) => {
     const normalizedX = normalizeCoordinate(sampleX, widthTiles);
@@ -347,7 +361,7 @@ const createIslandSampler = (
     );
 
     const rawHeight =
-      -0.8 +
+      (-0.8 + params.densityBias) +
       major * 0.95 +
       medium * 0.55 +
       micro +
@@ -363,14 +377,15 @@ const createWrappedHeightSampler = (
   generator: MapGenerator,
   widthTiles: number,
   heightTiles: number,
-  seed: string
+  seed: string,
+  generatorParams?: IslandClusterGeneratorParams
 ) => {
   if (generator === MAP_GENERATOR) {
     return createDiamondSquareCompatibilitySampler(widthTiles, heightTiles, seed);
   }
 
   if (generator === MAP_GENERATOR_ISLANDS) {
-    return createIslandSampler(widthTiles, heightTiles, seed);
+    return createIslandSampler(widthTiles, heightTiles, seed, generatorParams);
   }
 
   throw new Error(`Unsupported map generator: ${generator}`);
@@ -390,12 +405,13 @@ export const generateDiamondSquareHeightfield = (
 export const generateIslandHeightfield = (
   widthTiles: number,
   heightTiles: number,
-  seed: string
+  seed: string,
+  params: IslandClusterGeneratorParams = DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS
 ): GeneratedHeightfield =>
   buildHeightfield(
     widthTiles,
     heightTiles,
-    createIslandSampler(widthTiles, heightTiles, seed)
+    createIslandSampler(widthTiles, heightTiles, seed, params)
   );
 
 const getChunkHeightSamples = (
@@ -484,7 +500,13 @@ export const buildGeneratedMapChunk = (
 ): GeneratedMapChunkRecord =>
   buildChunkFromSampler(
     map,
-    createWrappedHeightSampler(map.generator, map.widthTiles, map.heightTiles, map.seed),
+    createWrappedHeightSampler(
+      map.generator,
+      map.widthTiles,
+      map.heightTiles,
+      map.seed,
+      map.generatorParams
+    ),
     chunkX,
     chunkZ
   );
@@ -496,7 +518,8 @@ export const buildGeneratedMapChunks = (
     map.generator,
     map.widthTiles,
     map.heightTiles,
-    map.seed
+    map.seed,
+    map.generatorParams
   );
   const chunks: GeneratedMapChunkRecord[] = [];
 

@@ -4,7 +4,8 @@ import {
   buildGeneratedMapChunk,
   buildGeneratedMapChunks,
   generateDiamondSquareHeightfield,
-  generateIslandHeightfield
+  generateIslandHeightfield,
+  MAP_WATER_LEVEL
 } from './generation';
 
 const expectWrappedSeams = (
@@ -50,6 +51,26 @@ describe('map generation', () => {
 
     expect(Array.from(first.heights)).toEqual(Array.from(second.heights));
     expectWrappedSeams(first.heights, first.sampleWidth, first.sampleHeight);
+  });
+
+  test('island params can make the archipelago meaningfully denser', () => {
+    const sparse = generateIslandHeightfield(128, 128, 'density-seed', {
+      densityBias: 0,
+      majorAttractorCount: 2,
+      mediumAttractorCount: 5,
+      radiusScale: 1
+    });
+    const dense = generateIslandHeightfield(128, 128, 'density-seed', {
+      densityBias: 0.45,
+      majorAttractorCount: 6,
+      mediumAttractorCount: 14,
+      radiusScale: 1.8
+    });
+
+    const countLand = (heights: Float32Array) =>
+      Array.from(heights).filter(height => height > MAP_WATER_LEVEL).length;
+
+    expect(countLand(dense.heights)).toBeGreaterThan(countLand(sparse.heights));
   });
 
   test('generated chunks keep matching internal border samples', () => {

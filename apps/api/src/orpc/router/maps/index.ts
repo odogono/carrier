@@ -18,6 +18,8 @@ import {
   ListMapExportsRoute,
   ListMapsInput,
   ListMapsRoute,
+  RegenerateMapInput,
+  RegenerateMapRoute,
   UpdateMapInput,
   UpdateMapRoute,
   UpdateMapTilesInput,
@@ -62,6 +64,22 @@ const remove = os
       deleted: true as const,
       id: input.id
     };
+  });
+
+const regenerate = os
+  .route(RegenerateMapRoute)
+  .input(RegenerateMapInput)
+  .handler(async ({ input }) => {
+    try {
+      return getMapRepository().regenerateMap(
+        input.id,
+        input.expectedRevision,
+        input.seed,
+        input.generatorParams
+      );
+    } catch (error) {
+      return asOrpcError(error);
+    }
   });
 
 const find = os
@@ -219,6 +237,7 @@ export const maps = {
   getTileEditConfig,
   listExports,
   list,
+  regenerate,
   update,
   updateTiles
 };

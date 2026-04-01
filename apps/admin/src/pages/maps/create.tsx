@@ -1,4 +1,7 @@
-import { MAP_METERS_PER_TILE } from 'carrier-contracts/types';
+import {
+  DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
+  MAP_METERS_PER_TILE
+} from 'carrier-contracts/types';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -24,6 +27,17 @@ export function CreateMapPage() {
   const [generator, setGenerator] = useState<
     'diamond-square' | 'island-clusters'
   >('diamond-square');
+  const [islandDensityBias, setIslandDensityBias] = useState(
+    String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.densityBias)
+  );
+  const [islandMajorAttractorCount, setIslandMajorAttractorCount] = useState(
+    String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.majorAttractorCount)
+  );
+  const [islandMediumAttractorCount, setIslandMediumAttractorCount] =
+    useState(String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.mediumAttractorCount));
+  const [islandRadiusScale, setIslandRadiusScale] = useState(
+    String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.radiusScale)
+  );
   const [seed, setSeed] = useState('');
 
   const parseDerivedTiles = (value: string) => {
@@ -45,6 +59,13 @@ export function CreateMapPage() {
   const derivedHeightTiles = parseDerivedTiles(heightMeters);
   const wrappedClassicDimensionsValid =
     derivedWidthTiles !== null && derivedHeightTiles !== null;
+  const islandParamsValid =
+    Number.isFinite(Number(islandDensityBias)) &&
+    Number.isFinite(Number(islandMajorAttractorCount)) &&
+    Number.isInteger(Number(islandMajorAttractorCount)) &&
+    Number.isFinite(Number(islandMediumAttractorCount)) &&
+    Number.isInteger(Number(islandMediumAttractorCount)) &&
+    Number.isFinite(Number(islandRadiusScale));
 
   const createMutation = useMutation({
     mutationFn: () => {
@@ -56,6 +77,15 @@ export function CreateMapPage() {
         });
       }
       return client.maps.create({
+        generatorParams:
+          generator === 'island-clusters'
+            ? {
+                densityBias: Number(islandDensityBias),
+                majorAttractorCount: Number(islandMajorAttractorCount),
+                mediumAttractorCount: Number(islandMediumAttractorCount),
+                radiusScale: Number(islandRadiusScale)
+              }
+            : undefined,
         generator,
         heightMeters: Number(heightMeters),
         kind: 'wrapped-classic',
@@ -175,6 +205,67 @@ export function CreateMapPage() {
                     <option value="island-clusters">Island Clusters</option>
                   </Select>
                 </div>
+
+                {generator === 'island-clusters' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="island-density-bias">Density Bias</Label>
+                      <Input
+                        id="island-density-bias"
+                        max={1.5}
+                        min={-0.5}
+                        onChange={e => setIslandDensityBias(e.target.value)}
+                        step="0.05"
+                        type="number"
+                        value={islandDensityBias}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="island-radius-scale">Radius Scale</Label>
+                      <Input
+                        id="island-radius-scale"
+                        max={2.5}
+                        min={0.5}
+                        onChange={e => setIslandRadiusScale(e.target.value)}
+                        step="0.05"
+                        type="number"
+                        value={islandRadiusScale}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="major-attractor-count">
+                        Major Clusters
+                      </Label>
+                      <Input
+                        id="major-attractor-count"
+                        max={8}
+                        min={1}
+                        onChange={e =>
+                          setIslandMajorAttractorCount(e.target.value)
+                        }
+                        step="1"
+                        type="number"
+                        value={islandMajorAttractorCount}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="medium-attractor-count">
+                        Medium Clusters
+                      </Label>
+                      <Input
+                        id="medium-attractor-count"
+                        max={16}
+                        min={0}
+                        onChange={e =>
+                          setIslandMediumAttractorCount(e.target.value)
+                        }
+                        step="1"
+                        type="number"
+                        value={islandMediumAttractorCount}
+                      />
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -193,7 +284,9 @@ export function CreateMapPage() {
               <Button
                 disabled={
                   createMutation.isPending ||
-                  (kind === 'wrapped-classic' && !wrappedClassicDimensionsValid)
+                  (kind === 'wrapped-classic' &&
+                    (!wrappedClassicDimensionsValid ||
+                      (generator === 'island-clusters' && !islandParamsValid)))
                 }
                 type="submit"
               >

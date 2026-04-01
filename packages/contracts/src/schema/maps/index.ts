@@ -90,6 +90,23 @@ export type MapResolution = z.infer<typeof MapResolutionSchema>;
 export const MapGenerator = z.enum([MAP_GENERATOR, MAP_GENERATOR_ISLANDS]);
 export type MapGenerator = z.infer<typeof MapGenerator>;
 
+export const DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS = {
+  densityBias: 0.3,
+  majorAttractorCount: 4,
+  mediumAttractorCount: 9,
+  radiusScale: 1.35,
+} as const;
+
+export const IslandClusterGeneratorParamsSchema = z.object({
+  densityBias: z.number().min(-0.5).max(1.5),
+  majorAttractorCount: z.number().int().min(1).max(8),
+  mediumAttractorCount: z.number().int().min(0).max(16),
+  radiusScale: z.number().min(0.5).max(2.5),
+});
+export type IslandClusterGeneratorParams = z.infer<
+  typeof IslandClusterGeneratorParamsSchema
+>;
+
 // --- Height Layers ---
 
 export const MapHeightFloat32LayerSchema = z.object({
@@ -317,6 +334,7 @@ export const MapMetadataSchema = z.object({
   resolution: MapResolutionSchema,
   revision: z.number().int().nonnegative(),
   generator: MapGenerator.optional(),
+  generatorParams: IslandClusterGeneratorParamsSchema.optional(),
   seed: z.string().min(1),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -386,6 +404,7 @@ export type MapChunkBinary = z.infer<typeof MapChunkBinarySchema>;
 // --- Create Map Input (discriminated) ---
 
 const CreateWrappedClassicMapInput = z.object({
+  generatorParams: IslandClusterGeneratorParamsSchema.optional(),
   kind: z.literal("wrapped-classic"),
   generator: MapGenerator.default(MAP_GENERATOR),
   heightMeters: z
@@ -435,6 +454,17 @@ export const DeleteMapOutput = z.object({
   id: z.string().min(1),
 });
 export type DeleteMapOutput = z.infer<typeof DeleteMapOutput>;
+
+export const RegenerateMapInput = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  generatorParams: IslandClusterGeneratorParamsSchema.optional(),
+  id: z.string().min(1),
+  seed: z.string().trim().min(1).max(120).optional(),
+});
+export type RegenerateMapInput = z.infer<typeof RegenerateMapInput>;
+
+export const RegenerateMapOutput = MapMetadataSchema;
+export type RegenerateMapOutput = z.infer<typeof RegenerateMapOutput>;
 
 export const GetMapInput = z.object({
   id: z.string().min(1),
@@ -547,6 +577,13 @@ export const DeleteMapRoute: Route = {
   tags: ["maps"],
 } as const;
 
+export const RegenerateMapRoute: Route = {
+  description: "Regenerate a wrapped-classic map and wipe its persisted map data",
+  method: "POST",
+  path: "/maps/{id}/regenerate",
+  tags: ["maps"],
+} as const;
+
 export const GetMapRoute: Route = {
   description: "Retrieve map metadata",
   method: "GET",
@@ -631,6 +668,10 @@ export const mapsContract = {
     .route(DeleteMapRoute)
     .input(DeleteMapInput)
     .output(DeleteMapOutput),
+  regenerate: oc
+    .route(RegenerateMapRoute)
+    .input(RegenerateMapInput)
+    .output(RegenerateMapOutput),
   find: oc.route(GetMapRoute).input(GetMapInput).output(GetMapOutput),
   findExport: oc
     .route(FindMapExportRoute)

@@ -6,18 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-27
+
 ### Added
 
 - Client Zarch tile edit mode with server-authored tile overrides for tile color, tile height steps, and tile type, plus explicit save/cancel, undo/redo, and landing-pad tile support for gameplay-safe touchdowns and relaunch
+- Wrapped-classic map regeneration in the admin, including destructive reset of persisted map data and support for editing the seed before regenerating
+- Wrapped-classic `island-clusters` generator tuning controls in admin create/regenerate flows, with persisted generator parameters for density bias, radius scale, and cluster counts
 
 ### Changed
 
 - Client Zarch edit controls now live in the shared Leva panel under an `Edit` folder instead of a separate overlay, avoiding overlap with the minimap and matching the existing runtime/debug UI
+- Wrapped-classic `island-clusters` generation now supports persisted parameterized density tuning instead of a fully hardcoded sparse preset
+- Shared terrain surface coloring now keeps high-altitude generated terrain in green grass bands instead of auto-classifying it as brown rock
 
 ### Fixed
 
 - Client Zarch minimap now keeps the terrain overview aligned with navigation controls, with corrected horizontal and vertical viewport movement plus a view-sized wrap-aware red footprint instead of a fixed marker
 - Client Zarch edited terrain now keeps raised/lowered tiles connected to neighboring terrain without rendering cracks, and edit-mode hover/control syncing no longer triggers the heavy Leva/UI update loop that was causing console performance violations
+- Client Zarch minimap now uses the same terrain color resolution path as the admin map preview and main terrain rendering, removing major palette mismatches and blank rendering caused by override-only color reads
 
 ## [0.6.0] - 2026-03-27
 

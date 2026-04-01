@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef } from 'react';
+import { Color } from 'three';
 
 import {
   MINIMAP_POLL_MS,
@@ -211,6 +212,7 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
 
     const context = canvas.getContext('2d');
     const backgroundContext = backgroundCanvas.getContext('2d');
+    const minimapColor = new Color();
 
     if (!context || !backgroundContext) {
       return;
@@ -245,15 +247,11 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
             image.data[index] = 8;
             image.data[index + 1] = 19;
             image.data[index + 2] = 31;
-          } else if (elevation < -10) {
-            image.data[index] = 30;
-            image.data[index + 1] = 80;
-            image.data[index + 2] = 160;
           } else {
-            const tint = Math.max(0, Math.min((elevation + 25) / 50, 1));
-            image.data[index] = Math.round(60 + tint * 100);
-            image.data[index + 1] = Math.round(120 + tint * 80);
-            image.data[index + 2] = 40;
+            terrain.tileColor(gx, gz, elevation, minimapColor);
+            image.data[index] = Math.round(minimapColor.r * 255);
+            image.data[index + 1] = Math.round(minimapColor.g * 255);
+            image.data[index + 2] = Math.round(minimapColor.b * 255);
           }
 
           image.data[index + 3] = 255;

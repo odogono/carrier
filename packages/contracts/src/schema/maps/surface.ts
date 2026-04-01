@@ -108,9 +108,6 @@ export const classifySurfaceMaterialFromElevation = (
 
   const jitteredElevation = elevation + (tileHash(gx, gz) - 0.5) * 6;
 
-  if (jitteredElevation > 18) {
-    return 'rock';
-  }
   if (jitteredElevation > 10) {
     return 'grass-high';
   }

@@ -25,6 +25,11 @@ const getChunkCount = (repository: MapRepository) =>
     .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM map_chunks')
     .get()?.count ?? 0;
 
+const getTableCount = (repository: MapRepository, table: string) =>
+  repository.db
+    .query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM ${table}`)
+    .get()?.count ?? 0;
+
 const hasTable = (repository: MapRepository, name: string) =>
   Boolean(
     repository.db
@@ -333,6 +338,140 @@ describe('map repository', () => {
           mapId: exported.id
         })
       ).toThrow(MapRepositoryError);
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('regenerates wrapped-classic maps by wiping persisted map data and bumping revisions', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const map = repository.createMap({
+        generator: 'island-clusters',
+        generatorParams: {
+          densityBias: 0.25,
+          majorAttractorCount: 4,
+          mediumAttractorCount: 9,
+          radiusScale: 1.35
+        },
+        heightMeters: 640,
+        kind: 'wrapped-classic',
+        name: 'Classic Islands',
+        seed: 'wrapped-regenerate-seed',
+        widthMeters: 960
+      });
+      const assetVersion = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 12,
+          heightMeters: 18,
+          widthMeters: 12
+        },
+        collisionClass: 'building-solid',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 12,
+          widthMeters: 12
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'lighthouse-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/lighthouse.glb',
+          sizeBytes: 512
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/lighthouse.glb',
+          sizeBytes: 256
+        },
+        status: 'ready'
+      });
+      const archetype = repository.createArchetype({
+        assetVersionId: assetVersion.id,
+        category: 'landmark',
+        id: 'lighthouse',
+        name: 'Lighthouse',
+        status: 'active',
+        tags: ['coastal']
+      });
+
+      const initialChunk = repository.getMapChunk(map.id, 0, 0);
+      expect(initialChunk).not.toBeNull();
+      expect(getChunkCount(repository)).toBe(1);
+
+      repository.updateMapTiles({
+        edits: [
+          {
+            colorIndex: 0,
+            heightSteps: 3,
+            tileX: 0,
+            tileZ: 0,
+            typeId: 'landing-pad'
+          }
+        ],
+        expectedRevision: 0,
+        mapId: map.id
+      });
+      repository.createStaticEntity({
+        archetypeId: archetype.id,
+        expectedRevision: 1,
+        id: 'lighthouse-1',
+        label: null,
+        mapId: map.id,
+        position: {
+          x: 20,
+          z: 20
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+
+      expect(getTableCount(repository, 'map_chunks')).toBe(1);
+      expect(getTableCount(repository, 'map_tile_overrides')).toBe(1);
+      expect(getTableCount(repository, 'map_static_entities')).toBe(1);
+
+      const regenerated = repository.regenerateMap(
+        map.id,
+        2,
+        'wrapped-regenerate-seed-2',
+        {
+          densityBias: 0.5,
+          majorAttractorCount: 6,
+          mediumAttractorCount: 14,
+          radiusScale: 1.8
+        }
+      );
+
+      expect(regenerated.id).toBe(map.id);
+      expect(regenerated.name).toBe(map.name);
+      expect(regenerated.seed).toBe('wrapped-regenerate-seed-2');
+      expect(regenerated.generator).toBe(map.generator);
+      expect(regenerated.generatorParams).toEqual({
+        densityBias: 0.5,
+        majorAttractorCount: 6,
+        mediumAttractorCount: 14,
+        radiusScale: 1.8
+      });
+      expect(regenerated.createdAt).toBe(map.createdAt);
+      expect(regenerated.updatedAt).not.toBe(map.updatedAt);
+      expect(regenerated.revision).toBe(3);
+      expect(getTableCount(repository, 'map_chunks')).toBe(0);
+      expect(getTableCount(repository, 'map_tile_overrides')).toBe(0);
+      expect(getTableCount(repository, 'map_static_entities')).toBe(0);
+
+      const regeneratedChunk = repository.getMapChunk(map.id, 0, 0);
+      expect(regeneratedChunk).not.toBeNull();
+      expect(regeneratedChunk?.tileHeightSteps).toBeUndefined();
+      expect(regeneratedChunk?.tileTypeIndexes).toBeUndefined();
+      expect(regeneratedChunk?.tileColorIndexes).toBeUndefined();
+      expect(regeneratedChunk?.staticEntities).toEqual([]);
     } finally {
       repository.close();
     }

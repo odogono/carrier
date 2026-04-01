@@ -1,5 +1,9 @@
-import { isFiniteMap, type MapExportKind } from 'carrier-contracts/types';
-import { ArrowLeft, Save, Trash2 } from 'lucide-react';
+import {
+  DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
+  isFiniteMap,
+  type MapExportKind
+} from 'carrier-contracts/types';
+import { ArrowLeft, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -34,8 +38,22 @@ export function MapDetailPage() {
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showRegenerate, setShowRegenerate] = useState(false);
   const [name, setName] = useState('');
   const [nameLoaded, setNameLoaded] = useState(false);
+  const [regenerateSeed, setRegenerateSeed] = useState('');
+  const [regenerateIslandDensityBias, setRegenerateIslandDensityBias] =
+    useState(String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.densityBias));
+  const [
+    regenerateIslandMajorAttractorCount,
+    setRegenerateIslandMajorAttractorCount
+  ] = useState(String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.majorAttractorCount));
+  const [
+    regenerateIslandMediumAttractorCount,
+    setRegenerateIslandMediumAttractorCount
+  ] = useState(String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.mediumAttractorCount));
+  const [regenerateIslandRadiusScale, setRegenerateIslandRadiusScale] =
+    useState(String(DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.radiusScale));
   const [exportName, setExportName] = useState('');
   const [exportBoundsLoaded, setExportBoundsLoaded] = useState(false);
   const [minX, setMinX] = useState('0');
@@ -73,6 +91,38 @@ export function MapDetailPage() {
       setNameLoaded(true);
     }
   }, [map, nameLoaded]);
+
+  useEffect(() => {
+    if (showRegenerate && map?.kind === 'wrapped-classic') {
+      setRegenerateSeed(map.seed);
+      if (map.generator === 'island-clusters') {
+        setRegenerateIslandDensityBias(
+          String(
+            map.generatorParams?.densityBias ??
+              DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.densityBias
+          )
+        );
+        setRegenerateIslandMajorAttractorCount(
+          String(
+            map.generatorParams?.majorAttractorCount ??
+              DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.majorAttractorCount
+          )
+        );
+        setRegenerateIslandMediumAttractorCount(
+          String(
+            map.generatorParams?.mediumAttractorCount ??
+              DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.mediumAttractorCount
+          )
+        );
+        setRegenerateIslandRadiusScale(
+          String(
+            map.generatorParams?.radiusScale ??
+              DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS.radiusScale
+          )
+        );
+      }
+    }
+  }, [map?.kind, map?.seed, showRegenerate]);
 
   useEffect(() => {
     if (!overviewQuery.data?.bounds || exportBoundsLoaded) {
@@ -117,6 +167,45 @@ export function MapDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map deleted');
       void navigate({ to: '/maps' });
+    }
+  });
+
+  const regenerateMutation = useMutation({
+    mutationFn: () =>
+      client.maps.regenerate({
+        expectedRevision: map!.revision,
+        generatorParams:
+          map!.generator === 'island-clusters'
+            ? {
+                densityBias: Number(regenerateIslandDensityBias),
+                majorAttractorCount: Number(
+                  regenerateIslandMajorAttractorCount
+                ),
+                mediumAttractorCount: Number(
+                  regenerateIslandMediumAttractorCount
+                ),
+                radiusScale: Number(regenerateIslandRadiusScale)
+              }
+            : undefined,
+        id,
+        seed: regenerateSeed.trim()
+      }),
+    onError: error => {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to regenerate map'
+      );
+    },
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['maps'] }),
+        queryClient.invalidateQueries({ queryKey: ['maps', id] }),
+        queryClient.removeQueries({
+          predicate: query =>
+            query.queryKey[0] === 'map-chunk' && query.queryKey[1] === id
+        })
+      ]);
+      toast.success('Map regenerated');
+      setShowRegenerate(false);
     }
   });
 
@@ -181,6 +270,14 @@ export function MapDetailPage() {
   }
 
   const hasChanges = name !== (map.name ?? '');
+  const regenerateSeedValid = regenerateSeed.trim().length > 0;
+  const regenerateIslandParamsValid =
+    Number.isFinite(Number(regenerateIslandDensityBias)) &&
+    Number.isFinite(Number(regenerateIslandMajorAttractorCount)) &&
+    Number.isInteger(Number(regenerateIslandMajorAttractorCount)) &&
+    Number.isFinite(Number(regenerateIslandMediumAttractorCount)) &&
+    Number.isInteger(Number(regenerateIslandMediumAttractorCount)) &&
+    Number.isFinite(Number(regenerateIslandRadiusScale));
   const finite = isFiniteMap(map);
   const parsedMinX = parseNumber(minX);
   const parsedMinZ = parseNumber(minZ);
@@ -242,6 +339,16 @@ export function MapDetailPage() {
           </h2>
           <p className="font-mono text-sm text-muted-foreground">{map.id}</p>
         </div>
+        {map.kind === 'wrapped-classic' && (
+          <Button
+            onClick={() => setShowRegenerate(true)}
+            size="sm"
+            variant="destructive"
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Regenerate
+          </Button>
+        )}
         <Button
           onClick={() => setShowDelete(true)}
           size="sm"
@@ -507,6 +614,119 @@ export function MapDetailPage() {
               variant="destructive"
             >
               {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setShowRegenerate} open={showRegenerate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Regenerate Map</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to regenerate{' '}
+              <strong>{map.name ?? 'this map'}</strong>? This will wipe all
+              existing map data for this map, including tile overrides and
+              static entities, and clear cached/generated chunks. This action
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="regenerate-seed">Seed</Label>
+              <Input
+                id="regenerate-seed"
+                maxLength={120}
+                onChange={e => setRegenerateSeed(e.target.value)}
+                value={regenerateSeed}
+              />
+              <p className="text-xs text-muted-foreground">
+                Current seed: <span className="font-mono">{map.seed}</span>
+              </p>
+            </div>
+            {map.generator === 'island-clusters' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="regenerate-density-bias">
+                    Density Bias
+                  </Label>
+                  <Input
+                    id="regenerate-density-bias"
+                    max={1.5}
+                    min={-0.5}
+                    onChange={e => setRegenerateIslandDensityBias(e.target.value)}
+                    step="0.05"
+                    type="number"
+                    value={regenerateIslandDensityBias}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="regenerate-radius-scale">Radius Scale</Label>
+                  <Input
+                    id="regenerate-radius-scale"
+                    max={2.5}
+                    min={0.5}
+                    onChange={e => setRegenerateIslandRadiusScale(e.target.value)}
+                    step="0.05"
+                    type="number"
+                    value={regenerateIslandRadiusScale}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="regenerate-major-count">
+                    Major Clusters
+                  </Label>
+                  <Input
+                    id="regenerate-major-count"
+                    max={8}
+                    min={1}
+                    onChange={e =>
+                      setRegenerateIslandMajorAttractorCount(e.target.value)
+                    }
+                    step="1"
+                    type="number"
+                    value={regenerateIslandMajorAttractorCount}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="regenerate-medium-count">
+                    Medium Clusters
+                  </Label>
+                  <Input
+                    id="regenerate-medium-count"
+                    max={16}
+                    min={0}
+                    onChange={e =>
+                      setRegenerateIslandMediumAttractorCount(e.target.value)
+                    }
+                    step="1"
+                    type="number"
+                    value={regenerateIslandMediumAttractorCount}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => setShowRegenerate(false)}
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                regenerateMutation.isPending ||
+                !regenerateSeedValid ||
+                (map.generator === 'island-clusters' &&
+                  !regenerateIslandParamsValid)
+              }
+              onClick={() => regenerateMutation.mutate()}
+              variant="destructive"
+            >
+              {regenerateMutation.isPending
+                ? 'Regenerating...'
+                : 'Regenerate'}
             </Button>
           </DialogFooter>
         </DialogContent>

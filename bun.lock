@@ -13,7 +13,7 @@
     },
     "apps/admin": {
       "name": "carrier-admin",
-      "version": "0.4.0",
+      "version": "0.7.0",
       "dependencies": {
         "@orpc/client": "^1.13.9",
         "@orpc/contract": "^1.13.9",
@@ -93,7 +93,7 @@
     },
     "apps/client": {
       "name": "carrier-client",
-      "version": "0.4.0",
+      "version": "0.7.0",
       "dependencies": {
         "@orpc/client": "^1.13.9",
         "@orpc/contract": "^1.13.9",
@@ -143,7 +143,7 @@
     },
     "packages/contracts": {
       "name": "carrier-contracts",
-      "version": "0.4.0",
+      "version": "0.7.0",
       "dependencies": {
         "@orpc/contract": "^1.13.4",
         "@orpc/server": "^1.13.4",

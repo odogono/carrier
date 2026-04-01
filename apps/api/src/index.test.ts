@@ -138,6 +138,91 @@ describe('API server map routes', () => {
     expect((finalList.json as unknown[]).length).toBe(0);
   });
 
+  test('supports wrapped-classic regeneration through the public contract', async () => {
+    const repository = getMapRepository();
+    const map = repository.createMap({
+      generator: 'island-clusters',
+      generatorParams: {
+        densityBias: 0.2,
+        majorAttractorCount: 4,
+        mediumAttractorCount: 8,
+        radiusScale: 1.3
+      },
+      heightMeters: 640,
+      kind: 'wrapped-classic',
+      name: 'Regenerate Me',
+      seed: 'regenerate-contract-seed',
+      widthMeters: 640
+    });
+
+    repository.getMapChunk(map.id, 0, 0);
+    repository.updateMapTiles({
+      edits: [
+        {
+          colorIndex: 0,
+          heightSteps: 2,
+          tileX: 0,
+          tileZ: 0,
+          typeId: 'landing-pad'
+        }
+      ],
+      expectedRevision: 0,
+      mapId: map.id
+    });
+
+    const client = await createTestClient();
+    const regenerated = await client.maps.regenerate({
+      expectedRevision: 1,
+      generatorParams: {
+        densityBias: 0.55,
+        majorAttractorCount: 6,
+        mediumAttractorCount: 14,
+        radiusScale: 1.9
+      },
+      id: map.id,
+      seed: 'regenerate-contract-seed-2'
+    });
+
+    expect(regenerated.id).toBe(map.id);
+    expect(regenerated.seed).toBe('regenerate-contract-seed-2');
+    expect(regenerated.generatorParams).toEqual({
+      densityBias: 0.55,
+      majorAttractorCount: 6,
+      mediumAttractorCount: 14,
+      radiusScale: 1.9
+    });
+    expect(regenerated.revision).toBe(2);
+    expect(repository.getMapChunk(map.id, 0, 0)?.tileHeightSteps).toBeUndefined();
+  });
+
+  test('returns not found and rejects unsupported map kinds for regeneration', async () => {
+    const client = await createTestClient();
+
+    await expect(
+      client.maps.regenerate({
+        expectedRevision: 0,
+        id: 'missing-map',
+        seed: 'missing-seed'
+      })
+    ).rejects.toThrow('Map missing-map was not found');
+
+    const infiniteMap = getMapRepository().createMap({
+      kind: 'infinite-vector',
+      name: 'Infinite World',
+      seed: 'infinite-regenerate-seed'
+    });
+
+    await expect(
+      client.maps.regenerate({
+        expectedRevision: 0,
+        id: infiniteMap.id,
+        seed: 'still-unsupported'
+      })
+    ).rejects.toThrow(
+      `Map ${infiniteMap.id} cannot be regenerated because kind infinite-vector is not supported`
+    );
+  });
+
   test('supports creating island preset maps through the public contract', async () => {
     const createdResponse = await request('POST', '/api/maps', {
       kind: 'wrapped-classic',

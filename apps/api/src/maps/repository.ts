@@ -13,6 +13,7 @@ import type {
   CreateMapExportInput,
   CreateMapInput,
   DerivedIsland,
+  IslandClusterGeneratorParams,
   MapChunk,
   MapGenerator,
   MapMetadata,
@@ -33,6 +34,8 @@ import type {
   ZarchRuntimeEntity
 } from 'carrier-contracts';
 import {
+  DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
+  MAP_GENERATOR_ISLANDS,
   ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS,
   ZARCH_TILE_OVERRIDE_COLOR_SENTINEL,
   ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
@@ -86,6 +89,7 @@ type MapRow = {
   exportBoundsMinZ: number | null;
   exportedAt: string | null;
   generator: string | null;
+  generatorParamsJson: string | null;
   heightTiles: number | null;
   id: string;
   kind: string;
@@ -345,6 +349,7 @@ const MAP_ROW_COLUMNS = `
   export_bounds_min_z AS exportBoundsMinZ,
   exported_at AS exportedAt,
   generator,
+  generator_params_json AS generatorParamsJson,
   height_tiles AS heightTiles,
   id,
   kind,
@@ -576,6 +581,30 @@ const getStaticEntityExportDetail = (
   };
 };
 
+const normalizeIslandClusterGeneratorParams = (
+  params?: Partial<IslandClusterGeneratorParams> | null
+): IslandClusterGeneratorParams => ({
+  ...DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
+  ...params
+});
+
+const parseGeneratorParamsJson = (
+  generator: string | null,
+  generatorParamsJson: string | null
+): IslandClusterGeneratorParams | undefined => {
+  if (generator !== MAP_GENERATOR_ISLANDS) {
+    return undefined;
+  }
+
+  if (!generatorParamsJson) {
+    return normalizeIslandClusterGeneratorParams();
+  }
+
+  return normalizeIslandClusterGeneratorParams(
+    JSON.parse(generatorParamsJson) as Partial<IslandClusterGeneratorParams>
+  );
+};
+
 const mapRowToMetadata = (
   row: MapRow,
   options: { includeExportManifest: boolean }
@@ -629,6 +658,10 @@ const mapRowToMetadata = (
         row.kind === 'wrapped-classic'
           ? (row.generator as MapMetadata['generator'])
           : undefined,
+      generatorParams:
+        row.kind === 'wrapped-classic'
+          ? parseGeneratorParamsJson(row.generator, row.generatorParamsJson)
+          : undefined,
       id: row.id,
       kind: row.kind as MapMetadata['kind'],
       name: row.name,
@@ -644,6 +677,7 @@ const mapRowToMetadata = (
     extent: { kind: 'infinite' as const },
     export: exportMetadata,
     generator: undefined,
+    generatorParams: undefined,
     id: row.id,
     kind: row.kind as MapMetadata['kind'],
     name: row.name,
@@ -2446,6 +2480,7 @@ export class MapRepository {
         exportBoundsMinZ: input.bounds.minZ,
         exportedAt: now,
         generator: null,
+        generatorParamsJson: null,
         heightTiles,
         id,
         kind: input.kind,
@@ -2472,12 +2507,12 @@ export class MapRepository {
         INSERT INTO maps (
           id, name, kind, extent_kind,
           width_tiles, height_tiles, wrap_x, wrap_z,
-          meters_per_tile, chunk_size_tiles,
-          generator, seed, revision, terrain_revision,
-          source_map_id, source_revision, exported_at,
+        meters_per_tile, chunk_size_tiles,
+        generator, generator_params_json, seed, revision, terrain_revision,
+        source_map_id, source_revision, exported_at,
           export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
         )
         .run(
@@ -2492,6 +2527,7 @@ export class MapRepository {
           row.metersPerTile,
           row.chunkSizeTiles,
           row.generator,
+          row.generatorParamsJson,
           row.seed,
           row.revision,
           row.terrainRevision,
@@ -2612,6 +2648,10 @@ export class MapRepository {
       {
         chunkSizeTiles: row.chunkSizeTiles,
         generator: row.generator as MapGenerator,
+        generatorParams: parseGeneratorParamsJson(
+          row.generator,
+          row.generatorParamsJson
+        ),
         heightTiles: row.heightTiles,
         id: row.id,
         metersPerTile: row.metersPerTile,
@@ -2701,6 +2741,12 @@ export class MapRepository {
         exportBoundsMinZ: null,
         exportedAt: null,
         generator: input.generator,
+        generatorParamsJson:
+          input.generator === MAP_GENERATOR_ISLANDS
+            ? JSON.stringify(
+                normalizeIslandClusterGeneratorParams(input.generatorParams)
+              )
+            : null,
         heightTiles,
         id,
         kind: 'wrapped-classic',
@@ -2731,6 +2777,7 @@ export class MapRepository {
         exportBoundsMinZ: null,
         exportedAt: null,
         generator: null,
+        generatorParamsJson: null,
         heightTiles: null,
         id,
         kind: 'infinite-vector',
@@ -2759,11 +2806,11 @@ export class MapRepository {
         id, name, kind, extent_kind,
         width_tiles, height_tiles, wrap_x, wrap_z,
         meters_per_tile, chunk_size_tiles,
-        generator, seed, revision, terrain_revision,
+        generator, generator_params_json, seed, revision, terrain_revision,
         source_map_id, source_revision, exported_at,
         export_bounds_min_x, export_bounds_min_z, export_bounds_max_x, export_bounds_max_z,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
       )
       .run(
@@ -2778,6 +2825,7 @@ export class MapRepository {
         row.metersPerTile,
         row.chunkSizeTiles,
         row.generator,
+        row.generatorParamsJson,
         row.seed,
         row.revision,
         row.terrainRevision,
@@ -2810,6 +2858,52 @@ export class MapRepository {
     }
 
     return result.changes > 0;
+  }
+
+  regenerateMap(
+    id: string,
+    expectedRevision: number,
+    seed?: string,
+    generatorParams?: IslandClusterGeneratorParams
+  ) {
+    return this.runInTransaction(() => {
+      const row = this.getMapRowOrThrow(id);
+      this.assertExpectedRevision(row, expectedRevision);
+
+      if (row.kind !== 'wrapped-classic') {
+        throw new MapRepositoryError(
+          'BAD_REQUEST',
+          `Map ${id} cannot be regenerated because kind ${row.kind} is not supported`
+        );
+      }
+
+      const nextSeed = seed ?? row.seed;
+      const nextGeneratorParamsJson =
+        row.generator === MAP_GENERATOR_ISLANDS
+          ? JSON.stringify(
+              normalizeIslandClusterGeneratorParams(generatorParams)
+            )
+          : row.generatorParamsJson;
+
+      this.db
+        .prepare(
+          'UPDATE maps SET seed = ?, generator_params_json = ? WHERE id = ?'
+        )
+        .run(nextSeed, nextGeneratorParamsJson, id);
+
+      this.db.prepare('DELETE FROM map_chunks WHERE map_id = ?').run(id);
+      this.db.prepare('DELETE FROM map_tile_overrides WHERE map_id = ?').run(id);
+      this.db.prepare('DELETE FROM map_static_entities WHERE map_id = ?').run(id);
+
+      return mapRowToMetadata(
+        this.bumpMapRevisions(id, {
+          terrainAffecting: true
+        }),
+        {
+          includeExportManifest: true
+        }
+      );
+    });
   }
 
   getMap(id: string) {
@@ -4366,6 +4460,7 @@ export class MapRepository {
         meters_per_tile INTEGER NOT NULL,
         chunk_size_tiles INTEGER NOT NULL,
         generator TEXT,
+        generator_params_json TEXT,
         seed TEXT NOT NULL,
         revision INTEGER NOT NULL DEFAULT 0,
         terrain_revision INTEGER NOT NULL DEFAULT 0,
@@ -4559,6 +4654,7 @@ export class MapRepository {
     this.ensureColumnExists('maps', 'source_map_id', 'TEXT');
     this.ensureColumnExists('maps', 'source_revision', 'INTEGER');
     this.ensureColumnExists('maps', 'exported_at', 'TEXT');
+    this.ensureColumnExists('maps', 'generator_params_json', 'TEXT');
     this.ensureColumnExists('maps', 'export_bounds_min_x', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_min_z', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_x', 'REAL');
