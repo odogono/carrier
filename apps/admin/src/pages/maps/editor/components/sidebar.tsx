@@ -3,9 +3,9 @@ import type {
   AssetVersion,
   ControlPoint,
   DerivedIsland,
+  SourcePolygon,
   StaticEntity,
   StaticEntityListItem,
-  SourcePolygon,
   WorldBounds,
   WorldPoint
 } from 'carrier-contracts/types';
@@ -31,8 +31,8 @@ import {
   DEFAULT_SOURCE_POLYGON_PARAMS,
   canSavePolygonDraft,
   nextOrderedSelection,
-  type StaticEntityGroundingDiagnostics,
-  type EditorTool
+  type EditorTool,
+  type StaticEntityGroundingDiagnostics
 } from '../helpers';
 import {
   createControlPointDraft,
@@ -345,176 +345,179 @@ export const EditorSidebar = ({
                 <SectionShell
                   description="Adjust the selected placement and apply changes explicitly."
                   title="Static Entity"
-                  >
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InspectorStat
-                        label="Entity ID"
-                        value={currentEntityForInspector.id}
-                      />
-                      <InspectorStat
-                        label="Diagnostics"
-                        value={
-                          selectedEntity?.diagnostics.status === 'pending'
-                            ? 'Pending'
-                            : selectedEntity?.diagnostics.status === 'warning'
-                              ? 'Warning'
-                              : 'Valid'
-                        }
-                      />
-                    </div>
-                    <TextInput
-                      id="entity-label"
-                      label="Label"
-                      onChange={label =>
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InspectorStat
+                      label="Entity ID"
+                      value={currentEntityForInspector.id}
+                    />
+                    <InspectorStat
+                      label="Diagnostics"
+                      value={
+                        selectedEntity?.diagnostics.status === 'pending'
+                          ? 'Pending'
+                          : selectedEntity?.diagnostics.status === 'warning'
+                            ? 'Warning'
+                            : 'Valid'
+                      }
+                    />
+                  </div>
+                  <TextInput
+                    id="entity-label"
+                    label="Label"
+                    onChange={label =>
+                      setEntityDraft(
+                        draft => (draft ? { ...draft, label } : draft),
+                        true
+                      )
+                    }
+                    placeholder="Leave blank for automatic label"
+                    value={currentEntityForInspector.label}
+                  />
+                  <div className="space-y-2">
+                    <Label htmlFor="entity-archetype">Archetype</Label>
+                    <Select
+                      id="entity-archetype"
+                      onChange={event =>
                         setEntityDraft(
-                          draft => (draft ? { ...draft, label } : draft),
+                          draft =>
+                            draft
+                              ? {
+                                  ...draft,
+                                  archetypeId: event.target.value
+                                }
+                              : draft,
                           true
                         )
                       }
-                      placeholder="Leave blank for automatic label"
-                      value={currentEntityForInspector.label}
+                      value={currentEntityForInspector.archetypeId}
+                    >
+                      {selectedEntity &&
+                      !catalogArchetypes.some(
+                        archetype =>
+                          archetype.id === selectedEntity.entity.archetypeId
+                      ) ? (
+                        <option value={selectedEntity.entity.archetypeId}>
+                          {selectedEntity.archetype.name} (
+                          {selectedEntity.archetype.status})
+                        </option>
+                      ) : null}
+                      {catalogArchetypes.map(archetype => (
+                        <option key={archetype.id} value={archetype.id}>
+                          {archetype.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <NumberInput
+                      id="entity-x"
+                      label="X"
+                      onChange={x =>
+                        setEntityDraft(
+                          draft => (draft ? { ...draft, x } : draft),
+                          true
+                        )
+                      }
+                      value={currentEntityForInspector.x}
+                    />
+                    <NumberInput
+                      id="entity-z"
+                      label="Z"
+                      onChange={z =>
+                        setEntityDraft(
+                          draft => (draft ? { ...draft, z } : draft),
+                          true
+                        )
+                      }
+                      value={currentEntityForInspector.z}
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <NumberInput
+                      id="entity-yaw"
+                      label="Yaw"
+                      onChange={yaw =>
+                        setEntityDraft(
+                          draft => (draft ? { ...draft, yaw } : draft),
+                          true
+                        )
+                      }
+                      value={currentEntityForInspector.yaw}
+                    />
+                    <NumberInput
+                      id="entity-scale"
+                      label="Scale"
+                      min="0.1"
+                      onChange={scale =>
+                        setEntityDraft(
+                          draft => (draft ? { ...draft, scale } : draft),
+                          true
+                        )
+                      }
+                      step="0.1"
+                      value={currentEntityForInspector.scale}
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <NumberInput
+                      id="entity-y-offset"
+                      label="Y Offset"
+                      onChange={yOffset =>
+                        setEntityDraft(
+                          draft => (draft ? { ...draft, yOffset } : draft),
+                          true
+                        )
+                      }
+                      step="0.1"
+                      value={currentEntityForInspector.yOffset}
                     />
                     <div className="space-y-2">
-                      <Label htmlFor="entity-archetype">Archetype</Label>
+                      <Label htmlFor="entity-state">State</Label>
                       <Select
-                        id="entity-archetype"
+                        id="entity-state"
                         onChange={event =>
                           setEntityDraft(
                             draft =>
                               draft
                                 ? {
                                     ...draft,
-                                    archetypeId: event.target.value
+                                    state: event.target
+                                      .value as StaticEntity['state']
                                   }
                                 : draft,
                             true
                           )
                         }
-                        value={currentEntityForInspector.archetypeId}
+                        value={currentEntityForInspector.state}
                       >
-                        {selectedEntity &&
-                        !catalogArchetypes.some(
-                          archetype =>
-                            archetype.id === selectedEntity.entity.archetypeId
-                        ) ? (
-                          <option value={selectedEntity.entity.archetypeId}>
-                            {selectedEntity.archetype.name} (
-                            {selectedEntity.archetype.status})
-                          </option>
-                        ) : null}
-                        {catalogArchetypes.map(archetype => (
-                          <option key={archetype.id} value={archetype.id}>
-                            {archetype.name}
-                          </option>
-                        ))}
+                        <option value="active">Active</option>
+                        <option value="disabled">Disabled</option>
                       </Select>
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <NumberInput
-                        id="entity-x"
-                        label="X"
-                        onChange={x =>
-                          setEntityDraft(
-                            draft => (draft ? { ...draft, x } : draft),
-                            true
-                          )
+                  </div>
+                  {selectedEntity ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <InspectorStat
+                        label="Grounding"
+                        value={
+                          selectedEntity.diagnostics.status === 'pending'
+                            ? 'Pending terrain'
+                            : `${selectedEntity.diagnostics.maxHeightDelta.toFixed(2)}m delta`
                         }
-                        value={currentEntityForInspector.x}
                       />
-                      <NumberInput
-                        id="entity-z"
-                        label="Z"
-                        onChange={z =>
-                          setEntityDraft(
-                            draft => (draft ? { ...draft, z } : draft),
-                            true
+                      <InspectorStat
+                        label="Catalog"
+                        value={
+                          referencedArchetypeIds.has(
+                            selectedEntity.archetype.id
                           )
+                            ? 'Referenced'
+                            : 'Global only'
                         }
-                        value={currentEntityForInspector.z}
                       />
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <NumberInput
-                        id="entity-yaw"
-                        label="Yaw"
-                        onChange={yaw =>
-                          setEntityDraft(
-                            draft => (draft ? { ...draft, yaw } : draft),
-                            true
-                          )
-                        }
-                        value={currentEntityForInspector.yaw}
-                      />
-                      <NumberInput
-                        id="entity-scale"
-                        label="Scale"
-                        min="0.1"
-                        onChange={scale =>
-                          setEntityDraft(
-                            draft => (draft ? { ...draft, scale } : draft),
-                            true
-                          )
-                        }
-                        step="0.1"
-                        value={currentEntityForInspector.scale}
-                      />
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <NumberInput
-                        id="entity-y-offset"
-                        label="Y Offset"
-                        onChange={yOffset =>
-                          setEntityDraft(
-                            draft => (draft ? { ...draft, yOffset } : draft),
-                            true
-                          )
-                        }
-                        step="0.1"
-                        value={currentEntityForInspector.yOffset}
-                      />
-                      <div className="space-y-2">
-                        <Label htmlFor="entity-state">State</Label>
-                        <Select
-                          id="entity-state"
-                          onChange={event =>
-                            setEntityDraft(
-                              draft =>
-                                draft
-                                  ? {
-                                      ...draft,
-                                      state: event.target.value as StaticEntity['state']
-                                    }
-                                  : draft,
-                              true
-                            )
-                          }
-                          value={currentEntityForInspector.state}
-                        >
-                          <option value="active">Active</option>
-                          <option value="disabled">Disabled</option>
-                        </Select>
-                      </div>
-                    </div>
-                    {selectedEntity ? (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <InspectorStat
-                          label="Grounding"
-                          value={
-                            selectedEntity.diagnostics.status === 'pending'
-                              ? 'Pending terrain'
-                              : `${selectedEntity.diagnostics.maxHeightDelta.toFixed(2)}m delta`
-                          }
-                        />
-                        <InspectorStat
-                          label="Catalog"
-                          value={
-                            referencedArchetypeIds.has(selectedEntity.archetype.id)
-                              ? 'Referenced'
-                              : 'Global only'
-                          }
-                        />
-                      </div>
-                    ) : null}
+                  ) : null}
                 </SectionShell>
               ) : null}
 
@@ -667,9 +670,31 @@ export const EditorSidebar = ({
                     </div>
                   </SectionShell>
                   <SectionShell
-                    description="Terrain generation values are saved per polygon mutation."
+                    description="Terrain generation values are saved per polygon mutation. Higher Interior Fill makes land occupy more of the polygon."
                     title="Terrain Parameters"
                   >
+                    <NumberInput
+                      id="polygon-interior-fill"
+                      label="Interior Fill"
+                      min="0.25"
+                      onChange={interiorFill => {
+                        setPolygonDraft(
+                          draft => ({
+                            ...(draft ??
+                              createPolygonDraft(selectedPolygon ?? undefined)),
+                            params: {
+                              ...(draft?.params ??
+                                selectedPolygon?.params ??
+                                DEFAULT_SOURCE_POLYGON_PARAMS),
+                              interiorFill
+                            }
+                          }),
+                          true
+                        );
+                      }}
+                      step="0.05"
+                      value={currentPolygonForInspector.params.interiorFill}
+                    />
                     <NumberInput
                       id="polygon-noise-scale"
                       label="Noise Scale"
@@ -892,10 +917,7 @@ export const EditorSidebar = ({
 
             {currentEntityForInspector ? (
               <ActionBar>
-                <Button
-                  disabled={!entityDirty}
-                  onClick={onSaveEntityDraft}
-                >
+                <Button disabled={!entityDirty} onClick={onSaveEntityDraft}>
                   <Save className="h-4 w-4" />
                   Apply
                 </Button>
@@ -1139,7 +1161,11 @@ export const EditorSidebar = ({
                         {items
                           .filter(archetype =>
                             activeCatalogSearch.trim()
-                              ? [archetype.id, archetype.name, ...archetype.tags]
+                              ? [
+                                  archetype.id,
+                                  archetype.name,
+                                  ...archetype.tags
+                                ]
                                   .map(value => value.toLowerCase())
                                   .some(value =>
                                     value.includes(
@@ -1157,7 +1183,9 @@ export const EditorSidebar = ({
                                   : 'border-border bg-background hover:bg-accent/40'
                               )}
                               key={archetype.id}
-                              onClick={() => onPickCatalogArchetype(archetype.id)}
+                              onClick={() =>
+                                onPickCatalogArchetype(archetype.id)
+                              }
                               type="button"
                             >
                               <div className="min-w-0">
@@ -1185,7 +1213,10 @@ export const EditorSidebar = ({
                   <Package className="h-4 w-4" />
                   Place Selected Archetype
                 </Button>
-                <Button onClick={() => onSelectTool('select')} variant="outline">
+                <Button
+                  onClick={() => onSelectTool('select')}
+                  variant="outline"
+                >
                   Selection Tool
                 </Button>
               </div>
@@ -1230,7 +1261,9 @@ export const EditorSidebar = ({
                 <Select
                   id="outliner-archetype"
                   onChange={event =>
-                    onSetOutlinerArchetypeId(event.target.value as string | 'all')
+                    onSetOutlinerArchetypeId(
+                      event.target.value as string | 'all'
+                    )
                   }
                   value={activeOutlinerArchetypeId}
                 >

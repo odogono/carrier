@@ -1,11 +1,12 @@
 import { difference, intersection, union, xor, type Geom } from 'polyclip-ts';
 
-import type {
-  BooleanOperation,
-  SourcePolygon,
-  SourcePolygonParams,
-  WorldBounds,
-  WorldPoint
+import {
+  DEFAULT_SOURCE_POLYGON_PARAMS,
+  type BooleanOperation,
+  type SourcePolygon,
+  type SourcePolygonParams,
+  type WorldBounds,
+  type WorldPoint
 } from '../../../../packages/contracts/src/schema/maps';
 
 export type PolygonRing = WorldPoint[];
@@ -23,9 +24,12 @@ export type ResolvedIslandGeometry = {
 const EPSILON = 1e-6;
 
 const isSamePoint = (left: WorldPoint, right: WorldPoint) =>
-  Math.abs(left.x - right.x) <= EPSILON && Math.abs(left.z - right.z) <= EPSILON;
+  Math.abs(left.x - right.x) <= EPSILON &&
+  Math.abs(left.z - right.z) <= EPSILON;
 
-export const canonicalizeVertices = (vertices: readonly WorldPoint[]): PolygonRing => {
+export const canonicalizeVertices = (
+  vertices: readonly WorldPoint[]
+): PolygonRing => {
   const normalized = vertices.map(vertex => ({
     x: Number(vertex.x),
     z: Number(vertex.z)
@@ -33,19 +37,27 @@ export const canonicalizeVertices = (vertices: readonly WorldPoint[]): PolygonRi
   const deduped: PolygonRing = [];
 
   for (const vertex of normalized) {
-    if (deduped.length === 0 || !isSamePoint(deduped[deduped.length - 1]!, vertex)) {
+    if (
+      deduped.length === 0 ||
+      !isSamePoint(deduped[deduped.length - 1]!, vertex)
+    ) {
       deduped.push(vertex);
     }
   }
 
-  if (deduped.length >= 2 && isSamePoint(deduped[0]!, deduped[deduped.length - 1]!)) {
+  if (
+    deduped.length >= 2 &&
+    isSamePoint(deduped[0]!, deduped[deduped.length - 1]!)
+  ) {
     deduped.pop();
   }
 
   return deduped;
 };
 
-export const computePolygonBbox = (vertices: readonly WorldPoint[]): WorldBounds => {
+export const computePolygonBbox = (
+  vertices: readonly WorldPoint[]
+): WorldBounds => {
   const canonical = canonicalizeVertices(vertices);
 
   if (canonical.length < 3) {
@@ -93,7 +105,9 @@ export const computePolygonSignedArea = (vertices: readonly WorldPoint[]) => {
 export const computePolygonArea = (vertices: readonly WorldPoint[]) =>
   Math.abs(computePolygonSignedArea(vertices));
 
-export const computePolygonCentroid = (vertices: readonly WorldPoint[]): WorldPoint => {
+export const computePolygonCentroid = (
+  vertices: readonly WorldPoint[]
+): WorldPoint => {
   const canonical = canonicalizeVertices(vertices);
   const signedArea = computePolygonSignedArea(canonical);
 
@@ -142,7 +156,10 @@ export const mergeBounds = (
   };
 };
 
-export const expandWorldBounds = (bounds: WorldBounds, amount: number): WorldBounds => ({
+export const expandWorldBounds = (
+  bounds: WorldBounds,
+  amount: number
+): WorldBounds => ({
   maxX: bounds.maxX + amount,
   maxZ: bounds.maxZ + amount,
   minX: bounds.minX - amount,
@@ -155,7 +172,10 @@ export const bboxesIntersect = (left: WorldBounds, right: WorldBounds) =>
   left.minZ <= right.maxZ &&
   left.maxZ >= right.minZ;
 
-export const pointInPolygon = (point: WorldPoint, vertices: readonly WorldPoint[]) => {
+export const pointInPolygon = (
+  point: WorldPoint,
+  vertices: readonly WorldPoint[]
+) => {
   const canonical = canonicalizeVertices(vertices);
   let inside = false;
 
@@ -167,10 +187,10 @@ export const pointInPolygon = (point: WorldPoint, vertices: readonly WorldPoint[
     const current = canonical[currentIndex]!;
     const previous = canonical[previousIndex]!;
     const intersects =
-      (current.z > point.z) !== (previous.z > point.z) &&
+      current.z > point.z !== previous.z > point.z &&
       point.x <
         ((previous.x - current.x) * (point.z - current.z)) /
-          ((previous.z - current.z) || Number.EPSILON) +
+          (previous.z - current.z || Number.EPSILON) +
           current.x;
 
     if (intersects) {
@@ -220,9 +240,13 @@ export const pointToPolygonEdgeDistance = (
 };
 
 const toPolyclipRing = (vertices: readonly WorldPoint[]) =>
-  canonicalizeVertices(vertices).map(vertex => [vertex.x, vertex.z] as [number, number]);
+  canonicalizeVertices(vertices).map(
+    vertex => [vertex.x, vertex.z] as [number, number]
+  );
 
-const toPolyclipPolygon = (vertices: readonly WorldPoint[]): Geom => [toPolyclipRing(vertices)];
+const toPolyclipPolygon = (vertices: readonly WorldPoint[]): Geom => [
+  toPolyclipRing(vertices)
+];
 
 const fromPolyclipRing = (ring: readonly [number, number][]): PolygonRing =>
   canonicalizeVertices(ring.map(([x, z]) => ({ x, z })));
@@ -242,8 +266,8 @@ const geometryToPolygons = (geometry: Geom): PolygonRing[] => {
     return [fromPolyclipRing(geometry as unknown as [number, number][])];
   }
 
-  return (geometry as unknown as Array<Array<Array<[number, number]>>>).map(polygon =>
-    fromPolyclipRing(polygon[0]!)
+  return (geometry as unknown as Array<Array<Array<[number, number]>>>).map(
+    polygon => fromPolyclipRing(polygon[0]!)
   );
 };
 
@@ -267,7 +291,10 @@ const normalizeBooleanResult = (geometry: Geom) => {
 export const intersectPolygons = (
   left: readonly WorldPoint[],
   right: readonly WorldPoint[]
-) => normalizeBooleanResult(intersection(toPolyclipPolygon(left), toPolyclipPolygon(right)));
+) =>
+  normalizeBooleanResult(
+    intersection(toPolyclipPolygon(left), toPolyclipPolygon(right))
+  );
 
 export const unionPolygons = (polygons: readonly (readonly WorldPoint[])[]) => {
   if (polygons.length === 0) {
@@ -296,15 +323,21 @@ export const applyBooleanOperationToPolygons = (
 
   switch (operation) {
     case 'difference':
-      return normalizeBooleanResult(difference(toPolyclipPolygon(first!), ...operands));
+      return normalizeBooleanResult(
+        difference(toPolyclipPolygon(first!), ...operands)
+      );
     case 'intersection':
       return normalizeBooleanResult(
         intersection(toPolyclipPolygon(first!), ...operands)
       );
     case 'union':
-      return normalizeBooleanResult(union(toPolyclipPolygon(first!), ...operands));
+      return normalizeBooleanResult(
+        union(toPolyclipPolygon(first!), ...operands)
+      );
     case 'xor':
-      return normalizeBooleanResult(xor(toPolyclipPolygon(first!), ...operands));
+      return normalizeBooleanResult(
+        xor(toPolyclipPolygon(first!), ...operands)
+      );
     default: {
       const exhaustiveCheck: never = operation;
       return exhaustiveCheck;
@@ -316,21 +349,21 @@ export const averageSourcePolygonParams = (
   polygons: readonly Pick<SourcePolygon, 'params'>[]
 ): SourcePolygonParams => {
   if (polygons.length === 0) {
-    return {
-      maxDisplacementMeters: 0,
-      noiseScaleMeters: 128,
-      roughness: 0
-    };
+    return { ...DEFAULT_SOURCE_POLYGON_PARAMS };
   }
 
   const totals = polygons.reduce(
     (accumulator, polygon) => ({
+      interiorFill: accumulator.interiorFill + polygon.params.interiorFill,
       maxDisplacementMeters:
-        accumulator.maxDisplacementMeters + polygon.params.maxDisplacementMeters,
-      noiseScaleMeters: accumulator.noiseScaleMeters + polygon.params.noiseScaleMeters,
+        accumulator.maxDisplacementMeters +
+        polygon.params.maxDisplacementMeters,
+      noiseScaleMeters:
+        accumulator.noiseScaleMeters + polygon.params.noiseScaleMeters,
       roughness: accumulator.roughness + polygon.params.roughness
     }),
     {
+      interiorFill: 0,
       maxDisplacementMeters: 0,
       noiseScaleMeters: 0,
       roughness: 0
@@ -338,6 +371,7 @@ export const averageSourcePolygonParams = (
   );
 
   return {
+    interiorFill: totals.interiorFill / polygons.length,
     maxDisplacementMeters: totals.maxDisplacementMeters / polygons.length,
     noiseScaleMeters: totals.noiseScaleMeters / polygons.length,
     roughness: totals.roughness / polygons.length
@@ -351,7 +385,9 @@ export const resolveConnectedLandMasses = (
     return [];
   }
 
-  const unionedPolygons = unionPolygons(polygons.map(polygon => polygon.vertices));
+  const unionedPolygons = unionPolygons(
+    polygons.map(polygon => polygon.vertices)
+  );
 
   return unionedPolygons.map(vertices => {
     const bbox = computePolygonBbox(vertices);

@@ -1,3 +1,4 @@
+import { normalizeSourcePolygonParams } from 'carrier-contracts';
 import type { SourcePolygon, WorldBounds } from 'carrier-contracts/types';
 
 import {
@@ -11,9 +12,9 @@ import type {
   DerivedIslandLike,
   IslandDraft,
   PolygonDraft,
+  SourcePolygonLike,
   StaticEntityDraft,
-  StaticEntityLike,
-  SourcePolygonLike
+  StaticEntityLike
 } from './types';
 
 export const createPolygonDraft = (
@@ -21,7 +22,9 @@ export const createPolygonDraft = (
 ): PolygonDraft => ({
   id: polygon?.id,
   kind: polygon ? 'edit' : 'create',
-  params: polygon?.params ?? { ...DEFAULT_SOURCE_POLYGON_PARAMS },
+  params: normalizeSourcePolygonParams(
+    polygon?.params ?? DEFAULT_SOURCE_POLYGON_PARAMS
+  ),
   selectedVertexIndex: null,
   vertices: polygon?.vertices.map(vertex => ({ ...vertex })) ?? []
 });

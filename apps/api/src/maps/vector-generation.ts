@@ -1,20 +1,17 @@
-import type {
-  ControlPoint,
-  MapMetadata,
-  SourcePolygon,
-  WorldBounds,
-  WorldPoint
-} from '../../../../packages/contracts/src/schema/maps';
-
 import {
   classifySurfaceMaterialFromElevation,
-  getSurfaceMaterialId
+  getSurfaceMaterialId,
+  type ControlPoint,
+  type MapMetadata,
+  type SourcePolygon,
+  type WorldBounds,
+  type WorldPoint
 } from '../../../../packages/contracts/src/schema/maps';
-
+import { MAP_WATER_LEVEL, type GeneratedMapChunkRecord } from './generation';
 import {
   averageSourcePolygonParams,
-  boundsFromPointRadius,
   bboxesIntersect,
+  boundsFromPointRadius,
   canonicalizeVertices,
   computePolygonBbox,
   expandWorldBounds,
@@ -25,7 +22,6 @@ import {
   unionPolygons,
   type PolygonRing
 } from './geometry';
-import { MAP_WATER_LEVEL, type GeneratedMapChunkRecord } from './generation';
 
 type DerivedIslandGeometry = {
   areaMeters2: number;
@@ -62,6 +58,7 @@ type CompiledIsland = {
   controlPoints: ControlPoint[];
   displacedPolygons: DisplacedPolygon[];
   id: string;
+  metersPerTile: number;
   solveBounds: WorldBounds;
   solveGrid: SolveGrid;
   sourcePolygonIds: string[];
@@ -206,7 +203,9 @@ const displacePolygon = (
   polygon: SourcePolygon,
   mapSeed: string
 ): DisplacedPolygon => {
-  const { arcLengths, perimeter, vertices } = computeArcLengths(polygon.vertices);
+  const { arcLengths, perimeter, vertices } = computeArcLengths(
+    polygon.vertices
+  );
   const signedArea = vertices.reduce((area, current, index) => {
     const next = vertices[(index + 1) % vertices.length]!;
     return area + current.x * next.z - next.x * current.z;
@@ -235,7 +234,9 @@ const displacePolygon = (
         z: (-dx / length) * outwardSign
       };
       const traveled =
-        (arcLengths[index] ?? 0) + edgeLength * amount + phase * polygon.params.noiseScaleMeters;
+        (arcLengths[index] ?? 0) +
+        edgeLength * amount +
+        phase * polygon.params.noiseScaleMeters;
       const noiseValue = fbm2d(
         `${mapSeed}:${polygon.id}:coast`,
         traveled / Math.max(polygon.params.noiseScaleMeters, 1),
@@ -264,8 +265,10 @@ const displacePolygon = (
   };
 };
 
-
-const boundsToSolveDimensions = (bounds: WorldBounds, metersPerTile: number) => {
+const boundsToSolveDimensions = (
+  bounds: WorldBounds,
+  metersPerTile: number
+) => {
   const spanX = Math.max(bounds.maxX - bounds.minX, metersPerTile);
   const spanZ = Math.max(bounds.maxZ - bounds.minZ, metersPerTile);
   const longestAxis = Math.max(spanX, spanZ);
@@ -289,11 +292,70 @@ const worldToSolveCoordinate = (
   height: number,
   point: WorldPoint
 ) => ({
-  x: ((point.x - bounds.minX) / Math.max(bounds.maxX - bounds.minX, 1)) * (width - 1),
-  z: ((point.z - bounds.minZ) / Math.max(bounds.maxZ - bounds.minZ, 1)) * (height - 1)
+  x:
+    ((point.x - bounds.minX) / Math.max(bounds.maxX - bounds.minX, 1)) *
+    (width - 1),
+  z:
+    ((point.z - bounds.minZ) / Math.max(bounds.maxZ - bounds.minZ, 1)) *
+    (height - 1)
 });
 
 const solveIndex = (x: number, z: number, width: number) => z * width + x;
+
+const resolvePointParams = (
+  point: WorldPoint,
+  displacedPolygons: readonly DisplacedPolygon[]
+) => {
+  const containing = displacedPolygons.filter(
+    polygon =>
+      bboxesIntersect(polygon.bbox, boundsFromPointRadius(point)) &&
+      pointInPolygon(point, polygon.vertices)
+  );
+
+  return averageSourcePolygonParams(containing);
+};
+
+const scaleInteriorFalloff = (
+  startDistance: number,
+  endDistance: number,
+  interiorFill: number
+) => {
+  const fill = clamp(interiorFill, 0.25, 512);
+
+  return {
+    end: endDistance / fill,
+    start: startDistance / fill
+  };
+};
+
+const applyInteriorFillToBias = (bias: number, interiorFill: number) => {
+  const fill = clamp(interiorFill, 0.25, 512);
+  const normalizedBias = clamp(bias, 0, 1);
+
+  return Math.pow(normalizedBias, 1 / fill);
+};
+
+const resolveLandFloorHeight = (
+  shorelineDistance: number,
+  interiorFill: number,
+  metersPerTile: number
+) => {
+  const interiorFalloff = scaleInteriorFalloff(
+    metersPerTile * 0.5,
+    metersPerTile * 6,
+    interiorFill
+  );
+  const baseBias = smoothstep(
+    interiorFalloff.start,
+    interiorFalloff.end,
+    shorelineDistance
+  );
+  const landBias = applyInteriorFillToBias(baseBias, interiorFill);
+
+  // Treat the polygon as the authoritative land mask.
+  // The shoreline stays low, but the interior remains dry by default.
+  return lerp(0.5, 8, landBias);
+};
 
 const buildSolveGrid = (
   map: MapMetadata,
@@ -302,16 +364,17 @@ const buildSolveGrid = (
   controlPoints: readonly ControlPoint[]
 ): SolveGrid => {
   const maxDisplacement = displacedPolygons.reduce(
-    (maximum, polygon) => Math.max(maximum, polygon.params.maxDisplacementMeters),
+    (maximum, polygon) =>
+      Math.max(maximum, polygon.params.maxDisplacementMeters),
     0
   );
   const bounds = expandWorldBounds(island.bbox, maxDisplacement);
-  const { width, height } = boundsToSolveDimensions(bounds, map.resolution.metersPerTile);
+  const { width, height } = boundsToSolveDimensions(
+    bounds,
+    map.resolution.metersPerTile
+  );
   const values = new Float32Array(width * height).fill(MAP_WATER_LEVEL);
   const mask = new Uint8Array(width * height);
-  const pinned = new Uint8Array(width * height);
-  const centroidPinHeight =
-    MAP_WATER_LEVEL + Math.max(28, Math.sqrt(Math.max(island.areaMeters2, 1)) * 0.055);
 
   for (let gridZ = 0; gridZ < height; gridZ += 1) {
     for (let gridX = 0; gridX < width; gridX += 1) {
@@ -319,7 +382,9 @@ const buildSolveGrid = (
         x: lerp(bounds.minX, bounds.maxX, gridX / Math.max(width - 1, 1)),
         z: lerp(bounds.minZ, bounds.maxZ, gridZ / Math.max(height - 1, 1))
       };
-      const inside = displacedPolygons.some(polygon => pointInPolygon(world, polygon.vertices));
+      const inside = displacedPolygons.some(polygon =>
+        pointInPolygon(world, polygon.vertices)
+      );
 
       if (!inside) {
         continue;
@@ -332,64 +397,34 @@ const buildSolveGrid = (
           return minimum;
         }
 
-        return Math.min(minimum, pointToPolygonEdgeDistance(world, polygon.vertices));
+        return Math.min(
+          minimum,
+          pointToPolygonEdgeDistance(world, polygon.vertices)
+        );
       }, Number.POSITIVE_INFINITY);
-      const interiorBias = smoothstep(
+      const localParams = resolvePointParams(world, displacedPolygons);
+      const interiorFalloff = scaleInteriorFalloff(
         map.resolution.metersPerTile * 2,
         map.resolution.metersPerTile * 14,
+        localParams.interiorFill
+      );
+      const rawInteriorBias = smoothstep(
+        interiorFalloff.start,
+        interiorFalloff.end,
         shorelineDistance
       );
-      values[index] = lerp(MAP_WATER_LEVEL, centroidPinHeight, interiorBias);
-    }
-  }
-
-  const implicitPins = [
-    {
-      elevationMeters: centroidPinHeight - MAP_WATER_LEVEL,
-      x: island.vertices.reduce((sum, vertex) => sum + vertex.x, 0) / island.vertices.length,
-      z: island.vertices.reduce((sum, vertex) => sum + vertex.z, 0) / island.vertices.length
-    },
-    ...controlPoints
-  ];
-
-  for (const controlPoint of implicitPins) {
-    const coordinate = worldToSolveCoordinate(bounds, width, height, controlPoint);
-    const gridX = clamp(Math.round(coordinate.x), 0, width - 1);
-    const gridZ = clamp(Math.round(coordinate.z), 0, height - 1);
-    const index = solveIndex(gridX, gridZ, width);
-
-    if (mask[index] === 0) {
-      continue;
-    }
-
-    pinned[index] = 1;
-    values[index] = MAP_WATER_LEVEL + controlPoint.elevationMeters;
-  }
-
-  for (let iteration = 0; iteration < SOLVE_MAX_ITERATIONS; iteration += 1) {
-    let maxDelta = 0;
-
-    for (let gridZ = 1; gridZ < height - 1; gridZ += 1) {
-      for (let gridX = 1; gridX < width - 1; gridX += 1) {
-        const index = solveIndex(gridX, gridZ, width);
-
-        if (mask[index] === 0 || pinned[index] === 1) {
-          continue;
-        }
-
-        const left = values[solveIndex(gridX - 1, gridZ, width)]!;
-        const right = values[solveIndex(gridX + 1, gridZ, width)]!;
-        const top = values[solveIndex(gridX, gridZ - 1, width)]!;
-        const bottom = values[solveIndex(gridX, gridZ + 1, width)]!;
-        const next = (left + right + top + bottom) * 0.25;
-        const relaxed = values[index]! + (next - values[index]!) * SOLVE_RELAXATION;
-        maxDelta = Math.max(maxDelta, Math.abs(relaxed - values[index]!));
-        values[index] = relaxed;
-      }
-    }
-
-    if (maxDelta <= SOLVE_EPSILON) {
-      break;
+      const interiorBias = applyInteriorFillToBias(
+        rawInteriorBias,
+        localParams.interiorFill
+      );
+      values[index] = Math.max(
+        lerp(MAP_WATER_LEVEL, 4, interiorBias),
+        resolveLandFloorHeight(
+          shorelineDistance,
+          localParams.interiorFill,
+          map.resolution.metersPerTile
+        )
+      );
     }
   }
 
@@ -405,7 +440,12 @@ const bilinearSample = (
   grid: SolveGrid,
   point: WorldPoint
 ) => {
-  const coordinate = worldToSolveCoordinate(bounds, grid.width, grid.height, point);
+  const coordinate = worldToSolveCoordinate(
+    bounds,
+    grid.width,
+    grid.height,
+    point
+  );
   const x0 = clamp(Math.floor(coordinate.x), 0, grid.width - 1);
   const z0 = clamp(Math.floor(coordinate.z), 0, grid.height - 1);
   const x1 = clamp(x0 + 1, 0, grid.width - 1);
@@ -429,8 +469,12 @@ const compileIsland = (
   const islandPolygons = island.sourcePolygonIds
     .map(sourcePolygonId => polygonsById.get(sourcePolygonId))
     .filter((polygon): polygon is SourcePolygon => polygon !== undefined);
-  const displacedPolygons = islandPolygons.map(polygon => displacePolygon(polygon, map.seed));
-  const displacedUnion = unionPolygons(displacedPolygons.map(polygon => polygon.vertices));
+  const displacedPolygons = islandPolygons.map(polygon =>
+    displacePolygon(polygon, map.seed)
+  );
+  const displacedUnion = unionPolygons(
+    displacedPolygons.map(polygon => polygon.vertices)
+  );
   const displacedBounds = displacedUnion.reduce<WorldBounds | null>(
     (bounds, vertices) => mergeBounds(bounds, computePolygonBbox(vertices)),
     null
@@ -441,11 +485,17 @@ const compileIsland = (
   const solveBounds = expandWorldBounds(
     displacedBounds ?? island.bbox,
     displacedPolygons.reduce(
-      (maximum, polygon) => Math.max(maximum, polygon.params.maxDisplacementMeters),
+      (maximum, polygon) =>
+        Math.max(maximum, polygon.params.maxDisplacementMeters),
       0
     )
   );
-  const solveGrid = buildSolveGrid(map, island, displacedPolygons, islandControlPoints);
+  const solveGrid = buildSolveGrid(
+    map,
+    island,
+    displacedPolygons,
+    islandControlPoints
+  );
 
   return {
     areaMeters2: island.areaMeters2,
@@ -453,6 +503,7 @@ const compileIsland = (
     controlPoints: islandControlPoints,
     displacedPolygons,
     id: island.id,
+    metersPerTile: map.resolution.metersPerTile,
     solveBounds,
     solveGrid,
     sourcePolygonIds: island.sourcePolygonIds,
@@ -463,7 +514,9 @@ const compileIsland = (
 const compileArtifact = (
   input: VectorTerrainCompileInput
 ): CompiledVectorTerrainArtifact => {
-  const polygonsById = new Map(input.polygons.map(polygon => [polygon.id, polygon]));
+  const polygonsById = new Map(
+    input.polygons.map(polygon => [polygon.id, polygon])
+  );
 
   return {
     controlPoints: input.controlPoints,
@@ -512,25 +565,16 @@ export const clearCompiledVectorTerrainArtifact = (
   compiledArtifactCache.delete(cacheKeyFor(mapId, terrainRevision));
 };
 
-const resolvePointParams = (
-  point: WorldPoint,
-  displacedPolygons: readonly DisplacedPolygon[]
-) => {
-  const containing = displacedPolygons.filter(polygon =>
-    bboxesIntersect(polygon.bbox, boundsFromPointRadius(point)) &&
-    pointInPolygon(point, polygon.vertices)
-  );
-
-  return averageSourcePolygonParams(containing);
-};
-
 const applyControlPointInfluence = (
   baseHeight: number,
   point: WorldPoint,
   controlPoints: readonly ControlPoint[]
 ) =>
   controlPoints.reduce((height, controlPoint) => {
-    const distance = Math.hypot(point.x - controlPoint.x, point.z - controlPoint.z);
+    const distance = Math.hypot(
+      point.x - controlPoint.x,
+      point.z - controlPoint.z
+    );
 
     if (distance > controlPoint.influenceMeters) {
       return height;
@@ -538,7 +582,8 @@ const applyControlPointInfluence = (
 
     const weight = 1 - distance / Math.max(controlPoint.influenceMeters, 1);
     const targetHeight = MAP_WATER_LEVEL + controlPoint.elevationMeters;
-    const influenceStrength = clamp(controlPoint.strength, 0, 2) * weight * weight;
+    const influenceStrength =
+      clamp(controlPoint.strength, 0, 2) * weight * weight;
     return lerp(height, targetHeight, influenceStrength);
   }, baseHeight);
 
@@ -551,28 +596,52 @@ const sampleIslandHeight = (
     return null;
   }
 
-  const shorelineDistance = island.displacedPolygons.reduce((minimum, polygon) => {
-    if (!bboxesIntersect(polygon.bbox, boundsFromPointRadius(point))) {
-      return minimum;
-    }
+  const shorelineDistance = island.displacedPolygons.reduce(
+    (minimum, polygon) => {
+      if (!bboxesIntersect(polygon.bbox, boundsFromPointRadius(point))) {
+        return minimum;
+      }
 
-    if (!pointInPolygon(point, polygon.vertices)) {
-      return minimum;
-    }
+      if (!pointInPolygon(point, polygon.vertices)) {
+        return minimum;
+      }
 
-    return Math.min(minimum, pointToPolygonEdgeDistance(point, polygon.vertices));
-  }, Number.POSITIVE_INFINITY);
+      return Math.min(
+        minimum,
+        pointToPolygonEdgeDistance(point, polygon.vertices)
+      );
+    },
+    Number.POSITIVE_INFINITY
+  );
 
   if (!Number.isFinite(shorelineDistance)) {
     return null;
   }
 
   let height = bilinearSample(island.solveBounds, island.solveGrid, point);
-  height = applyControlPointInfluence(height, point, island.controlPoints);
   const params = resolvePointParams(point, island.displacedPolygons);
-  const interiorMask = smoothstep(6, 60, shorelineDistance);
+  height = Math.max(
+    height,
+    resolveLandFloorHeight(
+      shorelineDistance,
+      params.interiorFill,
+      island.metersPerTile
+    )
+  );
+  height = applyControlPointInfluence(height, point, island.controlPoints);
+  const interiorFalloff = scaleInteriorFalloff(6, 60, params.interiorFill);
+  const rawInteriorMask = smoothstep(
+    interiorFalloff.start,
+    interiorFalloff.end,
+    shorelineDistance
+  );
+  const interiorMask = applyInteriorFillToBias(
+    rawInteriorMask,
+    params.interiorFill
+  );
   const normalizedElevation = clamp((height - MAP_WATER_LEVEL) / 96, 0, 1);
-  const detailAmplitude = params.roughness * 14 * interiorMask * normalizedElevation;
+  const detailAmplitude =
+    params.roughness * 14 * interiorMask * normalizedElevation;
   const detail = fbm2d(
     `${mapSeed}:${island.id}:detail`,
     point.x / Math.max(params.noiseScaleMeters, 1),
@@ -601,10 +670,8 @@ export const generateVectorChunk = (
     worldOriginZ?: number;
   } = {}
 ): GeneratedMapChunkRecord => {
-  const {
-    chunkSizeTiles,
-    metersPerTile: mapMetersPerTile
-  } = artifact.map.resolution;
+  const { chunkSizeTiles, metersPerTile: mapMetersPerTile } =
+    artifact.map.resolution;
   const metersPerTile = options.metersPerTile ?? mapMetersPerTile;
   const originTileX = options.originTileX ?? chunkX * chunkSizeTiles;
   const originTileZ = options.originTileZ ?? chunkZ * chunkSizeTiles;
@@ -616,8 +683,12 @@ export const generateVectorChunk = (
   const materialOriginTileX = options.materialOriginTileX ?? originTileX;
   const materialOriginTileZ = options.materialOriginTileZ ?? originTileZ;
   const chunkWorldBounds = {
-    maxX: (options.worldOriginX ?? originTileX * metersPerTile) + tileWidth * metersPerTile,
-    maxZ: (options.worldOriginZ ?? originTileZ * metersPerTile) + tileHeight * metersPerTile,
+    maxX:
+      (options.worldOriginX ?? originTileX * metersPerTile) +
+      tileWidth * metersPerTile,
+    maxZ:
+      (options.worldOriginZ ?? originTileZ * metersPerTile) +
+      tileHeight * metersPerTile,
     minX: options.worldOriginX ?? originTileX * metersPerTile,
     minZ: options.worldOriginZ ?? originTileZ * metersPerTile
   };

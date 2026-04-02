@@ -192,7 +192,9 @@ describe('API server map routes', () => {
       radiusScale: 1.9
     });
     expect(regenerated.revision).toBe(2);
-    expect(repository.getMapChunk(map.id, 0, 0)?.tileHeightSteps).toBeUndefined();
+    expect(
+      repository.getMapChunk(map.id, 0, 0)?.tileHeightSteps
+    ).toBeUndefined();
   });
 
   test('returns not found and rejects unsupported map kinds for regeneration', async () => {
@@ -449,12 +451,14 @@ describe('API server map routes', () => {
     });
 
     expect(await client.maps.listZarchRuntimeEntities({})).toEqual([bound]);
-    expect(
-      await client.maps.getZarchRuntimeEntity({ id: bound.id })
-    ).toEqual(bound);
+    expect(await client.maps.getZarchRuntimeEntity({ id: bound.id })).toEqual(
+      bound
+    );
 
     const modelResponse = await requestRaw(
-      new Request('http://localhost/api/zarch/runtime-entities/zarch-player-ship/model')
+      new Request(
+        'http://localhost/api/zarch/runtime-entities/zarch-player-ship/model'
+      )
     );
     expect(modelResponse.status).toBe(200);
     expect(modelResponse.headers.get('content-type')).toBe('model/gltf-binary');
@@ -630,6 +634,7 @@ describe('API server map routes', () => {
         expectedRevision: 0,
         mapId: created.id,
         params: {
+          interiorFill: 1.5,
           maxDisplacementMeters: 16,
           noiseScaleMeters: 96,
           roughness: 0.6
@@ -817,6 +822,7 @@ describe('API server map routes', () => {
         expectedRevision: 0,
         mapId: created.id,
         params: {
+          interiorFill: 1.5,
           maxDisplacementMeters: 16,
           noiseScaleMeters: 96,
           roughness: 0.6
@@ -962,9 +968,9 @@ describe('API server map routes', () => {
     expect(listedExports[0]?.id).toBe(exported.id);
     expect(
       (
-        ((listedExports[0]?.export as Record<string, unknown>)
-          .staticEntities as Record<string, unknown>)?.manifest
-      )
+        (listedExports[0]?.export as Record<string, unknown>)
+          .staticEntities as Record<string, unknown>
+      )?.manifest
     ).toBeUndefined();
     expect(
       (
@@ -983,8 +989,10 @@ describe('API server map routes', () => {
     ).toBe(3);
     expect(
       (
-        ((fetchedExport.export as Record<string, unknown>)
-          .staticEntities as Record<string, unknown>).manifest as Array<{
+        (
+          (fetchedExport.export as Record<string, unknown>)
+            .staticEntities as Record<string, unknown>
+        ).manifest as Array<{
           archetype: { id: string };
         }>
       ).map(entry => entry.archetype.id)
@@ -996,10 +1004,12 @@ describe('API server map routes', () => {
     );
     expect(
       (
-        (((fetchedMapResponse.json as Record<string, unknown>).export as Record<
-          string,
-          unknown
-        >).staticEntities as Record<string, unknown>).manifest as Array<{
+        (
+          (
+            (fetchedMapResponse.json as Record<string, unknown>)
+              .export as Record<string, unknown>
+          ).staticEntities as Record<string, unknown>
+        ).manifest as Array<{
           archetype: { id: string };
         }>
       ).map(entry => entry.archetype.id)
@@ -1173,7 +1183,10 @@ describe('API server map routes', () => {
         heightMeters: 24,
         widthMeters: 20
       },
-      diagnostics: ['Candidate metadata auto-derived from uploaded asset', 'Admin adjusted footprint'],
+      diagnostics: [
+        'Candidate metadata auto-derived from uploaded asset',
+        'Admin adjusted footprint'
+      ],
       footprint: {
         depthMeters: 16,
         widthMeters: 20

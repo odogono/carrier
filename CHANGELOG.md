@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-02
+
+### Changed
+
+- Infinite-vector polygon terrain generation now treats authored polygons as the primary land footprint, so generated islands generally fill the polygon instead of collapsing into small central domes
+- Admin map editor polygons now expose a shared `Interior Fill` terrain parameter, with larger values expanding land sooner from the shoreline while keeping coastline noise controlled by the existing edge parameters
+
+### Fixed
+
+- Infinite-vector polygon terrain parameters now normalize missing `interiorFill` values from legacy stored polygon JSON, keeping older maps compatible without a database migration
+- Infinite-vector polygon terrain generation now applies `Interior Fill` across a much larger effective range, including very large authored values, instead of plateauing too early
+
 ## [0.8.0] - 2026-04-01
 
 ### Changed

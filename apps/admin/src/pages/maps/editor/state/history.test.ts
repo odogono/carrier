@@ -53,6 +53,7 @@ describe('editor history state', () => {
         ...createPolygonDraft({
           id: 'polygon-1',
           params: {
+            interiorFill: 1.5,
             maxDisplacementMeters: 12,
             noiseScaleMeters: 64,
             roughness: 0.5
@@ -80,6 +81,7 @@ describe('editor history state', () => {
             id: 'polygon-1',
             mapId: 'map-1',
             params: {
+              interiorFill: 1.5,
               maxDisplacementMeters: 12,
               noiseScaleMeters: 64,
               roughness: 0.5
@@ -123,9 +125,7 @@ describe('editor history state', () => {
       tool: 'place-entity' as const
     };
 
-    expect(
-      snapshotsEqual(createEmptyEditorSnapshot(), snapshot)
-    ).toBe(false);
+    expect(snapshotsEqual(createEmptyEditorSnapshot(), snapshot)).toBe(false);
     expect(snapshot.entityDraft?.label).toBe('North Tower');
     expect(snapshot.selectedEntityIds).toEqual(['watchtower-1']);
     expect(snapshot.tool).toBe('place-entity');

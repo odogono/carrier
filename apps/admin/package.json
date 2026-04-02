@@ -1,7 +1,7 @@
 {
   "name": "carrier-admin",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "module",
   "scripts": {
     "dev": "bun --env-file=dev.defaults.env ./index.html",

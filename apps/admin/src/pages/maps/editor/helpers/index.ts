@@ -7,6 +7,8 @@ import type {
   WorldPoint
 } from 'carrier-contracts/types';
 
+export { DEFAULT_SOURCE_POLYGON_PARAMS } from 'carrier-contracts';
+
 export type EditorTool =
   | 'pan'
   | 'select'
@@ -14,12 +16,6 @@ export type EditorTool =
   | 'draw-polygon'
   | 'edit-vertices'
   | 'place-control-point';
-
-export const DEFAULT_SOURCE_POLYGON_PARAMS: SourcePolygonParams = {
-  maxDisplacementMeters: 12,
-  noiseScaleMeters: 64,
-  roughness: 0.5
-};
 
 export const DEFAULT_CONTROL_POINT = {
   elevationMeters: 0,
@@ -40,6 +36,8 @@ export const canSavePolygonDraft = (
 ) =>
   vertices.length >= 3 &&
   countUniqueVertices(vertices) >= 3 &&
+  Number.isFinite(params.interiorFill) &&
+  params.interiorFill > 0 &&
   Number.isFinite(params.maxDisplacementMeters) &&
   params.maxDisplacementMeters >= 0 &&
   Number.isFinite(params.noiseScaleMeters) &&

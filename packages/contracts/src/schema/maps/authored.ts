@@ -1,19 +1,20 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-import { oc } from '@orpc/contract';
-import { type Route } from '@orpc/server';
+import { oc } from "@orpc/contract";
+import { type Route } from "@orpc/server";
 
 const finiteNumber = z.number().finite();
 const nonNegativeFiniteNumber = z.number().finite().nonnegative();
 const positiveFiniteNumber = z.number().finite().positive();
 const timestampSchema = z.string();
 
-const hasAtLeastThreeUniqueVertices = (vertices: readonly { x: number; z: number }[]) =>
-  new Set(vertices.map(vertex => `${vertex.x}:${vertex.z}`)).size >= 3;
+const hasAtLeastThreeUniqueVertices = (
+  vertices: readonly { x: number; z: number }[],
+) => new Set(vertices.map((vertex) => `${vertex.x}:${vertex.z}`)).size >= 3;
 
 export const WorldPointSchema = z.object({
   x: finiteNumber,
-  z: finiteNumber
+  z: finiteNumber,
 });
 export type WorldPoint = z.infer<typeof WorldPointSchema>;
 
@@ -21,19 +22,52 @@ export const WorldBoundsSchema = z.object({
   maxX: finiteNumber,
   maxZ: finiteNumber,
   minX: finiteNumber,
-  minZ: finiteNumber
+  minZ: finiteNumber,
 });
 export type WorldBounds = z.infer<typeof WorldBoundsSchema>;
 
-export const SourcePolygonStatusSchema = z.enum(['active', 'retired']);
+export const SourcePolygonStatusSchema = z.enum(["active", "retired"]);
 export type SourcePolygonStatus = z.infer<typeof SourcePolygonStatusSchema>;
 
-export const SourcePolygonParamsSchema = z.object({
+export const DEFAULT_SOURCE_POLYGON_PARAMS = {
+  interiorFill: 1.5,
+  maxDisplacementMeters: 12,
+  noiseScaleMeters: 64,
+  roughness: 0.5,
+} as const;
+
+export type SourcePolygonParams = {
+  interiorFill: number;
+  maxDisplacementMeters: number;
+  noiseScaleMeters: number;
+  roughness: number;
+};
+
+const SourcePolygonParamsShape = z.object({
+  interiorFill: z.number().finite().positive(),
   maxDisplacementMeters: nonNegativeFiniteNumber,
   noiseScaleMeters: z.number().finite().positive(),
-  roughness: nonNegativeFiniteNumber
+  roughness: nonNegativeFiniteNumber,
 });
-export type SourcePolygonParams = z.infer<typeof SourcePolygonParamsSchema>;
+
+export const normalizeSourcePolygonParams = (
+  input:
+    | Partial<SourcePolygonParams>
+    | typeof DEFAULT_SOURCE_POLYGON_PARAMS
+    | null
+    | undefined,
+): SourcePolygonParams => ({
+  ...DEFAULT_SOURCE_POLYGON_PARAMS,
+  ...(input ?? {}),
+});
+
+export const SourcePolygonParamsSchema = z.preprocess(
+  (value) =>
+    typeof value === "object" && value !== null
+      ? normalizeSourcePolygonParams(value as Partial<SourcePolygonParams>)
+      : value,
+  SourcePolygonParamsShape,
+);
 
 export const SourcePolygonSchema = z.object({
   bbox: WorldBoundsSchema,
@@ -48,12 +82,12 @@ export const SourcePolygonSchema = z.object({
     .array(WorldPointSchema)
     .min(3)
     .refine(hasAtLeastThreeUniqueVertices, {
-      message: 'Source polygons require at least 3 unique vertices'
-    })
+      message: "Source polygons require at least 3 unique vertices",
+    }),
 });
 export type SourcePolygon = z.infer<typeof SourcePolygonSchema>;
 
-export const ControlPointTypeSchema = z.enum(['peak', 'valley', 'plain']);
+export const ControlPointTypeSchema = z.enum(["peak", "valley", "plain"]);
 export type ControlPointType = z.infer<typeof ControlPointTypeSchema>;
 
 export const ControlPointSchema = z.object({
@@ -66,7 +100,7 @@ export const ControlPointSchema = z.object({
   type: ControlPointTypeSchema,
   updatedAt: timestampSchema,
   x: finiteNumber,
-  z: finiteNumber
+  z: finiteNumber,
 });
 export type ControlPoint = z.infer<typeof ControlPointSchema>;
 
@@ -81,7 +115,7 @@ export const DerivedIslandSchema = z.object({
   mapId: z.string().min(1),
   name: z.string().trim().min(1).max(120).nullable(),
   sourcePolygonIds: z.array(z.string().min(1)),
-  updatedAt: timestampSchema
+  updatedAt: timestampSchema,
 });
 export type DerivedIsland = z.infer<typeof DerivedIslandSchema>;
 
@@ -90,14 +124,14 @@ export const MapOverviewClusterSchema = z.object({
   centroid: WorldPointSchema,
   controlPointCount: z.number().int().nonnegative(),
   derivedIslandCount: z.number().int().nonnegative(),
-  sourcePolygonCount: z.number().int().nonnegative()
+  sourcePolygonCount: z.number().int().nonnegative(),
 });
 export type MapOverviewCluster = z.infer<typeof MapOverviewClusterSchema>;
 
 export const MapOverviewCountsSchema = z.object({
   controlPoints: z.number().int().nonnegative(),
   derivedIslands: z.number().int().nonnegative(),
-  sourcePolygons: z.number().int().nonnegative()
+  sourcePolygons: z.number().int().nonnegative(),
 });
 export type MapOverviewCounts = z.infer<typeof MapOverviewCountsSchema>;
 
@@ -106,63 +140,69 @@ export const MapOverviewSchema = z.object({
   clusters: z.array(MapOverviewClusterSchema),
   counts: MapOverviewCountsSchema,
   mapId: z.string().min(1),
-  revision: z.number().int().nonnegative()
+  revision: z.number().int().nonnegative(),
 });
 export type MapOverview = z.infer<typeof MapOverviewSchema>;
 
 export const AssetVersionStatusSchema = z.enum([
-  'uploaded',
-  'processing',
-  'review',
-  'ready',
-  'failed',
-  'archived'
+  "uploaded",
+  "processing",
+  "review",
+  "ready",
+  "failed",
+  "archived",
 ]);
 export type AssetVersionStatus = z.infer<typeof AssetVersionStatusSchema>;
 
-export const ArchetypeStatusSchema = z.enum(['active', 'deprecated', 'archived']);
+export const ArchetypeStatusSchema = z.enum([
+  "active",
+  "deprecated",
+  "archived",
+]);
 export type ArchetypeStatus = z.infer<typeof ArchetypeStatusSchema>;
 
-export const StaticEntityStateSchema = z.enum(['active', 'disabled']);
+export const StaticEntityStateSchema = z.enum(["active", "disabled"]);
 export type StaticEntityState = z.infer<typeof StaticEntityStateSchema>;
 
-export const ZarchRuntimeEntityKindSchema = z.enum(['player-ship']);
+export const ZarchRuntimeEntityKindSchema = z.enum(["player-ship"]);
 export type ZarchRuntimeEntityKind = z.infer<
   typeof ZarchRuntimeEntityKindSchema
 >;
 
-export const ZarchRuntimeEntityStatusSchema = z.enum(['active', 'archived']);
+export const ZarchRuntimeEntityStatusSchema = z.enum(["active", "archived"]);
 export type ZarchRuntimeEntityStatus = z.infer<
   typeof ZarchRuntimeEntityStatusSchema
 >;
 
 export const ArchetypeCategorySchema = z.enum([
-  'building',
-  'landmark',
-  'industrial',
-  'natural-prop'
+  "building",
+  "landmark",
+  "industrial",
+  "natural-prop",
 ]);
 export type ArchetypeCategory = z.infer<typeof ArchetypeCategorySchema>;
 
 export const AssetFileMetadataSchema = z.object({
   contentType: z.string().trim().min(1).max(255).nullable(),
   path: z.string().trim().min(1).max(1024),
-  sizeBytes: z.number().int().nonnegative()
+  sizeBytes: z.number().int().nonnegative(),
 });
 export type AssetFileMetadata = z.infer<typeof AssetFileMetadataSchema>;
 
 export const AssetVersionFootprintSchema = z.object({
   depthMeters: positiveFiniteNumber,
-  widthMeters: positiveFiniteNumber
+  widthMeters: positiveFiniteNumber,
 });
 export type AssetVersionFootprint = z.infer<typeof AssetVersionFootprintSchema>;
 
 export const AssetVersionCollisionBoxSchema = z.object({
   depthMeters: positiveFiniteNumber,
   heightMeters: positiveFiniteNumber,
-  widthMeters: positiveFiniteNumber
+  widthMeters: positiveFiniteNumber,
 });
-export type AssetVersionCollisionBox = z.infer<typeof AssetVersionCollisionBoxSchema>;
+export type AssetVersionCollisionBox = z.infer<
+  typeof AssetVersionCollisionBoxSchema
+>;
 
 export const AssetVersionSchema = z.object({
   collisionBox: AssetVersionCollisionBoxSchema,
@@ -177,13 +217,13 @@ export const AssetVersionSchema = z.object({
   originalFile: AssetFileMetadataSchema,
   runtimeFile: AssetFileMetadataSchema.nullable(),
   status: AssetVersionStatusSchema,
-  updatedAt: timestampSchema
+  updatedAt: timestampSchema,
 });
 export type AssetVersion = z.infer<typeof AssetVersionSchema>;
 
 export const AssetVersionUsageSummarySchema = z.object({
   archetypeIds: z.array(z.string().min(1)).max(100),
-  runtimeEntityIds: z.array(z.string().min(1)).max(100)
+  runtimeEntityIds: z.array(z.string().min(1)).max(100),
 });
 export type AssetVersionUsageSummary = z.infer<
   typeof AssetVersionUsageSummarySchema
@@ -193,12 +233,12 @@ export const AssetVersionListItemSchema = z.object({
   asset: AssetVersionSchema,
   isDeletable: z.boolean(),
   runtimeArtifactPresent: z.boolean(),
-  usage: AssetVersionUsageSummarySchema
+  usage: AssetVersionUsageSummarySchema,
 });
 export type AssetVersionListItem = z.infer<typeof AssetVersionListItemSchema>;
 
 export const ZarchRuntimeEntityRenderDimensionsSchema = z.object({
-  lengthMeters: positiveFiniteNumber
+  lengthMeters: positiveFiniteNumber,
 });
 export type ZarchRuntimeEntityRenderDimensions = z.infer<
   typeof ZarchRuntimeEntityRenderDimensionsSchema
@@ -212,7 +252,7 @@ export const ZarchRuntimeEntitySchema = z.object({
   name: z.string().trim().min(1).max(120),
   renderDimensions: ZarchRuntimeEntityRenderDimensionsSchema,
   status: ZarchRuntimeEntityStatusSchema,
-  updatedAt: timestampSchema
+  updatedAt: timestampSchema,
 });
 export type ZarchRuntimeEntity = z.infer<typeof ZarchRuntimeEntitySchema>;
 
@@ -224,12 +264,12 @@ export const ArchetypeSchema = z.object({
   name: z.string().trim().min(1).max(120),
   status: ArchetypeStatusSchema,
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
-  updatedAt: timestampSchema
+  updatedAt: timestampSchema,
 });
 export type Archetype = z.infer<typeof ArchetypeSchema>;
 
 export const StaticEntityRotationSchema = z.object({
-  yaw: finiteNumber
+  yaw: finiteNumber,
 });
 export type StaticEntityRotation = z.infer<typeof StaticEntityRotationSchema>;
 
@@ -244,7 +284,7 @@ export const StaticEntitySchema = z.object({
   scale: positiveFiniteNumber,
   state: StaticEntityStateSchema,
   updatedAt: timestampSchema,
-  yOffset: finiteNumber
+  yOffset: finiteNumber,
 });
 export type StaticEntity = z.infer<typeof StaticEntitySchema>;
 
@@ -253,7 +293,7 @@ export const StaticEntityArchetypeSummarySchema = z.object({
   category: ArchetypeCategorySchema,
   id: z.string().min(1),
   name: z.string().trim().min(1).max(120),
-  status: ArchetypeStatusSchema
+  status: ArchetypeStatusSchema,
 });
 export type StaticEntityArchetypeSummary = z.infer<
   typeof StaticEntityArchetypeSummarySchema
@@ -261,20 +301,20 @@ export type StaticEntityArchetypeSummary = z.infer<
 
 export const StaticEntityListItemSchema = z.object({
   archetype: StaticEntityArchetypeSummarySchema,
-  entity: StaticEntitySchema
+  entity: StaticEntitySchema,
 });
 export type StaticEntityListItem = z.infer<typeof StaticEntityListItemSchema>;
 
 export const AssetVersionListFilterStatusSchema = z.union([
   AssetVersionStatusSchema,
-  z.literal('all')
+  z.literal("all"),
 ]);
 export type AssetVersionListFilterStatus = z.infer<
   typeof AssetVersionListFilterStatusSchema
 >;
 
 export const ListAssetVersionsInput = z.object({
-  status: AssetVersionListFilterStatusSchema.default('all')
+  status: AssetVersionListFilterStatusSchema.default("all"),
 });
 export type ListAssetVersionsInput = z.infer<typeof ListAssetVersionsInput>;
 
@@ -282,7 +322,7 @@ export const ListAssetVersionsOutput = z.array(AssetVersionListItemSchema);
 export type ListAssetVersionsOutput = z.infer<typeof ListAssetVersionsOutput>;
 
 export const GetAssetVersionInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type GetAssetVersionInput = z.infer<typeof GetAssetVersionInput>;
 
@@ -297,7 +337,7 @@ export const UpdateAssetVersionReviewInput = z.object({
   groundingPolicy: z.string().trim().min(1).max(120).optional(),
   id: z.string().min(1),
   instancingEligible: z.boolean().optional(),
-  maxHeightDeltaMeters: nonNegativeFiniteNumber.optional()
+  maxHeightDeltaMeters: nonNegativeFiniteNumber.optional(),
 });
 export type UpdateAssetVersionReviewInput = z.infer<
   typeof UpdateAssetVersionReviewInput
@@ -309,21 +349,19 @@ export type UpdateAssetVersionReviewOutput = z.infer<
 >;
 
 export const ListZarchRuntimeEntitiesInput = z.object({
-  status: ZarchRuntimeEntityStatusSchema.optional()
+  status: ZarchRuntimeEntityStatusSchema.optional(),
 });
 export type ListZarchRuntimeEntitiesInput = z.infer<
   typeof ListZarchRuntimeEntitiesInput
 >;
 
-export const ListZarchRuntimeEntitiesOutput = z.array(
-  ZarchRuntimeEntitySchema
-);
+export const ListZarchRuntimeEntitiesOutput = z.array(ZarchRuntimeEntitySchema);
 export type ListZarchRuntimeEntitiesOutput = z.infer<
   typeof ListZarchRuntimeEntitiesOutput
 >;
 
 export const GetZarchRuntimeEntityInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type GetZarchRuntimeEntityInput = z.infer<
   typeof GetZarchRuntimeEntityInput
@@ -340,7 +378,7 @@ export const UpsertZarchRuntimeEntityInput = z.object({
   kind: ZarchRuntimeEntityKindSchema,
   name: z.string().trim().min(1).max(120),
   renderDimensions: ZarchRuntimeEntityRenderDimensionsSchema,
-  status: ZarchRuntimeEntityStatusSchema
+  status: ZarchRuntimeEntityStatusSchema,
 });
 export type UpsertZarchRuntimeEntityInput = z.infer<
   typeof UpsertZarchRuntimeEntityInput
@@ -352,15 +390,17 @@ export type UpsertZarchRuntimeEntityOutput = z.infer<
 >;
 
 export const ApproveAssetVersionInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type ApproveAssetVersionInput = z.infer<typeof ApproveAssetVersionInput>;
 
 export const ApproveAssetVersionOutput = AssetVersionSchema;
-export type ApproveAssetVersionOutput = z.infer<typeof ApproveAssetVersionOutput>;
+export type ApproveAssetVersionOutput = z.infer<
+  typeof ApproveAssetVersionOutput
+>;
 
 export const ArchiveAssetVersionInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type ArchiveAssetVersionInput = z.infer<typeof ArchiveAssetVersionInput>;
 
@@ -370,19 +410,19 @@ export type ArchiveAssetVersionOutput = z.infer<
 >;
 
 export const DeleteAssetVersionInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type DeleteAssetVersionInput = z.infer<typeof DeleteAssetVersionInput>;
 
 export const DeleteAssetVersionOutput = z.object({
   deleted: z.literal(true),
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type DeleteAssetVersionOutput = z.infer<typeof DeleteAssetVersionOutput>;
 
 export const CreateArchetypeInput = ArchetypeSchema.omit({
   createdAt: true,
-  updatedAt: true
+  updatedAt: true,
 });
 export type CreateArchetypeInput = z.infer<typeof CreateArchetypeInput>;
 
@@ -390,7 +430,7 @@ export const CreateArchetypeOutput = ArchetypeSchema;
 export type CreateArchetypeOutput = z.infer<typeof CreateArchetypeOutput>;
 
 export const ListArchetypesInput = z.object({
-  status: ArchetypeStatusSchema.optional()
+  status: ArchetypeStatusSchema.optional(),
 });
 export type ListArchetypesInput = z.infer<typeof ListArchetypesInput>;
 
@@ -398,28 +438,27 @@ export const ListArchetypesOutput = z.array(ArchetypeSchema);
 export type ListArchetypesOutput = z.infer<typeof ListArchetypesOutput>;
 
 export const GetArchetypeInput = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 export type GetArchetypeInput = z.infer<typeof GetArchetypeInput>;
 
 export const GetArchetypeOutput = ArchetypeSchema;
 export type GetArchetypeOutput = z.infer<typeof GetArchetypeOutput>;
 
-export const UpdateArchetypeInput = z
-  .object({
-    category: ArchetypeCategorySchema.optional(),
-    id: z.string().min(1),
-    name: z.string().trim().min(1).max(120).optional(),
-    status: ArchetypeStatusSchema.optional(),
-    tags: z.array(z.string().trim().min(1).max(120)).max(100).optional()
-  });
+export const UpdateArchetypeInput = z.object({
+  category: ArchetypeCategorySchema.optional(),
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(120).optional(),
+  status: ArchetypeStatusSchema.optional(),
+  tags: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
+});
 export type UpdateArchetypeInput = z.infer<typeof UpdateArchetypeInput>;
 
 export const UpdateArchetypeOutput = ArchetypeSchema;
 export type UpdateArchetypeOutput = z.infer<typeof UpdateArchetypeOutput>;
 
 export const ListReferencedArchetypesInput = z.object({
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type ListReferencedArchetypesInput = z.infer<
   typeof ListReferencedArchetypesInput
@@ -440,18 +479,18 @@ export const CreateStaticEntityInput = z.object({
   rotation: StaticEntityRotationSchema,
   scale: positiveFiniteNumber,
   state: StaticEntityStateSchema,
-  yOffset: finiteNumber
+  yOffset: finiteNumber,
 });
 export type CreateStaticEntityInput = z.infer<typeof CreateStaticEntityInput>;
 
 export const CreateStaticEntityOutput = z.object({
   entity: StaticEntitySchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type CreateStaticEntityOutput = z.infer<typeof CreateStaticEntityOutput>;
 
 export const ListStaticEntitiesInput = z.object({
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type ListStaticEntitiesInput = z.infer<typeof ListStaticEntitiesInput>;
 
@@ -468,26 +507,26 @@ export const UpdateStaticEntityInput = z.object({
   rotation: StaticEntityRotationSchema.optional(),
   scale: positiveFiniteNumber.optional(),
   state: StaticEntityStateSchema.optional(),
-  yOffset: finiteNumber.optional()
+  yOffset: finiteNumber.optional(),
 });
 export type UpdateStaticEntityInput = z.infer<typeof UpdateStaticEntityInput>;
 
 export const UpdateStaticEntityOutput = z.object({
   entity: StaticEntitySchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type UpdateStaticEntityOutput = z.infer<typeof UpdateStaticEntityOutput>;
 
 export const DeleteStaticEntityInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   id: z.string().min(1),
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type DeleteStaticEntityInput = z.infer<typeof DeleteStaticEntityInput>;
 
 export const DeleteStaticEntityOutput = z.object({
   entity: StaticEntitySchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type DeleteStaticEntityOutput = z.infer<typeof DeleteStaticEntityOutput>;
 
@@ -495,50 +534,56 @@ export const CreateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   mapId: z.string().min(1),
   params: SourcePolygonParamsSchema,
-  vertices: SourcePolygonSchema.shape.vertices
+  vertices: SourcePolygonSchema.shape.vertices,
 });
 export type CreateSourcePolygonInput = z.infer<typeof CreateSourcePolygonInput>;
 
 export const CreateSourcePolygonOutput = z.object({
   dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
-  polygon: SourcePolygonSchema
+  polygon: SourcePolygonSchema,
 });
-export type CreateSourcePolygonOutput = z.infer<typeof CreateSourcePolygonOutput>;
+export type CreateSourcePolygonOutput = z.infer<
+  typeof CreateSourcePolygonOutput
+>;
 
 export const UpdateSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   id: z.string().min(1),
   mapId: z.string().min(1),
   params: SourcePolygonParamsSchema.optional(),
-  vertices: SourcePolygonSchema.shape.vertices.optional()
+  vertices: SourcePolygonSchema.shape.vertices.optional(),
 });
 export type UpdateSourcePolygonInput = z.infer<typeof UpdateSourcePolygonInput>;
 
 export const UpdateSourcePolygonOutput = z.object({
   dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
-  polygon: SourcePolygonSchema
+  polygon: SourcePolygonSchema,
 });
-export type UpdateSourcePolygonOutput = z.infer<typeof UpdateSourcePolygonOutput>;
+export type UpdateSourcePolygonOutput = z.infer<
+  typeof UpdateSourcePolygonOutput
+>;
 
 export const DeleteSourcePolygonInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   id: z.string().min(1),
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type DeleteSourcePolygonInput = z.infer<typeof DeleteSourcePolygonInput>;
 
 export const DeleteSourcePolygonOutput = z.object({
   dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
-  polygon: SourcePolygonSchema
+  polygon: SourcePolygonSchema,
 });
-export type DeleteSourcePolygonOutput = z.infer<typeof DeleteSourcePolygonOutput>;
+export type DeleteSourcePolygonOutput = z.infer<
+  typeof DeleteSourcePolygonOutput
+>;
 
 export const ListSourcePolygonsInput = z.object({
   mapId: z.string().min(1),
-  status: SourcePolygonStatusSchema.optional()
+  status: SourcePolygonStatusSchema.optional(),
 });
 export type ListSourcePolygonsInput = z.infer<typeof ListSourcePolygonsInput>;
 
@@ -553,14 +598,14 @@ export const CreateControlPointInput = z.object({
   strength: nonNegativeFiniteNumber.default(1),
   type: ControlPointTypeSchema,
   x: finiteNumber,
-  z: finiteNumber
+  z: finiteNumber,
 });
 export type CreateControlPointInput = z.infer<typeof CreateControlPointInput>;
 
 export const CreateControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
   dirtyBounds: WorldBoundsSchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type CreateControlPointOutput = z.infer<typeof CreateControlPointOutput>;
 
@@ -573,33 +618,33 @@ export const UpdateControlPointInput = z.object({
   strength: nonNegativeFiniteNumber.optional(),
   type: ControlPointTypeSchema.optional(),
   x: finiteNumber.optional(),
-  z: finiteNumber.optional()
+  z: finiteNumber.optional(),
 });
 export type UpdateControlPointInput = z.infer<typeof UpdateControlPointInput>;
 
 export const UpdateControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
   dirtyBounds: WorldBoundsSchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type UpdateControlPointOutput = z.infer<typeof UpdateControlPointOutput>;
 
 export const DeleteControlPointInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   id: z.string().min(1),
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type DeleteControlPointInput = z.infer<typeof DeleteControlPointInput>;
 
 export const DeleteControlPointOutput = z.object({
   controlPoint: ControlPointSchema,
   dirtyBounds: WorldBoundsSchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
 export type DeleteControlPointOutput = z.infer<typeof DeleteControlPointOutput>;
 
 export const ListControlPointsInput = z.object({
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type ListControlPointsInput = z.infer<typeof ListControlPointsInput>;
 
@@ -607,7 +652,7 @@ export const ListControlPointsOutput = z.array(ControlPointSchema);
 export type ListControlPointsOutput = z.infer<typeof ListControlPointsOutput>;
 
 export const ListDerivedIslandsInput = z.object({
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type ListDerivedIslandsInput = z.infer<typeof ListDerivedIslandsInput>;
 
@@ -620,21 +665,23 @@ export const UpdateDerivedIslandInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   id: z.string().min(1),
   mapId: z.string().min(1),
-  name: z.string().trim().min(1).max(120).nullable().optional()
+  name: z.string().trim().min(1).max(120).nullable().optional(),
 });
 export type UpdateDerivedIslandInput = z.infer<typeof UpdateDerivedIslandInput>;
 
 export const UpdateDerivedIslandOutput = z.object({
   island: DerivedIslandSchema,
-  mapRevision: z.number().int().nonnegative()
+  mapRevision: z.number().int().nonnegative(),
 });
-export type UpdateDerivedIslandOutput = z.infer<typeof UpdateDerivedIslandOutput>;
+export type UpdateDerivedIslandOutput = z.infer<
+  typeof UpdateDerivedIslandOutput
+>;
 
 export const BooleanOperationSchema = z.enum([
-  'union',
-  'intersection',
-  'xor',
-  'difference'
+  "union",
+  "intersection",
+  "xor",
+  "difference",
 ]);
 export type BooleanOperation = z.infer<typeof BooleanOperationSchema>;
 
@@ -642,7 +689,7 @@ export const ApplyBooleanInput = z.object({
   expectedRevision: z.number().int().nonnegative(),
   mapId: z.string().min(1),
   operation: BooleanOperationSchema,
-  polygonIds: z.array(z.string().min(1)).min(1)
+  polygonIds: z.array(z.string().min(1)).min(1),
 });
 export type ApplyBooleanInput = z.infer<typeof ApplyBooleanInput>;
 
@@ -650,12 +697,12 @@ export const ApplyBooleanOutput = z.object({
   createdPolygons: z.array(SourcePolygonSchema),
   dirtyBounds: WorldBoundsSchema,
   mapRevision: z.number().int().nonnegative(),
-  retiredPolygonIds: z.array(z.string().min(1))
+  retiredPolygonIds: z.array(z.string().min(1)),
 });
 export type ApplyBooleanOutput = z.infer<typeof ApplyBooleanOutput>;
 
 export const GetOverviewInput = z.object({
-  mapId: z.string().min(1)
+  mapId: z.string().min(1),
 });
 export type GetOverviewInput = z.infer<typeof GetOverviewInput>;
 
@@ -663,213 +710,216 @@ export const GetOverviewOutput = MapOverviewSchema;
 export type GetOverviewOutput = z.infer<typeof GetOverviewOutput>;
 
 export const ListSourcePolygonsRoute: Route = {
-  description: 'List authored source polygons for an infinite-vector map',
-  method: 'GET',
-  path: '/maps/{mapId}/polygons',
-  tags: ['maps']
+  description: "List authored source polygons for an infinite-vector map",
+  method: "GET",
+  path: "/maps/{mapId}/polygons",
+  tags: ["maps"],
 } as const;
 
 export const CreateSourcePolygonRoute: Route = {
-  description: 'Create a source polygon for an infinite-vector map',
-  method: 'POST',
-  path: '/maps/{mapId}/polygons',
-  tags: ['maps']
+  description: "Create a source polygon for an infinite-vector map",
+  method: "POST",
+  path: "/maps/{mapId}/polygons",
+  tags: ["maps"],
 } as const;
 
 export const UpdateSourcePolygonRoute: Route = {
-  description: 'Update a source polygon for an infinite-vector map',
-  method: 'PATCH',
-  path: '/maps/{mapId}/polygons/{id}',
-  tags: ['maps']
+  description: "Update a source polygon for an infinite-vector map",
+  method: "PATCH",
+  path: "/maps/{mapId}/polygons/{id}",
+  tags: ["maps"],
 } as const;
 
 export const DeleteSourcePolygonRoute: Route = {
-  description: 'Retire a source polygon for an infinite-vector map',
-  method: 'DELETE',
-  path: '/maps/{mapId}/polygons/{id}',
-  tags: ['maps']
+  description: "Retire a source polygon for an infinite-vector map",
+  method: "DELETE",
+  path: "/maps/{mapId}/polygons/{id}",
+  tags: ["maps"],
 } as const;
 
 export const ListControlPointsRoute: Route = {
-  description: 'List authored control points for an infinite-vector map',
-  method: 'GET',
-  path: '/maps/{mapId}/controls',
-  tags: ['maps']
+  description: "List authored control points for an infinite-vector map",
+  method: "GET",
+  path: "/maps/{mapId}/controls",
+  tags: ["maps"],
 } as const;
 
 export const CreateControlPointRoute: Route = {
-  description: 'Create a control point for an infinite-vector map',
-  method: 'POST',
-  path: '/maps/{mapId}/controls',
-  tags: ['maps']
+  description: "Create a control point for an infinite-vector map",
+  method: "POST",
+  path: "/maps/{mapId}/controls",
+  tags: ["maps"],
 } as const;
 
 export const UpdateControlPointRoute: Route = {
-  description: 'Update a control point for an infinite-vector map',
-  method: 'PATCH',
-  path: '/maps/{mapId}/controls/{id}',
-  tags: ['maps']
+  description: "Update a control point for an infinite-vector map",
+  method: "PATCH",
+  path: "/maps/{mapId}/controls/{id}",
+  tags: ["maps"],
 } as const;
 
 export const DeleteControlPointRoute: Route = {
-  description: 'Delete a control point for an infinite-vector map',
-  method: 'DELETE',
-  path: '/maps/{mapId}/controls/{id}',
-  tags: ['maps']
+  description: "Delete a control point for an infinite-vector map",
+  method: "DELETE",
+  path: "/maps/{mapId}/controls/{id}",
+  tags: ["maps"],
 } as const;
 
 export const ListDerivedIslandsRoute: Route = {
-  description: 'List derived islands for an infinite-vector map',
-  method: 'GET',
-  path: '/maps/{mapId}/islands',
-  tags: ['maps']
+  description: "List derived islands for an infinite-vector map",
+  method: "GET",
+  path: "/maps/{mapId}/islands",
+  tags: ["maps"],
 } as const;
 
 export const UpdateDerivedIslandRoute: Route = {
-  description: 'Update derived island metadata for an infinite-vector map',
-  method: 'PATCH',
-  path: '/maps/{mapId}/islands/{id}',
-  tags: ['maps']
+  description: "Update derived island metadata for an infinite-vector map",
+  method: "PATCH",
+  path: "/maps/{mapId}/islands/{id}",
+  tags: ["maps"],
 } as const;
 
 export const ApplyBooleanRoute: Route = {
-  description: 'Apply a boolean operation to source polygons',
-  method: 'POST',
-  path: '/maps/{mapId}/boolean',
-  tags: ['maps']
+  description: "Apply a boolean operation to source polygons",
+  method: "POST",
+  path: "/maps/{mapId}/boolean",
+  tags: ["maps"],
 } as const;
 
 export const GetOverviewRoute: Route = {
-  description: 'Retrieve authored overview data for an infinite-vector map',
-  method: 'GET',
-  path: '/maps/{mapId}/overview',
-  tags: ['maps']
+  description: "Retrieve authored overview data for an infinite-vector map",
+  method: "GET",
+  path: "/maps/{mapId}/overview",
+  tags: ["maps"],
 } as const;
 
 export const ListAssetVersionsRoute: Route = {
-  description: 'List uploaded asset versions',
-  method: 'GET',
-  path: '/maps/assets',
-  tags: ['maps']
+  description: "List uploaded asset versions",
+  method: "GET",
+  path: "/maps/assets",
+  tags: ["maps"],
 } as const;
 
 export const GetAssetVersionRoute: Route = {
-  description: 'Retrieve asset version metadata',
-  method: 'GET',
-  path: '/maps/assets/{id}',
-  tags: ['maps']
+  description: "Retrieve asset version metadata",
+  method: "GET",
+  path: "/maps/assets/{id}",
+  tags: ["maps"],
 } as const;
 
 export const UpdateAssetVersionReviewRoute: Route = {
-  description: 'Update derived asset review metadata while the asset is in review',
-  method: 'PATCH',
-  path: '/maps/assets/{id}/review',
-  tags: ['maps']
+  description:
+    "Update derived asset review metadata while the asset is in review",
+  method: "PATCH",
+  path: "/maps/assets/{id}/review",
+  tags: ["maps"],
 } as const;
 
 export const ApproveAssetVersionRoute: Route = {
-  description: 'Approve a reviewed asset version and mark it ready',
-  method: 'POST',
-  path: '/maps/assets/{id}/approve',
-  tags: ['maps']
+  description: "Approve a reviewed asset version and mark it ready",
+  method: "POST",
+  path: "/maps/assets/{id}/approve",
+  tags: ["maps"],
 } as const;
 
 export const ArchiveAssetVersionRoute: Route = {
-  description: 'Archive an asset version while keeping existing references resolvable',
-  method: 'POST',
-  path: '/maps/assets/{id}/archive',
-  tags: ['maps']
+  description:
+    "Archive an asset version while keeping existing references resolvable",
+  method: "POST",
+  path: "/maps/assets/{id}/archive",
+  tags: ["maps"],
 } as const;
 
 export const DeleteAssetVersionRoute: Route = {
-  description: 'Delete an unreferenced asset version permanently',
-  method: 'DELETE',
-  path: '/maps/assets/{id}',
-  tags: ['maps']
+  description: "Delete an unreferenced asset version permanently",
+  method: "DELETE",
+  path: "/maps/assets/{id}",
+  tags: ["maps"],
 } as const;
 
 export const ListZarchRuntimeEntitiesRoute: Route = {
-  description: 'List global Zarch runtime entity definitions',
-  method: 'GET',
-  path: '/zarch/runtime-entities',
-  tags: ['zarch']
+  description: "List global Zarch runtime entity definitions",
+  method: "GET",
+  path: "/zarch/runtime-entities",
+  tags: ["zarch"],
 } as const;
 
 export const GetZarchRuntimeEntityRoute: Route = {
-  description: 'Retrieve a single Zarch runtime entity definition',
-  method: 'GET',
-  path: '/zarch/runtime-entities/{id}',
-  tags: ['zarch']
+  description: "Retrieve a single Zarch runtime entity definition",
+  method: "GET",
+  path: "/zarch/runtime-entities/{id}",
+  tags: ["zarch"],
 } as const;
 
 export const UpsertZarchRuntimeEntityRoute: Route = {
-  description: 'Create or update a Zarch runtime entity definition',
-  method: 'PUT',
-  path: '/zarch/runtime-entities/{id}',
-  tags: ['zarch']
+  description: "Create or update a Zarch runtime entity definition",
+  method: "PUT",
+  path: "/zarch/runtime-entities/{id}",
+  tags: ["zarch"],
 } as const;
 
 export const CreateArchetypeRoute: Route = {
-  description: 'Create an archetype from a ready asset version',
-  method: 'POST',
-  path: '/maps/archetypes',
-  tags: ['maps']
+  description: "Create an archetype from a ready asset version",
+  method: "POST",
+  path: "/maps/archetypes",
+  tags: ["maps"],
 } as const;
 
 export const ListArchetypesRoute: Route = {
-  description: 'List global archetypes in the content catalog',
-  method: 'GET',
-  path: '/maps/archetypes',
-  tags: ['maps']
+  description: "List global archetypes in the content catalog",
+  method: "GET",
+  path: "/maps/archetypes",
+  tags: ["maps"],
 } as const;
 
 export const GetArchetypeRoute: Route = {
-  description: 'Retrieve a single archetype from the content catalog',
-  method: 'GET',
-  path: '/maps/archetypes/{id}',
-  tags: ['maps']
+  description: "Retrieve a single archetype from the content catalog",
+  method: "GET",
+  path: "/maps/archetypes/{id}",
+  tags: ["maps"],
 } as const;
 
 export const UpdateArchetypeRoute: Route = {
-  description: 'Update mutable archetype metadata and lifecycle status',
-  method: 'PATCH',
-  path: '/maps/archetypes/{id}',
-  tags: ['maps']
+  description: "Update mutable archetype metadata and lifecycle status",
+  method: "PATCH",
+  path: "/maps/archetypes/{id}",
+  tags: ["maps"],
 } as const;
 
 export const ListReferencedArchetypesRoute: Route = {
-  description: 'List distinct archetypes referenced by placements in a map',
-  method: 'GET',
-  path: '/maps/{mapId}/archetypes',
-  tags: ['maps']
+  description: "List distinct archetypes referenced by placements in a map",
+  method: "GET",
+  path: "/maps/{mapId}/archetypes",
+  tags: ["maps"],
 } as const;
 
 export const CreateStaticEntityRoute: Route = {
-  description: 'Create a static entity placement for a map',
-  method: 'POST',
-  path: '/maps/{mapId}/entities',
-  tags: ['maps']
+  description: "Create a static entity placement for a map",
+  method: "POST",
+  path: "/maps/{mapId}/entities",
+  tags: ["maps"],
 } as const;
 
 export const ListStaticEntitiesRoute: Route = {
-  description: 'List static entity placements for a map with resolved archetype summaries',
-  method: 'GET',
-  path: '/maps/{mapId}/entities',
-  tags: ['maps']
+  description:
+    "List static entity placements for a map with resolved archetype summaries",
+  method: "GET",
+  path: "/maps/{mapId}/entities",
+  tags: ["maps"],
 } as const;
 
 export const UpdateStaticEntityRoute: Route = {
-  description: 'Update a static entity placement for a map',
-  method: 'PATCH',
-  path: '/maps/{mapId}/entities/{id}',
-  tags: ['maps']
+  description: "Update a static entity placement for a map",
+  method: "PATCH",
+  path: "/maps/{mapId}/entities/{id}",
+  tags: ["maps"],
 } as const;
 
 export const DeleteStaticEntityRoute: Route = {
-  description: 'Delete a static entity placement for a map',
-  method: 'DELETE',
-  path: '/maps/{mapId}/entities/{id}',
-  tags: ['maps']
+  description: "Delete a static entity placement for a map",
+  method: "DELETE",
+  path: "/maps/{mapId}/entities/{id}",
+  tags: ["maps"],
 } as const;
 
 export const authoredMapsContract = {
@@ -921,7 +971,10 @@ export const authoredMapsContract = {
     .route(DeleteSourcePolygonRoute)
     .input(DeleteSourcePolygonInput)
     .output(DeleteSourcePolygonOutput),
-  getOverview: oc.route(GetOverviewRoute).input(GetOverviewInput).output(GetOverviewOutput),
+  getOverview: oc
+    .route(GetOverviewRoute)
+    .input(GetOverviewInput)
+    .output(GetOverviewOutput),
   getAssetVersion: oc
     .route(GetAssetVersionRoute)
     .input(GetAssetVersionInput)
@@ -989,5 +1042,5 @@ export const authoredMapsContract = {
   updateSourcePolygon: oc
     .route(UpdateSourcePolygonRoute)
     .input(UpdateSourcePolygonInput)
-    .output(UpdateSourcePolygonOutput)
+    .output(UpdateSourcePolygonOutput),
 };

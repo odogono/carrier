@@ -2,45 +2,44 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
-import type {
-  ApplyBooleanOutput,
-  Archetype,
-  AssetVersion,
-  AssetVersionListItem,
-  AssetVersionUsageSummary,
-  BooleanOperation,
-  ControlPoint,
-  CreateMapExportInput,
-  CreateMapInput,
-  DerivedIsland,
-  IslandClusterGeneratorParams,
-  MapChunk,
-  MapGenerator,
-  MapMetadata,
-  MapMetadataSummary,
-  MapOverview,
-  SourcePolygon,
-  SourcePolygonParams,
-  SourcePolygonStatus,
-  StaticEntity,
-  StaticEntityExportManifest,
-  StaticEntityExportManifestEntry,
-  StaticEntityArchetypeSummary,
-  StaticEntityListItem,
-  UpdateMapTilesOutput,
-  WorldBounds,
-  WorldPoint,
-  ZarchTileOverride,
-  ZarchRuntimeEntity
-} from 'carrier-contracts';
 import {
   DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
   MAP_GENERATOR_ISLANDS,
   ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS,
   ZARCH_TILE_OVERRIDE_COLOR_SENTINEL,
   ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
+  normalizeSourcePolygonParams,
   normalizeStaticEntityExportManifest,
-  slugify
+  slugify,
+  type ApplyBooleanOutput,
+  type Archetype,
+  type AssetVersion,
+  type AssetVersionListItem,
+  type AssetVersionUsageSummary,
+  type BooleanOperation,
+  type ControlPoint,
+  type CreateMapExportInput,
+  type CreateMapInput,
+  type DerivedIsland,
+  type IslandClusterGeneratorParams,
+  type MapChunk,
+  type MapGenerator,
+  type MapMetadata,
+  type MapMetadataSummary,
+  type MapOverview,
+  type SourcePolygon,
+  type SourcePolygonParams,
+  type SourcePolygonStatus,
+  type StaticEntity,
+  type StaticEntityArchetypeSummary,
+  type StaticEntityExportManifest,
+  type StaticEntityExportManifestEntry,
+  type StaticEntityListItem,
+  type UpdateMapTilesOutput,
+  type WorldBounds,
+  type WorldPoint,
+  type ZarchRuntimeEntity,
+  type ZarchTileOverride
 } from 'carrier-contracts';
 
 import {
@@ -69,15 +68,15 @@ import {
   resolveConnectedLandMasses
 } from './geometry';
 import {
-  clearCompiledVectorTerrainArtifact,
-  generateVectorChunk,
-  getCompiledVectorTerrainArtifact
-} from './vector-generation';
-import {
   DEFAULT_ZARCH_TILE_TYPE_ID,
   ZARCH_TILE_EDIT_CONFIG,
   getTileTypeIndex
 } from './tile-edit-config';
+import {
+  clearCompiledVectorTerrainArtifact,
+  generateVectorChunk,
+  getCompiledVectorTerrainArtifact
+} from './vector-generation';
 
 type MapRow = {
   chunkSizeTiles: number;
@@ -316,7 +315,10 @@ type MapRepositoryOptions = {
   dbPath?: string;
 };
 
-const DEFAULT_DB_PATH = resolve(import.meta.dir, '../../../.data/carrier.sqlite');
+const DEFAULT_DB_PATH = resolve(
+  import.meta.dir,
+  '../../../.data/carrier.sqlite'
+);
 
 export type RepositoryErrorCode = 'BAD_REQUEST' | 'CONFLICT' | 'NOT_FOUND';
 
@@ -577,7 +579,9 @@ const getStaticEntityExportDetail = (
 
   return {
     ...summary,
-    manifest: JSON.parse(row.staticEntityExportManifestJson) as StaticEntityExportManifest
+    manifest: JSON.parse(
+      row.staticEntityExportManifestJson
+    ) as StaticEntityExportManifest
   };
 };
 
@@ -745,7 +749,9 @@ const sourcePolygonRowToModel = (row: SourcePolygonRow): SourcePolygon => ({
   createdAt: row.createdAt,
   id: row.id,
   mapId: row.mapId,
-  params: parseJson<SourcePolygonParams>(row.paramsJson),
+  params: normalizeSourcePolygonParams(
+    parseJson<SourcePolygonParams>(row.paramsJson)
+  ),
   retiredAt: row.retiredAt,
   status: row.status as SourcePolygonStatus,
   updatedAt: row.updatedAt,
@@ -910,10 +916,7 @@ const getStaticEntityFootprintBounds = (
   };
 };
 
-const assetVersionHasChanges = (
-  current: AssetVersion,
-  next: AssetVersion
-) =>
+const assetVersionHasChanges = (current: AssetVersion, next: AssetVersion) =>
   JSON.stringify({
     collisionBox: current.collisionBox,
     collisionClass: current.collisionClass,
@@ -1084,11 +1087,7 @@ export class MapRepository {
       .get(mapId, chunkX, chunkZ);
   }
 
-  private normalizeTileCoordinate(
-    row: MapRow,
-    tileX: number,
-    tileZ: number
-  ) {
+  private normalizeTileCoordinate(row: MapRow, tileX: number, tileZ: number) {
     if (row.widthTiles !== null) {
       if (row.wrapX === 1) {
         tileX = toCanonicalTileCoordinate(tileX, row.widthTiles);
@@ -1142,7 +1141,10 @@ export class MapRepository {
   }
 
   private buildTileOverrideLayers(
-    chunk: Pick<ChunkRow, 'mapId' | 'originTileX' | 'originTileZ' | 'tileWidth' | 'tileHeight'>
+    chunk: Pick<
+      ChunkRow,
+      'mapId' | 'originTileX' | 'originTileZ' | 'tileWidth' | 'tileHeight'
+    >
   ) {
     const rows = this.listTileOverrideRowsForChunk(
       chunk.mapId,
@@ -1449,7 +1451,10 @@ export class MapRepository {
     };
   }
 
-  private batchAssetVersionUsageSummaries(): Map<string, AssetVersionUsageSummary> {
+  private batchAssetVersionUsageSummaries(): Map<
+    string,
+    AssetVersionUsageSummary
+  > {
     const map = new Map<string, AssetVersionUsageSummary>();
 
     const archetypeRows = this.db
@@ -1667,7 +1672,9 @@ export class MapRepository {
   }
 
   private listResolvedStaticEntities(mapId: string) {
-    const entities = this.listStaticEntityRows(mapId).map(staticEntityRowToModel);
+    const entities = this.listStaticEntityRows(mapId).map(
+      staticEntityRowToModel
+    );
 
     if (entities.length === 0) {
       return {
@@ -1774,7 +1781,10 @@ export class MapRepository {
       }
 
       if (
-        !bboxesIntersect(bounds, getStaticEntityFootprintBounds(entity, assetVersion))
+        !bboxesIntersect(
+          bounds,
+          getStaticEntityFootprintBounds(entity, assetVersion)
+        )
       ) {
         continue;
       }
@@ -1837,7 +1847,12 @@ export class MapRepository {
     chunkX: number,
     chunkZ: number
   ) {
-    const chunkBounds = ensureChunkBounds(chunkX, chunkZ, mapRow.chunkSizeTiles, mapRow.metersPerTile);
+    const chunkBounds = ensureChunkBounds(
+      chunkX,
+      chunkZ,
+      mapRow.chunkSizeTiles,
+      mapRow.metersPerTile
+    );
     const { archetypesById, assetVersionsById, entities } =
       this.listResolvedStaticEntities(mapRow.id);
 
@@ -1921,6 +1936,7 @@ export class MapRepository {
   ) {
     const canonicalVertices = ensurePolygonVertices(vertices);
     const bbox = computePolygonBbox(canonicalVertices);
+    const normalizedParams = normalizeSourcePolygonParams(params);
 
     this.db
       .prepare(
@@ -1936,7 +1952,7 @@ export class MapRepository {
         id,
         mapId,
         JSON.stringify(canonicalVertices),
-        JSON.stringify(params),
+        JSON.stringify(normalizedParams),
         bbox.minX,
         bbox.minZ,
         bbox.maxX,
@@ -2892,8 +2908,12 @@ export class MapRepository {
         .run(nextSeed, nextGeneratorParamsJson, id);
 
       this.db.prepare('DELETE FROM map_chunks WHERE map_id = ?').run(id);
-      this.db.prepare('DELETE FROM map_tile_overrides WHERE map_id = ?').run(id);
-      this.db.prepare('DELETE FROM map_static_entities WHERE map_id = ?').run(id);
+      this.db
+        .prepare('DELETE FROM map_tile_overrides WHERE map_id = ?')
+        .run(id);
+      this.db
+        .prepare('DELETE FROM map_static_entities WHERE map_id = ?')
+        .run(id);
 
       return mapRowToMetadata(
         this.bumpMapRevisions(id, {
@@ -3601,7 +3621,11 @@ export class MapRepository {
                 mapRow.metersPerTile
               )
             )
-          : tileBoundsToWorldBounds(edit.tileX, edit.tileZ, mapRow.metersPerTile);
+          : tileBoundsToWorldBounds(
+              edit.tileX,
+              edit.tileZ,
+              mapRow.metersPerTile
+            );
       }
 
       const updatedMapRow = this.bumpMapRevisions(input.mapId, {
@@ -3624,7 +3648,8 @@ export class MapRepository {
   createStaticEntity(input: CreateStaticEntityInput) {
     return this.performStaticEntityMutation(input, (mapRow, now) => {
       this.getPlaceableArchetypeOrThrow(input.archetypeId);
-      const entityId = input.id ?? this.nextStaticEntityId(mapRow.id, input.archetypeId);
+      const entityId =
+        input.id ?? this.nextStaticEntityId(mapRow.id, input.archetypeId);
 
       try {
         this.db
@@ -3884,8 +3909,9 @@ export class MapRepository {
         const nextVertices = input.vertices
           ? ensurePolygonVertices(input.vertices)
           : parseJson<WorldPoint[]>(existing.verticesJson);
-        const nextParams =
-          input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson);
+        const nextParams = normalizeSourcePolygonParams(
+          input.params ?? parseJson<SourcePolygonParams>(existing.paramsJson)
+        );
         const nextBounds = computePolygonBbox(nextVertices);
 
         this.db
@@ -4659,8 +4685,16 @@ export class MapRepository {
     this.ensureColumnExists('maps', 'export_bounds_min_z', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_x', 'REAL');
     this.ensureColumnExists('maps', 'export_bounds_max_z', 'REAL');
-    this.ensureColumnExists('maps', 'static_entity_export_manifest_json', 'TEXT');
-    this.ensureColumnExists('maps', 'static_entity_export_manifest_hash', 'TEXT');
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_manifest_json',
+      'TEXT'
+    );
+    this.ensureColumnExists(
+      'maps',
+      'static_entity_export_manifest_hash',
+      'TEXT'
+    );
     this.ensureColumnExists(
       'maps',
       'static_entity_export_entity_count',

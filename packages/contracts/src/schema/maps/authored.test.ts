@@ -17,6 +17,7 @@ import {
   CreateSourcePolygonInput,
   DeleteStaticEntityOutput,
   DeleteAssetVersionInput,
+  DEFAULT_SOURCE_POLYGON_PARAMS,
   GetArchetypeInput,
   hasCompatibleStaticEntityExportManifestHash,
   ListArchetypesInput,
@@ -35,6 +36,7 @@ import {
   ZarchRuntimeEntityKindSchema,
   ZarchRuntimeEntitySchema,
   stringifyStaticEntityExportManifest,
+  normalizeSourcePolygonParams,
   UpdateStaticEntityOutput,
   UpdateArchetypeInput,
 } from "./index";
@@ -46,6 +48,7 @@ describe("authored map schemas", () => {
         expectedRevision: 0,
         mapId: "map-1",
         params: {
+          interiorFill: 1.5,
           maxDisplacementMeters: 12,
           noiseScaleMeters: 64,
           roughness: 0.5,
@@ -63,6 +66,7 @@ describe("authored map schemas", () => {
         expectedRevision: 0,
         mapId: "map-1",
         params: {
+          interiorFill: 1.5,
           maxDisplacementMeters: 12,
           noiseScaleMeters: 64,
           roughness: 0.5,
@@ -164,6 +168,38 @@ describe("authored map schemas", () => {
         revision: 0,
       }).bounds,
     ).toBeNull();
+  });
+
+  test("normalizes polygon params with the shared default interior fill", () => {
+    expect(
+      normalizeSourcePolygonParams({
+        maxDisplacementMeters: 20,
+        noiseScaleMeters: 80,
+        roughness: 0.75,
+      }),
+    ).toEqual({
+      ...DEFAULT_SOURCE_POLYGON_PARAMS,
+      maxDisplacementMeters: 20,
+      noiseScaleMeters: 80,
+      roughness: 0.75,
+    });
+
+    expect(
+      CreateSourcePolygonInput.parse({
+        expectedRevision: 0,
+        mapId: "map-1",
+        params: {
+          maxDisplacementMeters: 12,
+          noiseScaleMeters: 64,
+          roughness: 0.5,
+        },
+        vertices: [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+          { x: 10, z: 10 },
+        ],
+      }).params,
+    ).toEqual(DEFAULT_SOURCE_POLYGON_PARAMS);
   });
 
   test("validates static entity catalog record shapes", () => {
@@ -343,9 +379,9 @@ describe("authored map schemas", () => {
       }).status,
     ).toBe("archived");
     expect(GetArchetypeInput.parse({ id: "watchtower" }).id).toBe("watchtower");
-    expect(GetZarchRuntimeEntityInput.parse({ id: "zarch-player-ship" }).id).toBe(
-      "zarch-player-ship",
-    );
+    expect(
+      GetZarchRuntimeEntityInput.parse({ id: "zarch-player-ship" }).id,
+    ).toBe("zarch-player-ship");
     expect(ArchiveAssetVersionInput.parse({ id: "watchtower-v1" }).id).toBe(
       "watchtower-v1",
     );
@@ -627,6 +663,7 @@ describe("authored map schemas", () => {
           id: "polygon-1",
           mapId: "map-1",
           params: {
+            interiorFill: 1.5,
             maxDisplacementMeters: 12,
             noiseScaleMeters: 64,
             roughness: 0.5,

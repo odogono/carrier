@@ -8,6 +8,7 @@ import {
 import { MapRepository, MapRepositoryError } from './repository';
 
 const polygonParams = {
+  interiorFill: 1.5,
   maxDisplacementMeters: 18,
   noiseScaleMeters: 96,
   roughness: 0.55
@@ -250,7 +251,9 @@ describe('map repository', () => {
       });
 
       expect(reset.mapRevision).toBe(2);
-      expect(repository.getMapChunk(map.id, 2, 0)?.tileHeightSteps).toBeUndefined();
+      expect(
+        repository.getMapChunk(map.id, 2, 0)?.tileHeightSteps
+      ).toBeUndefined();
     } finally {
       repository.close();
     }
@@ -321,7 +324,9 @@ describe('map repository', () => {
         minX: 0,
         minZ: 0
       });
-      expect(repository.getMapChunk(exported.id, 0, 0)?.tileHeightSteps?.[0]).toBe(1);
+      expect(
+        repository.getMapChunk(exported.id, 0, 0)?.tileHeightSteps?.[0]
+      ).toBe(1);
 
       expect(() =>
         repository.updateMapTiles({
@@ -508,6 +513,8 @@ describe('map repository', () => {
       });
 
       expect(xorResult.createdPolygons).toHaveLength(2);
+      expect(xorResult.createdPolygons[0]?.params).toEqual(polygonParams);
+      expect(xorResult.createdPolygons[1]?.params).toEqual(polygonParams);
       expect(xorResult.dirtyBounds).toEqual({
         maxX: 318,
         maxZ: 198,
@@ -556,6 +563,74 @@ describe('map repository', () => {
         repository.listSourcePolygons(rejectMap.id, 'active')
       ).toHaveLength(2);
       expect(repository.getMap(rejectMap.id)?.revision).toBe(2);
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('normalizes legacy stored polygon params and averages interior fill for boolean results', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Legacy Params World',
+        seed: 'legacy-params-seed'
+      });
+
+      const left = repository.createSourcePolygon({
+        expectedRevision: 0,
+        mapId: created.id,
+        params: {
+          ...polygonParams,
+          interiorFill: 1.2
+        },
+        vertices: square(0, 0, 180, 180)
+      });
+      const right = repository.createSourcePolygon({
+        expectedRevision: 1,
+        mapId: created.id,
+        params: {
+          ...polygonParams,
+          interiorFill: 1.8
+        },
+        vertices: square(120, 0, 300, 180)
+      });
+
+      repository.db
+        .prepare(
+          'UPDATE map_source_polygons SET params_json = ? WHERE map_id = ? AND id = ?'
+        )
+        .run(
+          JSON.stringify({
+            maxDisplacementMeters: 18,
+            noiseScaleMeters: 96,
+            roughness: 0.55
+          }),
+          created.id,
+          left.polygon.id
+        );
+
+      const normalized = repository.listSourcePolygons(created.id, 'active');
+      expect(
+        normalized.find(polygon => polygon.id === left.polygon.id)?.params
+      ).toEqual({
+        ...polygonParams,
+        interiorFill: 1.5
+      });
+
+      const unionResult = repository.applyBoolean({
+        expectedRevision: 2,
+        mapId: created.id,
+        operation: 'union',
+        polygonIds: [left.polygon.id, right.polygon.id]
+      });
+
+      expect(unionResult.createdPolygons).toHaveLength(1);
+      expect(unionResult.createdPolygons[0]?.params).toEqual({
+        ...polygonParams,
+        interiorFill: 1.65
+      });
     } finally {
       repository.close();
     }
@@ -832,7 +907,9 @@ describe('map repository', () => {
       const chunk = repository.getMapChunk(map.id, 0, 0);
       expect(chunk?.staticEntities).toHaveLength(1);
       expect(chunk?.staticEntities[0]?.id).toBe('watchtower-1');
-      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(1);
+      expect(repository.getMapChunk(map.id, 1, 0)?.staticEntities).toHaveLength(
+        1
+      );
 
       const binaryChunk = repository.getMapChunkBinary(map.id, 0, 0);
       expect(binaryChunk?.staticEntities).toHaveLength(1);
@@ -946,9 +1023,9 @@ describe('map repository', () => {
         id: archetype.id,
         status: 'archived'
       });
-      expect(repository.listStaticEntityItems(map.id)[0]?.archetype.status).toBe(
-        'archived'
-      );
+      expect(
+        repository.listStaticEntityItems(map.id)[0]?.archetype.status
+      ).toBe('archived');
       expect(() =>
         repository.createStaticEntity({
           archetypeId: archetype.id,
@@ -1268,7 +1345,9 @@ describe('map repository', () => {
         tags: []
       });
 
-      expect(repository.archiveAssetVersion(referenced.id).status).toBe('archived');
+      expect(repository.archiveAssetVersion(referenced.id).status).toBe(
+        'archived'
+      );
       expect(repository.listAssetVersionItems('archived')).toHaveLength(1);
       expect(() => repository.deleteAssetVersion(referenced.id)).toThrow(
         MapRepositoryError
@@ -1462,10 +1541,11 @@ describe('map repository', () => {
 
       expect(exported.export?.staticEntities?.entityCount).toBe(2);
       expect(exported.export?.staticEntities?.archetypeCount).toBe(2);
-      expect(exported.export?.staticEntities?.manifest.map(entry => entry.archetype.id)).toEqual([
-        'watchtower',
-        'windmill'
-      ]);
+      expect(
+        exported.export?.staticEntities?.manifest.map(
+          entry => entry.archetype.id
+        )
+      ).toEqual(['watchtower', 'windmill']);
 
       const manifest = exported.export?.staticEntities?.manifest ?? [];
       const expectedHash = createHash('sha256')
@@ -1477,9 +1557,9 @@ describe('map repository', () => {
 
       const exportedEntities = repository.listStaticEntities(exported.id);
       expect(
-        exportedEntities.map(entity => entity.id).sort((left, right) =>
-          left.localeCompare(right)
-        )
+        exportedEntities
+          .map(entity => entity.id)
+          .sort((left, right) => left.localeCompare(right))
       ).toEqual(['watchtower-center', 'windmill-edge']);
       expect(
         exportedEntities.find(entity => entity.id === 'watchtower-center')
@@ -1499,14 +1579,14 @@ describe('map repository', () => {
       });
 
       expect(
-        repository.getMapChunk(exported.id, 0, 0)?.staticEntities.map(
-          entity => entity.id
-        )
+        repository
+          .getMapChunk(exported.id, 0, 0)
+          ?.staticEntities.map(entity => entity.id)
       ).toEqual(['watchtower-center']);
       expect(
-        repository.getMapChunk(exported.id, 1, 0)?.staticEntities.map(
-          entity => entity.id
-        )
+        repository
+          .getMapChunk(exported.id, 1, 0)
+          ?.staticEntities.map(entity => entity.id)
       ).toContain('windmill-edge');
 
       const listedExport = repository.listExports(created.id)[0];
@@ -1516,9 +1596,9 @@ describe('map repository', () => {
       expect(
         repository.findExport(exported.id)?.export?.staticEntities?.manifest
       ).toEqual(manifest);
-      expect(repository.getMap(exported.id)?.export?.staticEntities?.manifest).toEqual(
-        manifest
-      );
+      expect(
+        repository.getMap(exported.id)?.export?.staticEntities?.manifest
+      ).toEqual(manifest);
     } finally {
       repository.close();
     }
@@ -1648,6 +1728,7 @@ describe('map repository', () => {
         expectedRevision: 0,
         mapId: created.id,
         params: {
+          interiorFill: 1.8,
           maxDisplacementMeters: 24,
           noiseScaleMeters: 72,
           roughness: 0.7
