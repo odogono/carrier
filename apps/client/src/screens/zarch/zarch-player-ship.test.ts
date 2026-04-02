@@ -2,6 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  DEFAULT_PLAYER_SHIP_SPEC,
   createPlayerShipSpawnState,
   getPlayerShipThrustVector,
   stepPlayerShip
@@ -208,6 +209,37 @@ describe('zarch player ship simulation', () => {
 
     expect(relaunched.state.landed).toBe(false);
     expect(relaunched.state.velY).toBeGreaterThan(0);
+    expect(relaunched.state.spawnGraceSeconds).toBeGreaterThan(0);
+  });
+
+  test('allows a slightly firmer landing on a landing pad', () => {
+    const initial = createPlayerShipSpawnState({
+      surface: makeSurface({ terrainHeight: 10 }),
+      x: 48,
+      z: 72
+    });
+
+    const result = stepPlayerShip({
+      deltaSeconds: 1 / 60,
+      input: {
+        pitchDown: false,
+        pitchUp: false,
+        thrust: false,
+        yawLeft: false,
+        yawRight: false
+      },
+      state: {
+        ...initial,
+        spawnGraceSeconds: 0,
+        velX: DEFAULT_PLAYER_SHIP_SPEC.landingHorizontalSpeedMax - 0.5,
+        velY: -(DEFAULT_PLAYER_SHIP_SPEC.landingVerticalSpeedMax - 0.5),
+        y: 11.15
+      },
+      surface: makeSurface({ terrainHeight: 10, tileTypeId: 'landing-pad' })
+    });
+
+    expect(result.event).toBeNull();
+    expect(result.state.landed).toBe(true);
   });
 
   test('blocks movement when terrain samples are unavailable', () => {

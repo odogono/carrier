@@ -38,6 +38,8 @@ export type PlayerShipSpec = {
   respawnClearance: number;
   respawnDelaySeconds: number;
   spawnGraceSeconds: number;
+  takeoffSpeed: number;
+  takeoffGraceSeconds: number;
   thrustAcceleration: number;
   verticalDrag: number;
   yawRate: number;
@@ -71,10 +73,10 @@ export type PlayerShipStepResult = {
 export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
   collisionRadius: TILE * 0.28,
   gravity: 22,
-  landingHorizontalSpeedMax: 8,
+  landingHorizontalSpeedMax: 10,
   landingPitchMax: 0.35,
   landingSupportHeightDeltaMax: 2,
-  landingVerticalSpeedMax: 12,
+  landingVerticalSpeedMax: 16,
   linearDrag: 0.45,
   maxPitch: 1.3,
   pitchDamping: 2.8,
@@ -89,6 +91,8 @@ export const DEFAULT_PLAYER_SHIP_SPEC: PlayerShipSpec = {
   respawnClearance: 48,
   respawnDelaySeconds: 1.25,
   spawnGraceSeconds: 0.75,
+  takeoffSpeed: 14,
+  takeoffGraceSeconds: 0.18,
   thrustAcceleration: 130,
   verticalDrag: 0.18,
   yawRate: 1.75
@@ -265,6 +269,11 @@ export const stepPlayerShip = ({
     }
 
     next.landed = false;
+    next.spawnGraceSeconds = Math.max(
+      next.spawnGraceSeconds,
+      spec.takeoffGraceSeconds
+    );
+    next.velY = Math.max(next.velY, spec.takeoffSpeed);
   }
 
   const pitchInput = (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0);

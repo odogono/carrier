@@ -674,6 +674,7 @@ export const ZarchScene = ({
   const particleNdcRef = useRef(new Vector2());
   const particleRaycasterRef = useRef(new Raycaster());
   const particleSystemRef = useRef(createParticleSystemState());
+  const respawnCameraBlendSecondsRef = useRef(0);
   const poolsRef = useRef<ScenePools | null>(null);
   const rightRef = useRef(new Vector3());
   const shipGroupRef = useRef<Group>(null);
@@ -893,6 +894,7 @@ export const ZarchScene = ({
         ) * dt
       );
     } else if (runtime.ship) {
+      const previousRespawnDelaySeconds = runtime.ship.respawnDelaySeconds;
       runtime.shipFireCooldownSeconds = Math.max(
         0,
         runtime.shipFireCooldownSeconds - dt
@@ -923,8 +925,34 @@ export const ZarchScene = ({
       });
 
       runtime.ship = shipStep.state;
-      runtime.camera.x = runtime.ship.x;
-      runtime.camera.z = runtime.ship.z;
+      if (
+        previousRespawnDelaySeconds > 0 &&
+        runtime.ship.respawnDelaySeconds === 0
+      ) {
+        respawnCameraBlendSecondsRef.current = 0.7;
+      }
+
+      if (respawnCameraBlendSecondsRef.current > 0) {
+        respawnCameraBlendSecondsRef.current = Math.max(
+          0,
+          respawnCameraBlendSecondsRef.current - dt
+        );
+        runtime.camera.x = MathUtils.damp(
+          runtime.camera.x,
+          runtime.ship.x,
+          4.5,
+          dt
+        );
+        runtime.camera.z = MathUtils.damp(
+          runtime.camera.z,
+          runtime.ship.z,
+          4.5,
+          dt
+        );
+      } else {
+        runtime.camera.x = runtime.ship.x;
+        runtime.camera.z = runtime.ship.z;
+      }
       runtime.score += Math.trunc(
         Math.round(
           Math.abs(runtime.ship.velX) +
