@@ -11,13 +11,22 @@ import (
 	pb "carrier/game/internal/pb"
 )
 
-type Handler struct {
-	hub    *hub.Hub
-	logger *slog.Logger
+type PlayerInputObserver interface {
+	UpdateActorPosition(actorID string, x, z float64)
 }
 
-func New(h *hub.Hub, logger *slog.Logger) *Handler {
-	return &Handler{hub: h, logger: logger}
+type Handler struct {
+	hub           *hub.Hub
+	logger        *slog.Logger
+	inputObserver PlayerInputObserver
+}
+
+func New(h *hub.Hub, logger *slog.Logger, observer PlayerInputObserver) *Handler {
+	return &Handler{
+		hub:           h,
+		logger:        logger,
+		inputObserver: observer,
+	}
 }
 
 func (h *Handler) HandleMessage(c *conn.Conn, env *pb.Envelope) {
@@ -52,8 +61,15 @@ func (h *Handler) handleJoin(c *conn.Conn, seq uint64, req *pb.JoinRequest) {
 }
 
 func (h *Handler) handlePlayerInput(c *conn.Conn, input *pb.PlayerInput) {
-	// Stub: in the future, store the input and use it in the game loop
-	_ = input
+	if h.inputObserver == nil || c.PlayerID() == "" {
+		return
+	}
+
+	h.inputObserver.UpdateActorPosition(
+		c.PlayerID(),
+		float64(input.CamX),
+		float64(input.CamZ),
+	)
 }
 
 func (h *Handler) handlePing(c *conn.Conn, seq uint64, ping *pb.Ping) {

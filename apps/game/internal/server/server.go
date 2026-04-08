@@ -13,22 +13,28 @@ import (
 	"carrier/game/internal/conn"
 	"carrier/game/internal/handler"
 	"carrier/game/internal/hub"
+	"carrier/game/internal/script"
 	"carrier/game/internal/world"
 )
 
 type Config struct {
-	Port        int
-	APIBaseURL  string
-	ExportMapID string
-	HTTPClient  *http.Client
+	Port             int
+	APIBaseURL       string
+	ExportMapID      string
+	HTTPClient       *http.Client
+	ScriptConfigPath string
+	ScriptDevMode    bool
+	ScriptDir        string
+	ScriptStatePath  string
 }
 
 type Server struct {
-	hub     *hub.Hub
-	handler *handler.Handler
-	logger  *slog.Logger
-	port    int
-	world   *world.World
+	hub           *hub.Hub
+	handler       *handler.Handler
+	logger        *slog.Logger
+	port          int
+	scriptRuntime *script.Runtime
+	world         *world.World
 }
 
 func New(logger *slog.Logger, config Config) (*Server, error) {
@@ -52,12 +58,30 @@ func New(logger *slog.Logger, config Config) (*Server, error) {
 		"active_obstacles", loadedWorld.ActiveObstacleCount(),
 	)
 
+	var scriptRuntime *script.Runtime
+	var inputObserver handler.PlayerInputObserver
+	if config.ScriptDir != "" || config.ScriptConfigPath != "" || config.ScriptStatePath != "" {
+		scriptRuntime, err = script.New(script.RuntimeOptions{
+			Logger:     logger,
+			MapID:      loadedWorld.Map.ID,
+			ScriptDir:  config.ScriptDir,
+			ConfigPath: config.ScriptConfigPath,
+			StatePath:  config.ScriptStatePath,
+			DevMode:    config.ScriptDevMode,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load script runtime: %w", err)
+		}
+		inputObserver = scriptRuntime
+	}
+
 	return &Server{
-		hub:     h,
-		handler: handler.New(h, logger),
-		logger:  logger,
-		port:    config.Port,
-		world:   loadedWorld,
+		hub:           h,
+		handler:       handler.New(h, logger, inputObserver),
+		logger:        logger,
+		port:          config.Port,
+		scriptRuntime: scriptRuntime,
+		world:         loadedWorld,
 	}, nil
 }
 
@@ -81,6 +105,14 @@ func (s *Server) StaticWorld() *world.World {
 	return s.world
 }
 
+func (s *Server) Close() error {
+	if s == nil || s.scriptRuntime == nil {
+		return nil
+	}
+
+	return s.scriptRuntime.Close()
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -100,7 +132,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	go c.WritePump()
 
-	defer s.hub.Unregister(c)
+	defer func() {
+		if s.scriptRuntime != nil {
+			if playerID := c.PlayerID(); playerID != "" {
+				s.scriptRuntime.RemoveActor(playerID)
+			}
+		}
+		s.hub.Unregister(c)
+	}()
 
 	for {
 		env, err := c.ReadMessage()
