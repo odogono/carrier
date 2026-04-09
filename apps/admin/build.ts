@@ -8,10 +8,13 @@ const apiUrlDefine =
     ? JSON.stringify(process.env.API_URL)
     : 'window.__backend_api_url';
 
+const basePathDefine = JSON.stringify(process.env.BASE_PATH ?? '/');
+
 const result = await Bun.build({
   define: {
     __API_URL__: apiUrlDefine,
-    __APP_VERSION__: JSON.stringify(pkg.version)
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __BASE_PATH__: basePathDefine
   },
   entrypoints: ['./index.html'],
   env: 'inline',

@@ -1,0 +1,14 @@
+.DS_Store
+.git
+.gitignore
+.vscode
+.data
+node_modules
+dist
+apps/*/dist
+coverage
+apps/admin/playwright-report
+apps/admin/test-results
+apps/admin/blob-report
+*.sqlite
+*.log

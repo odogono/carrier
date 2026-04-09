@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Game server now supports Lua scripting for custom game rules and logic
+- Client Zarch terrain editing with raise/lower tools and brush size controls
+- Client Zarch map editing mode with polygon terrain and tile color/height overrides
+- Client Zarch landing pad tiles for safe touchdowns and relaunch during gameplay
+- Admin map regeneration with seed editing and persisted generator parameters
+
+### Changed
+
+- Infinite vector map generation now treats authored polygons as primary land footprint, filling polygons instead of collapsing to central domes
+- Infinite vector polygon terrain now exposes `Interior Fill` parameter for controlling land expansion from shoreline
+- Client Zarch landing adjustments for better gameplay feel
+- Map regeneration now uses improved generator tuning controls
+
+### Fixed
+
+- Client tile editor now properly applies color changes to selections
+
 ## [0.8.1] - 2026-04-02
 
 ### Changed

@@ -4,4 +4,5 @@ plugins = ["bun-plugin-tailwind"]
 env = "PUBLIC_*"
 
 [serve]
+hostname = "0.0.0.0"
 port = 5179

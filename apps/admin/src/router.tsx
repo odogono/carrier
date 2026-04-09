@@ -13,6 +13,13 @@ import {
   createRouter
 } from '@tanstack/react-router';
 
+const adminBasepath =
+  typeof __BASE_PATH__ !== 'undefined'
+    ? __BASE_PATH__
+    : typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+      ? '/admin'
+      : '/';
+
 const rootRoute = createRootRoute({
   component: () => (
     <Layout>
@@ -73,7 +80,7 @@ const routeTree = rootRoute.addChildren([
   mapDetailRoute
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({ basepath: adminBasepath, routeTree });
 
 declare module '@tanstack/react-router' {
   type Register = {

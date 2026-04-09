@@ -1,0 +1,98 @@
+name: carrier-dev
+
+services:
+  nginx:
+    container_name: carrier-dev-nginx
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+      client:
+        condition: service_started
+      admin:
+        condition: service_started
+    ports:
+      - '8080:80'
+    volumes:
+      - ./infra/docker/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
+
+  api:
+    container_name: carrier-dev-api
+    build:
+      context: .
+      dockerfile: infra/docker/api.dev.Dockerfile
+    environment:
+      API_DB_PATH: /app/data/carrier.sqlite
+      API_HOST: 0.0.0.0
+      API_PORT: 6021
+    ports:
+      - '6021:6021'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "const response = await fetch('http://127.0.0.1:6021/health'); if (!response.ok) process.exit(1);",
+        ]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+    volumes:
+      - .:/app
+      - bun_node_modules:/app/node_modules
+
+  client:
+    container_name: carrier-dev-client
+    build:
+      context: .
+      dockerfile: infra/docker/client.dev.Dockerfile
+    environment:
+      API_URL: http://localhost:6021/api
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '5178:5178'
+    volumes:
+      - .:/app
+      - bun_node_modules:/app/node_modules
+
+  admin:
+    container_name: carrier-dev-admin
+    build:
+      context: .
+      dockerfile: infra/docker/admin.dev.Dockerfile
+    environment:
+      PUBLIC_API_URL: http://localhost:6021/api
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '5179:5179'
+    volumes:
+      - .:/app
+      - bun_node_modules:/app/node_modules
+
+  game-server:
+    container_name: carrier-dev-game-server
+    build:
+      context: .
+      dockerfile: infra/docker/game.dev.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      GAME_API_BASE_URL: http://api:6021
+      GAME_EXPORT_MAP_ID: ${GAME_EXPORT_MAP_ID:?GAME_EXPORT_MAP_ID is required}
+      GAME_SCRIPT_CONFIG: /app/apps/game/scripts/triggers.json
+      GAME_SCRIPT_DIR: /app/apps/game/scripts
+      GAME_SCRIPT_STATE: /tmp/script-state.json
+    ports:
+      - '6030:6030'
+    volumes:
+      - .:/app
+
+volumes:
+  bun_node_modules:

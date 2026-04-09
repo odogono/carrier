@@ -1,0 +1,62 @@
+name: carrier
+
+services:
+  nginx:
+    container_name: carrier-nginx
+    build:
+      context: .
+      dockerfile: infra/docker/nginx.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '8080:80'
+
+  api:
+    container_name: carrier-api
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    environment:
+      API_DB_PATH: /data/carrier.sqlite
+      API_HOST: 0.0.0.0
+      API_PORT: 6021
+      TRUSTED_ORIGINS: ${APP_ORIGIN:-http://localhost:8080}
+    expose:
+      - '6021'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "const response = await fetch('http://127.0.0.1:6021/health'); if (!response.ok) process.exit(1);",
+        ]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+    volumes:
+      - ./data:/data
+
+  game-server:
+    container_name: carrier-game-server
+    build:
+      context: .
+      dockerfile: infra/docker/game.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      GAME_API_BASE_URL: http://api:6021
+      GAME_EXPORT_MAP_ID: ${GAME_EXPORT_MAP_ID:?GAME_EXPORT_MAP_ID is required}
+      GAME_SCRIPT_CONFIG: /app/scripts/triggers.json
+      GAME_SCRIPT_DIR: /app/scripts
+      GAME_SCRIPT_STATE: /var/lib/carrier-game/script-state.json
+    ports:
+      - '6030:6030'
+    volumes:
+      - game_state:/var/lib/carrier-game
+
+volumes:
+  game_state:

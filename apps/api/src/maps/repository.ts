@@ -317,7 +317,7 @@ type MapRepositoryOptions = {
 
 const DEFAULT_DB_PATH = resolve(
   import.meta.dir,
-  '../../../.data/carrier.sqlite'
+  '../../../data/carrier.sqlite'
 );
 
 export type RepositoryErrorCode = 'BAD_REQUEST' | 'CONFLICT' | 'NOT_FOUND';
