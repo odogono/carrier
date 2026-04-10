@@ -19,11 +19,19 @@ import { Provider as JotaiProvider } from 'jotai';
 import { Leva, LevaPanel, button, useControls, useCreateStore } from 'leva';
 import { createLog } from 'odgn-ts-helpers/log';
 
+import type {
+  AssetVersion,
+  StaticEntity
+} from 'carrier-contracts/types';
+
 import { palette } from '@/components/leva-palette-plugin';
 // import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { client, connectApi } from '@/helpers/api-link';
 import { ensurePlaneToArrayCompat } from '@/helpers/three-plane-compat';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
+import {
+  collectChunkStaticEntities
+} from '@/helpers/zarch-static-entities';
 import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DevSceneControls,
@@ -32,10 +40,16 @@ import {
   type DevSceneControlFolderState,
   type LevaControlFolder
 } from '@/hooks/use-scene-controls';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
+import {
+  createZarchEntityEditState,
+  reduceZarchEntityEditState
+} from './zarch/zarch-entity-edit';
+import { ZarchEntityCatalog } from './zarch/zarch-entity-catalog';
+import { ZarchEntityEditHud } from './zarch/zarch-entity-edit-hud';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
@@ -159,14 +173,30 @@ const MainInner = () => {
     FALLBACK_TILE_EDIT_CONFIG,
     createZarchTileEditState
   );
+  const [entityEditState, dispatchEntityEdit] = useReducer(
+    reduceZarchEntityEditState,
+    undefined,
+    createZarchEntityEditState
+  );
+  const [editorMode, setEditorMode] = useState<'terrain' | 'entities'>('terrain');
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
   }, []);
+  const entityEditCallbacksRef = useRef<{
+    catalogOpen: boolean;
+    onClearSelection: () => void;
+    onCloseCatalog: () => void;
+    onDeleteEntity: () => void;
+    onRotateEntity: (direction: 'cw' | 'ccw') => void;
+    selectedEntityId: string | null;
+  } | null>(null);
   const { containerProps, enterShipMode, exitShipMode, inputRef, runtimeRef } =
     useZarchRuntime({
       containerElement,
       editEnabled: editState.enabled,
-      editTool: editState.tool
+      editTool: editState.tool,
+      editorMode,
+      entityEditCallbacksRef
     });
   const { editConfig, error, isLoading, map, terrain } = useServerMapTerrain();
   const showHud = useSceneConfigValue('showHud');
@@ -598,6 +628,301 @@ const MainInner = () => {
     }
   }, [editState, map, queryClient]);
 
+  // --- Entity editing: archetype catalog query ---
+  const archetypeCatalogQuery = useQuery({
+    enabled: editorMode === 'entities' && editState.enabled,
+    queryFn: () => client.maps.listArchetypes({ status: 'active' }),
+    queryKey: ['archetypes-catalog'],
+    staleTime: 60_000
+  });
+
+  const catalogArchetypes = archetypeCatalogQuery.data ?? [];
+
+  const catalogAssetVersionIds = useMemo(
+    () => Array.from(new Set(catalogArchetypes.map(a => a.assetVersionId))),
+    [catalogArchetypes]
+  );
+
+  const catalogAssetVersionQueries = useQueries({
+    queries: catalogAssetVersionIds.map(id => ({
+      enabled: editorMode === 'entities' && editState.enabled,
+      queryFn: () => client.maps.getAssetVersion({ id }),
+      queryKey: ['asset-version', id],
+      staleTime: 60_000
+    }))
+  });
+
+  const catalogAssetVersionsById = useMemo(
+    () =>
+      catalogAssetVersionQueries.reduce<Map<string, AssetVersion>>(
+        (result, query) => {
+          if (query.data) {
+            result.set(query.data.id, query.data);
+          }
+          return result;
+        },
+        new Map()
+      ),
+    [catalogAssetVersionQueries]
+  );
+
+  const referencedArchetypesQuery = useQuery({
+    enabled: editorMode === 'entities' && editState.enabled && !!map,
+    queryFn: () => client.maps.listReferencedArchetypes({ mapId: map!.id }),
+    queryKey: ['map-referenced-archetypes', map?.id],
+    staleTime: 60_000
+  });
+
+  const referencedArchetypeIds = useMemo(
+    () => new Set((referencedArchetypesQuery.data ?? []).map(a => a.id)),
+    [referencedArchetypesQuery.data]
+  );
+
+  // Find selected entity from chunks
+  const selectedEntity = useMemo((): StaticEntity | null => {
+    if (!entityEditState.selectedEntityId || !map) return null;
+
+    const chunks: any[] = [];
+    queryClient.getQueriesData({ queryKey: ['map-chunk', map.id] }).forEach(
+      ([, data]) => {
+        if (data) chunks.push(data);
+      }
+    );
+
+    const entities = collectChunkStaticEntities(chunks);
+    return entities.find(e => e.id === entityEditState.selectedEntityId) ?? null;
+  }, [entityEditState.selectedEntityId, map, queryClient]);
+
+  // Active archetype's asset version ID for preview
+  const activeAssetVersionId = useMemo(() => {
+    if (!entityEditState.activeArchetypeId) return null;
+    const archetype = catalogArchetypes.find(
+      a => a.id === entityEditState.activeArchetypeId
+    );
+    return archetype?.assetVersionId ?? null;
+  }, [entityEditState.activeArchetypeId, catalogArchetypes]);
+
+  // --- Entity editing: invalidation helper ---
+  const invalidateEntityQueries = useCallback(async () => {
+    if (!map) return;
+    await Promise.all([
+      queryClient.invalidateQueries({
+        predicate: query =>
+          query.queryKey[0] === 'map-chunk' && query.queryKey[1] === map.id
+      }),
+      queryClient.invalidateQueries({
+        predicate: query =>
+          (query.queryKey[0] === 'map' && query.queryKey[1] === map.id) ||
+          (query.queryKey[0] === 'maps' && query.queryKey.length === 1)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['map-referenced-archetypes', map.id]
+      })
+    ]);
+  }, [map, queryClient]);
+
+  // --- Entity editing: mutation handlers ---
+  const handlePlaceEntity = useCallback(
+    async (worldX: number, worldZ: number) => {
+      if (
+        !map ||
+        !entityEditState.activeArchetypeId ||
+        entityEditState.pendingAction
+      ) {
+        return;
+      }
+
+      dispatchEntityEdit({ type: 'set-pending', action: 'Placing' });
+      dispatchEntityEdit({ type: 'set-error', error: null });
+
+      try {
+        const result = await client.maps.createStaticEntity({
+          archetypeId: entityEditState.activeArchetypeId,
+          expectedRevision: map.revision,
+          label: null,
+          mapId: map.id,
+          position: { x: worldX, z: worldZ },
+          rotation: { yaw: 0 },
+          scale: 1,
+          state: 'active',
+          yOffset: 0
+        });
+
+        dispatchEntityEdit({
+          type: 'select-entity',
+          entityId: result.entity.id
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to place entity';
+        dispatchEntityEdit({
+          type: 'set-error',
+          error: message.includes('Expected revision')
+            ? 'Revision conflict: reload and retry.'
+            : message
+        });
+      } finally {
+        dispatchEntityEdit({ type: 'set-pending', action: null });
+      }
+    },
+    [entityEditState.activeArchetypeId, entityEditState.pendingAction, invalidateEntityQueries, map]
+  );
+
+  const handleRotateEntity = useCallback(
+    async (direction: 'cw' | 'ccw') => {
+      if (
+        !map ||
+        !selectedEntity ||
+        entityEditState.pendingAction
+      ) {
+        return;
+      }
+
+      dispatchEntityEdit({ type: 'set-pending', action: 'Rotating' });
+      dispatchEntityEdit({ type: 'set-error', error: null });
+
+      const yawDelta = direction === 'cw' ? 45 : -45;
+      const newYaw = ((selectedEntity.rotation.yaw + yawDelta) % 360 + 360) % 360;
+
+      try {
+        await client.maps.updateStaticEntity({
+          expectedRevision: map.revision,
+          id: selectedEntity.id,
+          mapId: map.id,
+          rotation: { yaw: newYaw }
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to rotate entity';
+        dispatchEntityEdit({
+          type: 'set-error',
+          error: message.includes('Expected revision')
+            ? 'Revision conflict: reload and retry.'
+            : message
+        });
+      } finally {
+        dispatchEntityEdit({ type: 'set-pending', action: null });
+      }
+    },
+    [entityEditState.pendingAction, invalidateEntityQueries, map, selectedEntity]
+  );
+
+  const handleDeleteEntity = useCallback(async () => {
+    if (
+      !map ||
+      !entityEditState.selectedEntityId ||
+      entityEditState.pendingAction
+    ) {
+      return;
+    }
+
+    dispatchEntityEdit({ type: 'set-pending', action: 'Deleting' });
+    dispatchEntityEdit({ type: 'set-error', error: null });
+
+    try {
+      await client.maps.deleteStaticEntity({
+        expectedRevision: map.revision,
+        id: entityEditState.selectedEntityId,
+        mapId: map.id
+      });
+      dispatchEntityEdit({ type: 'clear-selection' });
+      await invalidateEntityQueries();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to delete entity';
+      dispatchEntityEdit({
+        type: 'set-error',
+        error: message.includes('Expected revision')
+          ? 'Revision conflict: reload and retry.'
+          : message
+      });
+    } finally {
+      dispatchEntityEdit({ type: 'set-pending', action: null });
+    }
+  }, [entityEditState.pendingAction, entityEditState.selectedEntityId, invalidateEntityQueries, map]);
+
+  // Entity edit callbacks for runtime keyboard shortcuts
+  const entityEditCallbacks = useMemo(() => {
+    if (editorMode !== 'entities' || !editState.enabled) return null;
+    return {
+      catalogOpen: entityEditState.catalogOpen,
+      onClearSelection: () => dispatchEntityEdit({ type: 'clear-selection' }),
+      onCloseCatalog: () =>
+        dispatchEntityEdit({ type: 'set-catalog-open', open: false }),
+      onDeleteEntity: () => void handleDeleteEntity(),
+      onRotateEntity: (direction: 'cw' | 'ccw') =>
+        void handleRotateEntity(direction),
+      selectedEntityId: entityEditState.selectedEntityId
+    };
+  }, [
+    editorMode,
+    editState.enabled,
+    entityEditState.catalogOpen,
+    entityEditState.selectedEntityId,
+    handleDeleteEntity,
+    handleRotateEntity
+  ]);
+
+  // Keep the ref in sync for the runtime keyboard handler
+  entityEditCallbacksRef.current = entityEditCallbacks;
+
+  // Entity scene state for ZarchScene
+  const entityEditSceneState = useMemo(() => {
+    if (editorMode !== 'entities' || !editState.enabled) return null;
+    return {
+      activeArchetypeId: entityEditState.activeArchetypeId,
+      activeAssetVersionId: activeAssetVersionId,
+      hoveredEntityId: entityEditState.hoveredEntityId,
+      selectedEntityId: entityEditState.selectedEntityId,
+      tool: entityEditState.tool
+    };
+  }, [
+    activeAssetVersionId,
+    editorMode,
+    editState.enabled,
+    entityEditState.activeArchetypeId,
+    entityEditState.hoveredEntityId,
+    entityEditState.selectedEntityId,
+    entityEditState.tool
+  ]);
+
+  // HUD handlers for entity mode
+  const handleSetEditorMode = useCallback((mode: 'terrain' | 'entities') => {
+    setEditorMode(mode);
+  }, []);
+
+  const handleEntityHover = useCallback((entityId: string | null) => {
+    dispatchEntityEdit({ type: 'hover-entity', entityId });
+  }, []);
+
+  const handleEntitySelect = useCallback((entityId: string | null) => {
+    dispatchEntityEdit({ type: 'select-entity', entityId });
+  }, []);
+
+  const handleEntityPlace = useCallback(
+    (worldX: number, worldZ: number) => {
+      void handlePlaceEntity(worldX, worldZ);
+    },
+    [handlePlaceEntity]
+  );
+
+  const handleCatalogToggle = useCallback(() => {
+    dispatchEntityEdit({
+      type: 'set-catalog-open',
+      open: !entityEditState.catalogOpen
+    });
+  }, [entityEditState.catalogOpen]);
+
+  const handleSelectArchetype = useCallback((archetypeId: string) => {
+    dispatchEntityEdit({ type: 'set-active-archetype', archetypeId });
+  }, []);
+
+  const handleSetEntityTool = useCallback((tool: 'place' | 'select') => {
+    dispatchEntityEdit({ type: 'set-tool', tool });
+  }, []);
+
   useEffect(() => {
     if (!terrain || !editConfig || editState.tool !== 'height') {
       dispatchEdit({
@@ -903,12 +1228,17 @@ const MainInner = () => {
         >
           <ZarchScene
             editEnabled={editState.enabled}
+            editorMode={editorMode}
+            entityEditState={entityEditSceneState}
             inputRef={inputRef}
             map={map}
             onEditTileActivate={handleEditTileActivate}
             onEditTileHover={handleEditTileHover}
             onEditTileSelectionStart={handleEditTileSelectionStart}
             onEditTileSelectionUpdate={handleEditTileSelectionUpdate}
+            onEntityHover={handleEntityHover}
+            onEntityPlace={handleEntityPlace}
+            onEntitySelect={handleEntitySelect}
             previewHaloTiles={previewHaloTiles}
             runtimeRef={runtimeRef}
             selectedHeightPlane={editState.lastSolvedPlaneHeight}
@@ -928,8 +1258,56 @@ const MainInner = () => {
         {showMinimap && (
           <ZarchMinimap runtimeRef={runtimeRef} terrain={activeTerrain} />
         )}
+        {editState.enabled && (
+          <ZarchEntityEditHud
+            archetypes={catalogArchetypes}
+            editorMode={editorMode}
+            editEnabled={editState.enabled}
+            entityEditState={entityEditState}
+            onCatalogToggle={handleCatalogToggle}
+            onDeleteEntity={() => void handleDeleteEntity()}
+            onRotateEntity={direction => void handleRotateEntity(direction)}
+            onSetEditorMode={handleSetEditorMode}
+            onSetEnabled={handleSetEditEnabled}
+            onSetTool={handleSetEntityTool}
+            selectedEntity={selectedEntity}
+          />
+        )}
+        {editState.enabled &&
+          editorMode === 'entities' &&
+          entityEditState.catalogOpen && (
+            <ZarchEntityCatalog
+              activeArchetypeId={entityEditState.activeArchetypeId}
+              archetypes={catalogArchetypes}
+              assetVersionsById={catalogAssetVersionsById}
+              category={entityEditState.catalogCategory}
+              onClose={() =>
+                dispatchEntityEdit({
+                  type: 'set-catalog-open',
+                  open: false
+                })
+              }
+              onSelectArchetype={handleSelectArchetype}
+              onSetCategory={category =>
+                dispatchEntityEdit({
+                  type: 'set-catalog-category',
+                  category
+                })
+              }
+              onSetSearch={search =>
+                dispatchEntityEdit({
+                  type: 'set-catalog-search',
+                  search
+                })
+              }
+              referencedArchetypeIds={referencedArchetypeIds}
+              search={entityEditState.catalogSearch}
+            />
+          )}
       </div>
-      <LevaPanel store={editLevaStore} titleBar={{ title: 'Edit' }} />
+      {editorMode === 'terrain' && (
+        <LevaPanel store={editLevaStore} titleBar={{ title: 'Edit' }} />
+      )}
       {/* <ThemeTogglePortal /> */}
     </>
   );

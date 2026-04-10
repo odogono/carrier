@@ -357,6 +357,13 @@ export function MapDetailPage() {
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
         </Button>
+        {(map.kind === 'wrapped-classic' || map.kind === 'infinite-vector') && (
+          <Link params={{ id }} to="/maps/$id/editor">
+            <Button size="sm" variant="outline">
+              Open Editor
+            </Button>
+          </Link>
+        )}
         {map.kind === 'infinite-vector' && (
           <>
             <Button
@@ -366,11 +373,6 @@ export function MapDetailPage() {
             >
               Export Slice
             </Button>
-            <Link params={{ id }} to="/maps/$id/editor">
-              <Button size="sm" variant="outline">
-                Open Editor
-              </Button>
-            </Link>
           </>
         )}
       </div>

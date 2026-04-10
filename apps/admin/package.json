@@ -32,6 +32,7 @@
     "@tanstack/react-router": "^1.167.5",
     "carrier-preview": "workspace:*",
     "carrier-contracts": "workspace:*",
+    "carrier-terrain-edit": "workspace:*",
     "clsx": "^2.1.1",
     "konva": "^10.2.3",
     "jotai": "^2.18.1",

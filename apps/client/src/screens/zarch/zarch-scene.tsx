@@ -71,7 +71,10 @@ import {
   stepPlayerShip
 } from './zarch-player-ship';
 import { loadZarchRuntimeEntityModel } from './zarch-runtime-entity-model';
-import { ZarchStaticEntities } from './zarch-static-entities';
+import {
+  ZarchStaticEntities,
+  type ZarchStaticEntitiesHandle
+} from './zarch-static-entities';
 
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
@@ -131,14 +134,29 @@ type ScenePools = {
   treePool: TreeMeshEntry[];
 };
 
+type EditorMode = 'terrain' | 'entities';
+
+type EntityEditSceneState = {
+  activeArchetypeId: string | null;
+  activeAssetVersionId: string | null;
+  hoveredEntityId: string | null;
+  selectedEntityId: string | null;
+  tool: 'place' | 'select';
+};
+
 type ZarchSceneProps = {
   editEnabled: boolean;
+  editorMode: EditorMode;
+  entityEditState: EntityEditSceneState | null;
   inputRef: RefObject<ZarchInputState>;
   map: MapMetadata;
   onEditTileActivate: (tileX: number, tileZ: number, shiftKey: boolean) => void;
   onEditTileHover: (tile: { tileX: number; tileZ: number } | null) => void;
   onEditTileSelectionStart: (tileX: number, tileZ: number) => void;
   onEditTileSelectionUpdate: (tileX: number, tileZ: number) => void;
+  onEntityHover: (entityId: string | null) => void;
+  onEntityPlace: (worldX: number, worldZ: number) => void;
+  onEntitySelect: (entityId: string | null) => void;
   previewHaloTiles: { tileX: number; tileZ: number }[];
   runtimeRef: RefObject<ZarchRuntimeState>;
   selectedHeightPlane: number | null;
@@ -640,18 +658,29 @@ const setTreeBrightness = (group: Group, brightness: number) => {
 
 export const ZarchScene = ({
   editEnabled,
+  editorMode,
+  entityEditState,
   inputRef,
   map,
   onEditTileActivate,
   onEditTileHover,
   onEditTileSelectionStart,
   onEditTileSelectionUpdate,
+  onEntityHover,
+  onEntityPlace,
+  onEntitySelect,
   previewHaloTiles,
   runtimeRef,
   selectedHeightPlane,
   selectedHeightTiles,
   terrain
 }: ZarchSceneProps) => {
+  const staticEntitiesHandleRef = useRef<ZarchStaticEntitiesHandle | null>(null);
+  const entityPlacementPreviewRef = useRef<{
+    worldX: number;
+    worldZ: number;
+    valid: boolean;
+  } | null>(null);
   const configRef = useSceneConfigRef();
   const ambientIntensity = useSceneConfigValue('ambientIntensity');
   const ambientRef = useRef<AmbientLight>(null);
@@ -1306,7 +1335,51 @@ export const ZarchScene = ({
     clipPlanes[2].setComponents(0, 0, 1, clipRadius);
     clipPlanes[3].setComponents(0, 0, -1, clipRadius);
 
-    if (editEnabled && input.hoverPointer) {
+    if (editEnabled && editorMode === 'entities' && input.hoverPointer) {
+      // Entity mode hover: raycast entities for hover, terrain for placement preview
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const handle = staticEntitiesHandleRef.current;
+
+      if (handle && entityEditState?.tool === 'select') {
+        const entityHit = handle.raycastToEntity(
+          input.hoverPointer,
+          rect,
+          particleRaycaster,
+          particleNdc,
+          camera,
+          intersections
+        );
+        onEntityHover(entityHit?.entityId ?? null);
+      } else {
+        onEntityHover(null);
+      }
+
+      // Terrain hit for placement preview
+      if (entityEditState?.tool === 'place' && entityEditState.activeArchetypeId) {
+        const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+        if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
+          const hit = intersections[0];
+          if (hit) {
+            const worldScale = TILE / map.resolution.metersPerTile;
+            const worldX = (hit.point.x + runtime.camera.x) / worldScale;
+            const worldZ = (hit.point.z + runtime.camera.z) / worldScale;
+            entityPlacementPreviewRef.current = {
+              worldX,
+              worldZ,
+              valid: true
+            };
+          } else {
+            entityPlacementPreviewRef.current = null;
+          }
+        } else {
+          entityPlacementPreviewRef.current = null;
+        }
+      } else {
+        entityPlacementPreviewRef.current = null;
+      }
+
+      pools.tileHighlight.visible = false;
+    } else if (editEnabled && editorMode === 'terrain' && input.hoverPointer) {
       const rect = state.gl.domElement.getBoundingClientRect();
       const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
       const validTile = tile && terrain.isTileLoaded(tile.gx, tile.gz) ? tile : null;
@@ -1354,12 +1427,44 @@ export const ZarchScene = ({
     } else {
       if (editEnabled) {
         onEditTileHover(null);
+        if (editorMode === 'entities') {
+          onEntityHover(null);
+          entityPlacementPreviewRef.current = null;
+        }
       }
 
       pools.tileHighlight.visible = false;
     }
 
-    if (editEnabled && input.queuedEditTap) {
+    if (editEnabled && editorMode === 'entities' && input.queuedEditTap) {
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const tap = input.queuedEditTap;
+      input.queuedEditTap = null;
+      const handle = staticEntitiesHandleRef.current;
+
+      if (entityEditState?.tool === 'select' && handle) {
+        const entityHit = handle.raycastToEntity(
+          tap,
+          rect,
+          particleRaycaster,
+          particleNdc,
+          camera,
+          intersections
+        );
+        onEntitySelect(entityHit?.entityId ?? null);
+      } else if (entityEditState?.tool === 'place' && entityEditState.activeArchetypeId) {
+        const tile = raycastToTile(tap, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+        if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
+          const hit = intersections[0];
+          if (hit) {
+            const worldScale = TILE / map.resolution.metersPerTile;
+            const worldX = (hit.point.x + runtime.camera.x) / worldScale;
+            const worldZ = (hit.point.z + runtime.camera.z) / worldScale;
+            onEntityPlace(worldX, worldZ);
+          }
+        }
+      }
+    } else if (editEnabled && editorMode === 'terrain' && input.queuedEditTap) {
       const rect = state.gl.domElement.getBoundingClientRect();
       const tap = input.queuedEditTap;
       input.queuedEditTap = null;
@@ -1530,7 +1635,28 @@ export const ZarchScene = ({
             />
           ) : null}
         </group>
-        <ZarchStaticEntities map={map} runtimeRef={runtimeRef} />
+        <ZarchStaticEntities
+          entityEditEnabled={editEnabled && editorMode === 'entities'}
+          handleRef={staticEntitiesHandleRef}
+          hoveredEntityId={entityEditState?.hoveredEntityId ?? null}
+          map={map}
+          placementPreview={
+            entityEditState?.tool === 'place' &&
+            entityEditState.activeArchetypeId &&
+            entityEditState.activeAssetVersionId &&
+            entityPlacementPreviewRef.current
+              ? {
+                  archetypeId: entityEditState.activeArchetypeId,
+                  assetVersionId: entityEditState.activeAssetVersionId,
+                  valid: entityPlacementPreviewRef.current.valid,
+                  worldX: entityPlacementPreviewRef.current.worldX,
+                  worldZ: entityPlacementPreviewRef.current.worldZ
+                }
+              : null
+          }
+          runtimeRef={runtimeRef}
+          selectedEntityId={entityEditState?.selectedEntityId ?? null}
+        />
       </group>
       <ambientLight intensity={ambientIntensity} ref={ambientRef} />
       <directionalLight

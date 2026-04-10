@@ -8,6 +8,7 @@ COPY apps/admin/package.json apps/admin/
 COPY apps/client/package.json apps/client/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/preview/package.json packages/preview/
+COPY packages/terrain-edit/package.json packages/terrain-edit/
 
 RUN bun install --frozen-lockfile --ignore-scripts
 

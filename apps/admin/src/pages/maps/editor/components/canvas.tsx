@@ -3,7 +3,8 @@ import type {
   ControlPoint,
   MapMetadata,
   StaticEntity,
-  WorldPoint
+  WorldPoint,
+  ZarchTileEditConfig
 } from 'carrier-contracts/types';
 import { Home, Minus, Plus } from 'lucide-react';
 import {
@@ -19,8 +20,15 @@ import {
 import { MapStage } from '@/components/map-viewer/map-stage';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import type { Viewport } from '@/hooks/use-map-viewport';
+import {
+  getTerrainRenderLegend,
+  TERRAIN_RENDER_LAYER_OPTIONS,
+  type TerrainRenderLayer
+} from '@/lib/terrain-render';
 import { cn } from '@/lib/utils';
+import type { ZarchTileDraftEdits } from 'carrier-terrain-edit';
 
 import {
   canSavePolygonDraft,
@@ -44,6 +52,28 @@ type StaticEntityCanvasItem = {
   entity: StaticEntity;
 };
 
+const renderTerrainTileRect = (
+  rect: { height: number; width: number; x: number; z: number },
+  key: string,
+  fill: string,
+  stroke: string,
+  strokeWidth: number,
+  strokeDasharray?: string
+) => (
+  <rect
+    fill={fill}
+    height={rect.height}
+    key={key}
+    pointerEvents="none"
+    stroke={stroke}
+    strokeDasharray={strokeDasharray}
+    strokeWidth={strokeWidth}
+    width={rect.width}
+    x={rect.x}
+    y={rect.z}
+  />
+);
+
 type EditorCanvasProps = {
   chunks: ReturnType<typeof import('@/hooks/use-map-chunks').useMapChunks>;
   commitDrawPolygon: () => void;
@@ -51,6 +81,7 @@ type EditorCanvasProps = {
   controlPointDraft: ControlPointDraft | null;
   controlPoints: ControlPoint[];
   dragState: CanvasDragState;
+  editConfig: ZarchTileEditConfig | null;
   entityItems: StaticEntityCanvasItem[];
   fitToView: () => void;
   highlightedIslandPolygonIds: Set<string>;
@@ -84,6 +115,7 @@ type EditorCanvasProps = {
     event: PointerEvent<SVGCircleElement>,
     entity: StaticEntity
   ) => void;
+  onTerrainLayerChange: (layer: TerrainRenderLayer) => void;
   onPolygonClick: (
     event: MouseEvent<SVGPolygonElement>,
     polygon: SourcePolygonLike
@@ -109,6 +141,13 @@ type EditorCanvasProps = {
     record?: boolean
   ) => void;
   size: { height: number; width: number };
+  terrainDraftEdits?: ZarchTileDraftEdits;
+  terrainHeightSelectionTiles: Array<{ tileX: number; tileZ: number }>;
+  terrainHoveredTile: { tileX: number; tileZ: number } | null;
+  terrainPreviewHaloTiles: Array<{ tileX: number; tileZ: number }>;
+  terrainRenderLayer: TerrainRenderLayer;
+  terrainSelectedTile: { tileX: number; tileZ: number } | null;
+  terrainTool: 'height' | 'set-type';
   tool: EditorTool;
   toolLabel: string;
   toScreenPoint: (point: Pick<WorldPoint, 'x' | 'z'>) => {
@@ -128,6 +167,7 @@ export const EditorCanvas = ({
   controlPointDraft,
   controlPoints,
   dragState,
+  editConfig,
   entityItems,
   fitToView,
   highlightedIslandPolygonIds,
@@ -146,6 +186,7 @@ export const EditorCanvas = ({
   onStaticEntityClick,
   onStaticEntityPointerDown,
   onStaticEntityRotatePointerDown,
+  onTerrainLayerChange,
   onPolygonClick,
   onPolygonPointerDown,
   onWheel,
@@ -159,6 +200,13 @@ export const EditorCanvas = ({
   setDragState,
   setPolygonDraft,
   size,
+  terrainDraftEdits,
+  terrainHeightSelectionTiles,
+  terrainHoveredTile,
+  terrainPreviewHaloTiles,
+  terrainRenderLayer,
+  terrainSelectedTile,
+  terrainTool,
   tool,
   toolLabel,
   toScreenPoint,
@@ -170,6 +218,10 @@ export const EditorCanvas = ({
   const selectedPolygonSet = useMemo(() => new Set(selectedPolygonIds), [selectedPolygonIds]);
   const selectedEntitySet = useMemo(() => new Set(selectedEntityIds), [selectedEntityIds]);
   const zoomPercent = Math.round(viewport.zoom * 100);
+  const terrainLegendItems = useMemo(
+    () => getTerrainRenderLegend(terrainRenderLayer, editConfig),
+    [editConfig, terrainRenderLayer]
+  );
   const showEditVertices =
     polygonDraft?.kind === 'edit' &&
     (tool === 'select' || tool === 'edit-vertices');
@@ -186,6 +238,27 @@ export const EditorCanvas = ({
   const multiSelectActive = selectedPolygonIds.length > 1;
   const entityMultiSelectActive = selectedEntityIds.length > 1;
   const draftVertexCount = polygonDraft?.vertices.length ?? 0;
+  const metersPerTile = map.resolution.metersPerTile;
+  const tileToScreenRect = useMemo(
+    () => (tileX: number, tileZ: number) => {
+      const topLeft = toScreenPoint({
+        x: tileX * metersPerTile,
+        z: tileZ * metersPerTile
+      });
+      const bottomRight = toScreenPoint({
+        x: (tileX + 1) * metersPerTile,
+        z: (tileZ + 1) * metersPerTile
+      });
+
+      return {
+        height: bottomRight.z - topLeft.z,
+        width: bottomRight.x - topLeft.x,
+        x: topLeft.x,
+        z: topLeft.z
+      };
+    },
+    [metersPerTile, toScreenPoint]
+  );
 
   return (
     <div className="rounded-2xl border bg-card shadow-sm">
@@ -207,6 +280,22 @@ export const EditorCanvas = ({
             >
               {selectionSummary}
             </Badge>
+            <div className="min-w-[210px]">
+              <Select
+                aria-label="Editor terrain render layer"
+                className="h-9 rounded-md border-slate-700 bg-slate-950/70 text-xs text-slate-100"
+                onChange={event =>
+                  onTerrainLayerChange(event.target.value as TerrainRenderLayer)
+                }
+                value={terrainRenderLayer}
+              >
+                {TERRAIN_RENDER_LAYER_OPTIONS.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <Badge
               className={cn(
                 'rounded-md px-3 py-1 text-[11px]',
@@ -236,7 +325,10 @@ export const EditorCanvas = ({
                     canvasHeight={size.height}
                     canvasWidth={size.width}
                     chunks={chunks}
+                    draftEdits={terrainDraftEdits}
+                    editConfig={editConfig}
                     map={map}
+                    renderLayer={terrainRenderLayer}
                     viewport={viewport}
                   />
                 </div>
@@ -264,10 +356,34 @@ export const EditorCanvas = ({
                     <div className="rounded-xl border border-slate-800/90 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg backdrop-blur">
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         <span>Scroll to zoom</span>
-                        <span>Drag to pan in pan mode</span>
+                        <span>
+                          {tool === 'terrain'
+                            ? terrainTool === 'height'
+                              ? 'Drag to select terrain tiles'
+                              : 'Drag to paint tile types'
+                            : 'Drag to pan in pan mode'}
+                        </span>
                         <span>Esc clears drafts or selection</span>
                       </div>
                     </div>
+                    {terrainLegendItems.length > 0 ? (
+                      <div className="rounded-xl border border-slate-800/90 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg backdrop-blur">
+                        <div className="flex flex-wrap gap-2">
+                          {terrainLegendItems.map(item => (
+                            <div
+                              className="flex items-center gap-2 rounded-full border border-slate-800 px-2 py-1"
+                              key={`${terrainRenderLayer}-${item.label}`}
+                            >
+                              <span
+                                className="inline-block h-3 w-3 rounded-sm border border-black/40"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <span>{item.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <svg
                     className="absolute inset-0 outline-none"
@@ -296,6 +412,66 @@ export const EditorCanvas = ({
                     viewBox={`0 0 ${size.width} ${size.height}`}
                     width={size.width}
                   >
+                    {tool === 'terrain'
+                      ? terrainPreviewHaloTiles.map(tile => {
+                          const rect = tileToScreenRect(tile.tileX, tile.tileZ);
+                          return (
+                            <rect
+                              fill="rgba(245, 158, 11, 0.08)"
+                              height={rect.height}
+                              key={`terrain-halo-${tile.tileX}-${tile.tileZ}`}
+                              pointerEvents="none"
+                              stroke="rgba(245, 158, 11, 0.7)"
+                              strokeDasharray="6 4"
+                              strokeWidth={1.5}
+                              width={rect.width}
+                              x={rect.x}
+                              y={rect.z}
+                            />
+                          );
+                        })
+                      : null}
+                    {tool === 'terrain'
+                      ? terrainHeightSelectionTiles.map(tile => {
+                          const rect = tileToScreenRect(tile.tileX, tile.tileZ);
+                          return (
+                            <rect
+                              fill="rgba(56, 189, 248, 0.18)"
+                              height={rect.height}
+                              key={`terrain-selection-${tile.tileX}-${tile.tileZ}`}
+                              pointerEvents="none"
+                              stroke="rgba(125, 211, 252, 0.9)"
+                              strokeWidth={2}
+                              width={rect.width}
+                              x={rect.x}
+                              y={rect.z}
+                            />
+                          );
+                        })
+                      : null}
+                    {tool === 'terrain' && terrainSelectedTile
+                      ? renderTerrainTileRect(
+                          tileToScreenRect(terrainSelectedTile.tileX, terrainSelectedTile.tileZ),
+                          'terrain-selected',
+                          'transparent',
+                          '#f8fafc',
+                          2
+                        )
+                      : null}
+                    {tool === 'terrain' &&
+                    terrainHoveredTile &&
+                    (!terrainSelectedTile ||
+                      terrainHoveredTile.tileX !== terrainSelectedTile.tileX ||
+                      terrainHoveredTile.tileZ !== terrainSelectedTile.tileZ)
+                      ? renderTerrainTileRect(
+                          tileToScreenRect(terrainHoveredTile.tileX, terrainHoveredTile.tileZ),
+                          'terrain-hovered',
+                          'transparent',
+                          'rgba(226, 232, 240, 0.7)',
+                          1.5,
+                          '4 3'
+                        )
+                      : null}
                     {entityItems.map(item => {
                       const selected = selectedEntitySet.has(item.entity.id);
                       const overlay = item.assetVersion

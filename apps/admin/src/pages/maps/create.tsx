@@ -1,6 +1,8 @@
 import {
   DEFAULT_ISLAND_CLUSTER_GENERATOR_PARAMS,
-  MAP_METERS_PER_TILE
+  MAP_METERS_PER_TILE,
+  type MapMetadata,
+  type MapMetadataSummary
 } from 'carrier-contracts/types';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
@@ -11,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { client } from '@/lib/api-client';
+import { mergeCreatedMapIntoList } from '@/pages/maps/cache';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 
@@ -97,7 +100,11 @@ export function CreateMapPage() {
     onError: () => {
       toast.error('Failed to create map');
     },
-    onSuccess: () => {
+    onSuccess: createdMap => {
+      queryClient.setQueryData<MapMetadataSummary[]>(['maps'], current =>
+        mergeCreatedMapIntoList(current, createdMap)
+      );
+      queryClient.setQueryData<MapMetadata>(['maps', createdMap.id], createdMap);
       void queryClient.invalidateQueries({ queryKey: ['maps'] });
       toast.success('Map created');
       void navigate({ to: '/maps' });

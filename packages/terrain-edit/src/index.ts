@@ -1,0 +1,1400 @@
+import {
+  DEFAULT_ZARCH_TILE_TYPE_ID as DEFAULT_TILE_TYPE_ID,
+  type ZarchTileEditConfig,
+  type ZarchTileOverride
+} from 'carrier-contracts/types';
+
+export const DEFAULT_ZARCH_TILE_TYPE_ID = DEFAULT_TILE_TYPE_ID;
+
+export type ZarchTileEditTool = 'height' | 'set-color' | 'set-type';
+
+export type ZarchTileState = ZarchTileOverride;
+
+export type ZarchTileDraftEdits = Record<string, ZarchTileState>;
+
+export type ZarchTileEditSnapshot = {
+  edits: ZarchTileDraftEdits;
+};
+
+export type TilePoint = {
+  tileX: number;
+  tileZ: number;
+};
+
+export type ZarchTileEditState = {
+  canRedo: boolean;
+  canUndo: boolean;
+  edits: ZarchTileDraftEdits;
+  enabled: boolean;
+  heightSelectionAnchor: TilePoint | null;
+  heightSelection: Record<string, TilePoint>;
+  hoveredTile: TilePoint | null;
+  lastSolvedPlaneHeight: number | null;
+  maxAbsHeightSteps: number;
+  previewHaloTiles: Record<string, TilePoint>;
+  redoStack: ZarchTileEditSnapshot[];
+  saveError: string | null;
+  selectedColorIndex: number | null;
+  selectedTile: TilePoint | null;
+  selectedTypeId: string;
+  tool: ZarchTileEditTool;
+  undoStack: ZarchTileEditSnapshot[];
+};
+
+export type TerrainTileEditSource = {
+  containsTile: (gx: number, gz: number) => boolean;
+  getTileColorIndex: (gx: number, gz: number) => number | null;
+  getTileHeightSteps: (gx: number, gz: number) => number;
+  getTileTypeId: (gx: number, gz: number) => string;
+  sampleHeight: (gx: number, gz: number) => number | null;
+};
+
+type ApplyTileEditAction = {
+  current: ZarchTileState;
+  heightEdits?: { current: ZarchTileState; heightSteps: number }[];
+  lastSolvedPlaneHeight?: number | null;
+  previewHaloTiles?: TilePoint[];
+  selectedColorIndexOverride?: number | null;
+  selectedTypeIdOverride?: string;
+  toolOverride?: Exclude<ZarchTileEditTool, 'height'>;
+  tileEdits?: { current: ZarchTileState }[];
+  tileX: number;
+  tileZ: number;
+  type: 'apply-tool';
+};
+
+export type ZarchTileEditAction =
+  | ApplyTileEditAction
+  | { tileX: number; tileZ: number; type: 'begin-height-selection-box' }
+  | { type: 'clear-height-selection' }
+  | { enabled: boolean; type: 'set-enabled' }
+  | { hoveredTile: TilePoint | null; type: 'set-hovered-tile' }
+  | { tileX: number; tileZ: number; type: 'update-height-selection-box' }
+  | {
+      lastSolvedPlaneHeight: number | null;
+      previewHaloTiles: TilePoint[];
+      type: 'set-height-preview';
+    }
+  | { saveError: string | null; type: 'set-save-error' }
+  | { selectedColorIndex: number | null; type: 'set-selected-color-index' }
+  | { selectedTile: TilePoint | null; type: 'set-selected-tile' }
+  | { selectedTypeId: string; type: 'set-selected-type-id' }
+  | { tool: ZarchTileEditTool; type: 'set-tool' }
+  | { type: 'reset-draft' }
+  | { type: 'redo' }
+  | { type: 'undo' };
+
+const WATER_LEVEL = 0;
+const FLAT_TOLERANCE = 0.01;
+const SOLVER_REGULARIZATION = 0.02;
+const SOLVER_ITERATIONS = 16;
+
+export const tileEditKey = (tileX: number, tileZ: number) =>
+  `${tileX}:${tileZ}`;
+
+const cloneEdits = (edits: ZarchTileDraftEdits): ZarchTileDraftEdits => ({
+  ...edits
+});
+
+const snapshotEdits = (edits: ZarchTileDraftEdits): ZarchTileEditSnapshot => ({
+  edits: cloneEdits(edits)
+});
+
+const isDefaultTileState = (
+  tile: Pick<ZarchTileState, 'colorIndex' | 'heightSteps' | 'typeId'>
+) =>
+  tile.heightSteps === 0 &&
+  tile.typeId === DEFAULT_ZARCH_TILE_TYPE_ID &&
+  tile.colorIndex === null;
+
+export const createZarchTileEditState = (
+  editConfig: ZarchTileEditConfig
+): ZarchTileEditState => ({
+  canRedo: false,
+  canUndo: false,
+  edits: {},
+  enabled: false,
+  heightSelectionAnchor: null,
+  heightSelection: {},
+  hoveredTile: null,
+  lastSolvedPlaneHeight: null,
+  maxAbsHeightSteps: editConfig.maxAbsHeightSteps,
+  previewHaloTiles: {},
+  redoStack: [],
+  saveError: null,
+  selectedColorIndex: null,
+  selectedTile: null,
+  selectedTypeId: editConfig.tileTypes[0]?.id ?? DEFAULT_ZARCH_TILE_TYPE_ID,
+  tool: 'height',
+  undoStack: []
+});
+
+export const getTerrainTileState = (
+  terrain: TerrainTileEditSource,
+  tileX: number,
+  tileZ: number
+): ZarchTileState => ({
+  colorIndex: terrain.getTileColorIndex(tileX, tileZ),
+  heightSteps: terrain.getTileHeightSteps(tileX, tileZ),
+  tileX,
+  tileZ,
+  typeId: terrain.getTileTypeId(tileX, tileZ)
+});
+
+export const getMergedTileState = (
+  terrain: TerrainTileEditSource,
+  edits: ZarchTileDraftEdits,
+  tileX: number,
+  tileZ: number
+): ZarchTileState =>
+  edits[tileEditKey(tileX, tileZ)] ?? getTerrainTileState(terrain, tileX, tileZ);
+
+const applyToolToTile = (
+  state: ZarchTileEditState,
+  current: ZarchTileState,
+  overrides?: {
+    selectedColorIndexOverride?: number | null;
+    selectedTypeIdOverride?: string;
+    toolOverride?: Exclude<ZarchTileEditTool, 'height'>;
+  }
+): ZarchTileState => {
+  const tool = overrides?.toolOverride ?? state.tool;
+  const selectedColorIndex =
+    overrides?.selectedColorIndexOverride ?? state.selectedColorIndex;
+  const selectedTypeId =
+    overrides?.selectedTypeIdOverride ?? state.selectedTypeId;
+
+  if (tool === 'set-color') {
+    return {
+      ...current,
+      colorIndex: selectedColorIndex
+    };
+  }
+
+  return {
+    ...current,
+    typeId: selectedTypeId
+  };
+};
+
+const buildHeightSelectionBox = (
+  startTileX: number,
+  startTileZ: number,
+  endTileX: number,
+  endTileZ: number
+) => {
+  const minTileX = Math.min(startTileX, endTileX);
+  const maxTileX = Math.max(startTileX, endTileX);
+  const minTileZ = Math.min(startTileZ, endTileZ);
+  const maxTileZ = Math.max(startTileZ, endTileZ);
+  const selection: Record<string, TilePoint> = {};
+
+  for (let tileZ = minTileZ; tileZ <= maxTileZ; tileZ += 1) {
+    for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
+      selection[tileEditKey(tileX, tileZ)] = { tileX, tileZ };
+    }
+  }
+
+  return selection;
+};
+
+export const reduceZarchTileEditState = (
+  state: ZarchTileEditState,
+  action: ZarchTileEditAction
+): ZarchTileEditState => {
+  if (action.type === 'set-enabled') {
+    return {
+      ...state,
+      enabled: action.enabled,
+      heightSelectionAnchor: action.enabled ? state.heightSelectionAnchor : null,
+      heightSelection: action.enabled ? state.heightSelection : {},
+      hoveredTile: action.enabled ? state.hoveredTile : null,
+      lastSolvedPlaneHeight: action.enabled ? state.lastSolvedPlaneHeight : null,
+      previewHaloTiles: action.enabled ? state.previewHaloTiles : {},
+      saveError: action.enabled ? state.saveError : null
+    };
+  }
+
+  if (action.type === 'begin-height-selection-box') {
+    return {
+      ...state,
+      heightSelectionAnchor: { tileX: action.tileX, tileZ: action.tileZ },
+      heightSelection: buildHeightSelectionBox(
+        action.tileX,
+        action.tileZ,
+        action.tileX,
+        action.tileZ
+      ),
+      selectedTile: { tileX: action.tileX, tileZ: action.tileZ }
+    };
+  }
+
+  if (action.type === 'update-height-selection-box') {
+    const anchor = state.heightSelectionAnchor;
+
+    if (!anchor) {
+      return state;
+    }
+
+    return {
+      ...state,
+      heightSelection: buildHeightSelectionBox(
+        anchor.tileX,
+        anchor.tileZ,
+        action.tileX,
+        action.tileZ
+      ),
+      selectedTile: { tileX: action.tileX, tileZ: action.tileZ }
+    };
+  }
+
+  if (action.type === 'clear-height-selection') {
+    if (
+      Object.keys(state.heightSelection).length === 0 &&
+      Object.keys(state.previewHaloTiles).length === 0 &&
+      state.lastSolvedPlaneHeight === null
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      heightSelectionAnchor: null,
+      heightSelection: {},
+      lastSolvedPlaneHeight: null,
+      previewHaloTiles: {}
+    };
+  }
+
+  if (action.type === 'set-hovered-tile') {
+    if (
+      action.hoveredTile?.tileX === state.hoveredTile?.tileX &&
+      action.hoveredTile?.tileZ === state.hoveredTile?.tileZ
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      hoveredTile: action.hoveredTile
+    };
+  }
+
+  if (action.type === 'set-save-error') {
+    return {
+      ...state,
+      saveError: action.saveError
+    };
+  }
+
+  if (action.type === 'set-selected-color-index') {
+    return {
+      ...state,
+      selectedColorIndex: action.selectedColorIndex
+    };
+  }
+
+  if (action.type === 'set-selected-tile') {
+    return {
+      ...state,
+      selectedTile: action.selectedTile
+    };
+  }
+
+  if (action.type === 'set-selected-type-id') {
+    return {
+      ...state,
+      selectedTypeId: action.selectedTypeId
+    };
+  }
+
+  if (action.type === 'set-tool') {
+    return {
+      ...state,
+      heightSelectionAnchor: state.heightSelectionAnchor,
+      heightSelection: state.heightSelection,
+      lastSolvedPlaneHeight: action.tool === 'height' ? state.lastSolvedPlaneHeight : null,
+      previewHaloTiles: action.tool === 'height' ? state.previewHaloTiles : {},
+      tool: action.tool
+    };
+  }
+
+  if (action.type === 'set-height-preview') {
+    const nextPreviewHaloTiles = Object.fromEntries(
+      action.previewHaloTiles.map(tile => [tileEditKey(tile.tileX, tile.tileZ), tile])
+    );
+
+    if (
+      state.lastSolvedPlaneHeight === action.lastSolvedPlaneHeight &&
+      Object.keys(state.previewHaloTiles).length ===
+        Object.keys(nextPreviewHaloTiles).length &&
+      Object.keys(nextPreviewHaloTiles).every(key => state.previewHaloTiles[key])
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      lastSolvedPlaneHeight: action.lastSolvedPlaneHeight,
+      previewHaloTiles: nextPreviewHaloTiles
+    };
+  }
+
+  if (action.type === 'reset-draft') {
+    return {
+      ...state,
+      canRedo: false,
+      canUndo: false,
+      edits: {},
+      heightSelectionAnchor: null,
+      heightSelection: {},
+      lastSolvedPlaneHeight: null,
+      previewHaloTiles: {},
+      redoStack: [],
+      saveError: null,
+      undoStack: []
+    };
+  }
+
+  if (action.type === 'undo') {
+    const previous = state.undoStack.at(-1);
+
+    if (!previous) {
+      return state;
+    }
+
+    const undoStack = state.undoStack.slice(0, -1);
+    const redoStack = [...state.redoStack, snapshotEdits(state.edits)];
+
+    return {
+      ...state,
+      canRedo: true,
+      canUndo: undoStack.length > 0,
+      edits: cloneEdits(previous.edits),
+      redoStack,
+      undoStack
+    };
+  }
+
+  if (action.type === 'redo') {
+    const next = state.redoStack.at(-1);
+
+    if (!next) {
+      return state;
+    }
+
+    const redoStack = state.redoStack.slice(0, -1);
+    const undoStack = [...state.undoStack, snapshotEdits(state.edits)];
+
+    return {
+      ...state,
+      canRedo: redoStack.length > 0,
+      canUndo: true,
+      edits: cloneEdits(next.edits),
+      redoStack,
+      undoStack
+    };
+  }
+
+  if (state.tool === 'height' && action.heightEdits) {
+    const edits = cloneEdits(state.edits);
+    let changed = false;
+
+    for (const entry of action.heightEdits) {
+      const key = tileEditKey(entry.current.tileX, entry.current.tileZ);
+      const next: ZarchTileState = { ...entry.current, heightSteps: entry.heightSteps };
+
+      if (next.heightSteps !== entry.current.heightSteps) {
+        changed = true;
+      }
+
+      if (isDefaultTileState(next)) {
+        delete edits[key];
+      } else {
+        edits[key] = next;
+      }
+    }
+
+    if (!changed) {
+      return {
+        ...state,
+        selectedTile: { tileX: action.tileX, tileZ: action.tileZ }
+      };
+    }
+
+    const undoStack = [...state.undoStack, snapshotEdits(state.edits)];
+
+    return {
+      ...state,
+      canRedo: false,
+      canUndo: true,
+      edits,
+      lastSolvedPlaneHeight: action.lastSolvedPlaneHeight ?? state.lastSolvedPlaneHeight,
+      previewHaloTiles: Object.fromEntries(
+        (action.previewHaloTiles ?? []).map(tile => [tileEditKey(tile.tileX, tile.tileZ), tile])
+      ),
+      redoStack: [],
+      selectedTile: { tileX: action.tileX, tileZ: action.tileZ },
+      undoStack
+    };
+  }
+
+  if (action.tileEdits) {
+    const edits = cloneEdits(state.edits);
+    let changed = false;
+
+    for (const entry of action.tileEdits) {
+      const nextTile = applyToolToTile(state, entry.current, {
+        selectedColorIndexOverride: action.selectedColorIndexOverride,
+        selectedTypeIdOverride: action.selectedTypeIdOverride,
+        toolOverride: action.toolOverride
+      });
+      const key = tileEditKey(entry.current.tileX, entry.current.tileZ);
+
+      if (
+        nextTile.heightSteps !== entry.current.heightSteps ||
+        nextTile.typeId !== entry.current.typeId ||
+        nextTile.colorIndex !== entry.current.colorIndex
+      ) {
+        changed = true;
+      }
+
+      if (isDefaultTileState(nextTile)) {
+        delete edits[key];
+      } else {
+        edits[key] = nextTile;
+      }
+    }
+
+    if (!changed) {
+      return {
+        ...state,
+        selectedTile: { tileX: action.tileX, tileZ: action.tileZ }
+      };
+    }
+
+    const undoStack = [...state.undoStack, snapshotEdits(state.edits)];
+
+    return {
+      ...state,
+      canRedo: false,
+      canUndo: true,
+      edits,
+      redoStack: [],
+      selectedTile: { tileX: action.tileX, tileZ: action.tileZ },
+      undoStack
+    };
+  }
+
+  const nextTile = applyToolToTile(state, action.current, {
+    selectedColorIndexOverride: action.selectedColorIndexOverride,
+    selectedTypeIdOverride: action.selectedTypeIdOverride,
+    toolOverride: action.toolOverride
+  });
+  const key = tileEditKey(action.tileX, action.tileZ);
+
+  if (
+    nextTile.heightSteps === action.current.heightSteps &&
+    nextTile.typeId === action.current.typeId &&
+    nextTile.colorIndex === action.current.colorIndex
+  ) {
+    return {
+      ...state,
+      selectedTile: { tileX: action.tileX, tileZ: action.tileZ }
+    };
+  }
+
+  const edits = cloneEdits(state.edits);
+
+  if (isDefaultTileState(nextTile)) {
+    delete edits[key];
+  } else {
+    edits[key] = nextTile;
+  }
+
+  const undoStack = [...state.undoStack, snapshotEdits(state.edits)];
+
+  return {
+    ...state,
+    canRedo: false,
+    canUndo: true,
+    edits,
+    redoStack: [],
+    selectedTile: { tileX: action.tileX, tileZ: action.tileZ },
+    undoStack
+  };
+};
+
+export const getDraftEdits = (state: ZarchTileEditState) =>
+  Object.values(state.edits);
+
+export const getHeightSelectionTiles = (state: ZarchTileEditState) =>
+  Object.values(state.heightSelection);
+
+export const getPreviewHaloTiles = (state: ZarchTileEditState) =>
+  Object.values(state.previewHaloTiles);
+
+export const getHeightStepOffsetAtGrid = ({
+  containsTile,
+  getTileHeightSteps,
+  gx,
+  gz,
+  heightStepMeters
+}: {
+  containsTile: (gx: number, gz: number) => boolean;
+  getTileHeightSteps: (gx: number, gz: number) => number;
+  gx: number;
+  gz: number;
+  heightStepMeters: number;
+}) => {
+  let totalOffset = 0;
+  let count = 0;
+
+  for (const [tileX, tileZ] of [
+    [gx - 1, gz - 1],
+    [gx, gz - 1],
+    [gx - 1, gz],
+    [gx, gz]
+  ]) {
+    if (!containsTile(tileX, tileZ)) {
+      continue;
+    }
+
+    totalOffset += getTileHeightSteps(tileX, tileZ) * heightStepMeters;
+    count += 1;
+  }
+
+  return count === 0 ? 0 : totalOffset / count;
+};
+
+const isTileFlat = (cornerHeights: (number | null)[]): boolean => {
+  const valid = cornerHeights.filter((height): height is number => height !== null);
+
+  if (valid.length < 2) {
+    return true;
+  }
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  return max - min < FLAT_TOLERANCE;
+};
+
+const sampleBaseHeight = (
+  terrain: TerrainTileEditSource,
+  gx: number,
+  gz: number,
+  heightStepMeters: number
+) => {
+  const connectedHeight = terrain.sampleHeight(gx, gz);
+
+  if (connectedHeight === null) {
+    return null;
+  }
+
+  return (
+    connectedHeight -
+    getHeightStepOffsetAtGrid({
+      containsTile: terrain.containsTile,
+      getTileHeightSteps: terrain.getTileHeightSteps,
+      gx,
+      gz,
+      heightStepMeters
+    })
+  );
+};
+
+const getCurrentTileHeightSteps = (
+  terrain: TerrainTileEditSource,
+  edits: ZarchTileDraftEdits,
+  tileX: number,
+  tileZ: number
+) => edits[tileEditKey(tileX, tileZ)]?.heightSteps ?? terrain.getTileHeightSteps(tileX, tileZ);
+
+const getSelectionAndHaloTiles = (
+  terrain: TerrainTileEditSource,
+  selection: readonly TilePoint[]
+) => {
+  const selected = new Map<string, TilePoint>();
+  const halo = new Map<string, TilePoint>();
+
+  for (const tile of selection) {
+    selected.set(tileEditKey(tile.tileX, tile.tileZ), tile);
+  }
+
+  for (const tile of selection) {
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const tileX = tile.tileX + dx;
+        const tileZ = tile.tileZ + dz;
+
+        if (!terrain.containsTile(tileX, tileZ)) {
+          continue;
+        }
+
+        const key = tileEditKey(tileX, tileZ);
+
+        if (selected.has(key)) {
+          continue;
+        }
+
+        halo.set(key, { tileX, tileZ });
+      }
+    }
+  }
+
+  return {
+    haloTiles: Array.from(halo.values()),
+    selectedTiles: Array.from(selected.values())
+  };
+};
+
+const getSelectionVertexKeys = (selection: readonly TilePoint[]) => {
+  const keys = new Set<string>();
+
+  for (const tile of selection) {
+    keys.add(tileEditKey(tile.tileX, tile.tileZ));
+    keys.add(tileEditKey(tile.tileX + 1, tile.tileZ));
+    keys.add(tileEditKey(tile.tileX, tile.tileZ + 1));
+    keys.add(tileEditKey(tile.tileX + 1, tile.tileZ + 1));
+  }
+
+  return Array.from(keys);
+};
+
+const getCurrentVertexHeight = ({
+  edits,
+  editConfig,
+  terrain,
+  vertexX,
+  vertexZ
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  terrain: TerrainTileEditSource;
+  vertexX: number;
+  vertexZ: number;
+}) => {
+  const baseHeight = sampleBaseHeight(terrain, vertexX, vertexZ, editConfig.heightStepMeters);
+
+  if (baseHeight === null) {
+    return null;
+  }
+
+  return (
+    baseHeight +
+    getHeightStepOffsetAtGrid({
+      containsTile: terrain.containsTile,
+      getTileHeightSteps: (tileX, tileZ) =>
+        getCurrentTileHeightSteps(terrain, edits, tileX, tileZ),
+      gx: vertexX,
+      gz: vertexZ,
+      heightStepMeters: editConfig.heightStepMeters
+    })
+  );
+};
+
+const createLinearSystem = ({
+  affectedTiles,
+  edits,
+  editConfig,
+  selection,
+  targetHeight,
+  terrain
+}: {
+  affectedTiles: readonly TilePoint[];
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  targetHeight: number;
+  terrain: TerrainTileEditSource;
+}) => {
+  const unknownIndex = new Map<string, number>();
+
+  affectedTiles.forEach((tile, index) => {
+    unknownIndex.set(tileEditKey(tile.tileX, tile.tileZ), index);
+  });
+
+  const rows: { coefficients: number[]; rhs: number }[] = [];
+
+  for (const vertexKey of getSelectionVertexKeys(selection)) {
+    const [vertexXString, vertexZString] = vertexKey.split(':');
+    const vertexX = Number(vertexXString);
+    const vertexZ = Number(vertexZString);
+    const baseHeight = sampleBaseHeight(terrain, vertexX, vertexZ, editConfig.heightStepMeters);
+
+    if (baseHeight === null) {
+      continue;
+    }
+
+    const incidentTiles = [
+      [vertexX - 1, vertexZ - 1],
+      [vertexX, vertexZ - 1],
+      [vertexX - 1, vertexZ],
+      [vertexX, vertexZ]
+    ].filter(([tileX, tileZ]) => terrain.containsTile(tileX, tileZ));
+
+    if (incidentTiles.length === 0) {
+      continue;
+    }
+
+    const coefficients = new Array<number>(affectedTiles.length).fill(0);
+    let fixedContribution = 0;
+
+    for (const [tileX, tileZ] of incidentTiles) {
+      const key = tileEditKey(tileX, tileZ);
+      const currentValue = getCurrentTileHeightSteps(terrain, edits, tileX, tileZ);
+      const index = unknownIndex.get(key);
+
+      if (index === undefined) {
+        fixedContribution += currentValue;
+      } else {
+        coefficients[index] += 1;
+      }
+    }
+
+    rows.push({
+      coefficients,
+      rhs:
+        ((targetHeight - baseHeight) / editConfig.heightStepMeters) * incidentTiles.length -
+        fixedContribution
+    });
+  }
+
+  return rows;
+};
+
+const solveLinearSystem = (matrix: number[][], vector: number[]) => {
+  const size = vector.length;
+  const a = matrix.map(row => [...row]);
+  const b = [...vector];
+
+  for (let pivot = 0; pivot < size; pivot += 1) {
+    let maxRow = pivot;
+    let maxValue = Math.abs(a[pivot]?.[pivot] ?? 0);
+
+    for (let row = pivot + 1; row < size; row += 1) {
+      const value = Math.abs(a[row]?.[pivot] ?? 0);
+
+      if (value > maxValue) {
+        maxValue = value;
+        maxRow = row;
+      }
+    }
+
+    if (maxValue < 1e-9) {
+      continue;
+    }
+
+    if (maxRow !== pivot) {
+      [a[pivot], a[maxRow]] = [a[maxRow]!, a[pivot]!];
+      [b[pivot], b[maxRow]] = [b[maxRow]!, b[pivot]!];
+    }
+
+    const pivotValue = a[pivot]![pivot]!;
+
+    for (let column = pivot; column < size; column += 1) {
+      a[pivot]![column] = a[pivot]![column]! / pivotValue;
+    }
+
+    b[pivot] /= pivotValue;
+
+    for (let row = 0; row < size; row += 1) {
+      if (row === pivot) {
+        continue;
+      }
+
+      const factor = a[row]![pivot]!;
+
+      if (Math.abs(factor) < 1e-9) {
+        continue;
+      }
+
+      for (let column = pivot; column < size; column += 1) {
+        a[row]![column] -= factor * a[pivot]![column]!;
+      }
+
+      b[row] -= factor * b[pivot]!;
+    }
+  }
+
+  return b;
+};
+
+const optimizeRoundedSolution = ({
+  initial,
+  maxAbsHeightSteps,
+  objective
+}: {
+  initial: number[];
+  maxAbsHeightSteps: number;
+  objective: (candidate: readonly number[]) => number;
+}) => {
+  const candidate = [...initial];
+
+  for (let iteration = 0; iteration < SOLVER_ITERATIONS; iteration += 1) {
+    let improved = false;
+
+    for (let index = 0; index < candidate.length; index += 1) {
+      let bestValue = candidate[index]!;
+      let bestScore = objective(candidate);
+
+      for (const delta of [-4, -3, -2, -1, 1, 2, 3, 4]) {
+        const nextValue = Math.max(
+          -maxAbsHeightSteps,
+          Math.min(maxAbsHeightSteps, bestValue + delta)
+        );
+
+        if (nextValue === candidate[index]) {
+          continue;
+        }
+
+        candidate[index] = nextValue;
+        const score = objective(candidate);
+
+        if (score + 1e-6 < bestScore) {
+          bestScore = score;
+          bestValue = nextValue;
+          improved = true;
+        }
+      }
+
+      candidate[index] = bestValue;
+    }
+
+    if (!improved) {
+      break;
+    }
+  }
+
+  return candidate;
+};
+
+const getSelectionVertexHeightsForCandidate = ({
+  affectedTiles,
+  candidate,
+  edits,
+  editConfig,
+  selection,
+  terrain
+}: {
+  affectedTiles: readonly TilePoint[];
+  candidate: readonly number[];
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const candidateSteps = new Map<string, number>();
+
+  affectedTiles.forEach((tile, index) => {
+    candidateSteps.set(tileEditKey(tile.tileX, tile.tileZ), candidate[index]!);
+  });
+
+  return getSelectionVertexKeys(selection)
+    .map(vertexKey => {
+      const [vertexXString, vertexZString] = vertexKey.split(':');
+      const vertexX = Number(vertexXString);
+      const vertexZ = Number(vertexZString);
+      const baseHeight = sampleBaseHeight(terrain, vertexX, vertexZ, editConfig.heightStepMeters);
+
+      if (baseHeight === null) {
+        return null;
+      }
+
+      return (
+        baseHeight +
+        getHeightStepOffsetAtGrid({
+          containsTile: terrain.containsTile,
+          getTileHeightSteps: (tileX, tileZ) =>
+            candidateSteps.get(tileEditKey(tileX, tileZ)) ??
+            getCurrentTileHeightSteps(terrain, edits, tileX, tileZ),
+          gx: vertexX,
+          gz: vertexZ,
+          heightStepMeters: editConfig.heightStepMeters
+        })
+      );
+    })
+    .filter((height): height is number => height !== null);
+};
+
+const createBestFitPlaneLinearSystem = ({
+  affectedTiles,
+  edits,
+  editConfig,
+  selection,
+  terrain
+}: {
+  affectedTiles: readonly TilePoint[];
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const unknownIndex = new Map<string, number>();
+
+  affectedTiles.forEach((tile, index) => {
+    unknownIndex.set(tileEditKey(tile.tileX, tile.tileZ), index);
+  });
+
+  const planeIndex = affectedTiles.length;
+  const rows: { coefficients: number[]; rhs: number }[] = [];
+
+  for (const vertexKey of getSelectionVertexKeys(selection)) {
+    const [vertexXString, vertexZString] = vertexKey.split(':');
+    const vertexX = Number(vertexXString);
+    const vertexZ = Number(vertexZString);
+    const baseHeight = sampleBaseHeight(terrain, vertexX, vertexZ, editConfig.heightStepMeters);
+
+    if (baseHeight === null) {
+      continue;
+    }
+
+    const incidentTiles = [
+      [vertexX - 1, vertexZ - 1],
+      [vertexX, vertexZ - 1],
+      [vertexX - 1, vertexZ],
+      [vertexX, vertexZ]
+    ].filter(([tileX, tileZ]) => terrain.containsTile(tileX, tileZ));
+
+    if (incidentTiles.length === 0) {
+      continue;
+    }
+
+    const coefficients = new Array<number>(affectedTiles.length + 1).fill(0);
+    let fixedContribution = 0;
+
+    for (const [tileX, tileZ] of incidentTiles) {
+      const key = tileEditKey(tileX, tileZ);
+      const currentValue = getCurrentTileHeightSteps(terrain, edits, tileX, tileZ);
+      const index = unknownIndex.get(key);
+
+      if (index === undefined) {
+        fixedContribution += currentValue;
+      } else {
+        coefficients[index] += 1;
+      }
+    }
+
+    coefficients[planeIndex] = -(incidentTiles.length / editConfig.heightStepMeters);
+
+    rows.push({
+      coefficients,
+      rhs: -fixedContribution - (incidentTiles.length * baseHeight) / editConfig.heightStepMeters
+    });
+  }
+
+  return rows;
+};
+
+const solveAreaHeightEditsForTarget = ({
+  edits,
+  editConfig,
+  explicitTargetHeight,
+  selection,
+  terrain
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  explicitTargetHeight?: number | null;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const { haloTiles, selectedTiles } = getSelectionAndHaloTiles(terrain, selection);
+  const affectedTiles = [...selectedTiles, ...haloTiles];
+
+  if (affectedTiles.length === 0) {
+    return {
+      haloTiles,
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: explicitTargetHeight ?? null
+    };
+  }
+
+  const solvingForBestFitPlane =
+    explicitTargetHeight === undefined || explicitTargetHeight === null;
+  const rows = solvingForBestFitPlane
+    ? createBestFitPlaneLinearSystem({
+        affectedTiles,
+        edits,
+        editConfig,
+        selection: selectedTiles,
+        terrain
+      })
+    : createLinearSystem({
+        affectedTiles,
+        edits,
+        editConfig,
+        selection: selectedTiles,
+        targetHeight: explicitTargetHeight,
+        terrain
+      });
+
+  const currentValues = affectedTiles.map(tile =>
+    getCurrentTileHeightSteps(terrain, edits, tile.tileX, tile.tileZ)
+  );
+  const variableCount = solvingForBestFitPlane
+    ? affectedTiles.length + 1
+    : affectedTiles.length;
+  const normalMatrix = Array.from({ length: variableCount }, (_, rowIndex) =>
+    Array.from({ length: variableCount }, (_, columnIndex) =>
+      rowIndex === columnIndex ? SOLVER_REGULARIZATION : 0
+    )
+  );
+  const normalVector = Array.from({ length: variableCount }, (_, index) =>
+    index < currentValues.length ? currentValues[index]! * SOLVER_REGULARIZATION : 0
+  );
+
+  for (const row of rows) {
+    for (let left = 0; left < row.coefficients.length; left += 1) {
+      const leftValue = row.coefficients[left]!;
+
+      if (leftValue === 0) {
+        continue;
+      }
+
+      normalVector[left] += leftValue * row.rhs;
+
+      for (let right = 0; right < row.coefficients.length; right += 1) {
+        const rightValue = row.coefficients[right]!;
+
+        if (rightValue === 0) {
+          continue;
+        }
+
+        normalMatrix[left]![right] += leftValue * rightValue;
+      }
+    }
+  }
+
+  const solved = solveLinearSystem(normalMatrix, normalVector);
+  const solvedTileSteps = solved.slice(0, affectedTiles.length);
+  const rounded = solvedTileSteps.map(value =>
+    Math.max(-editConfig.maxAbsHeightSteps, Math.min(editConfig.maxAbsHeightSteps, Math.round(value)))
+  );
+
+  const optimized = optimizeRoundedSolution({
+    initial: rounded,
+    maxAbsHeightSteps: editConfig.maxAbsHeightSteps,
+    objective: candidate => {
+      const heights = getSelectionVertexHeightsForCandidate({
+        affectedTiles,
+        candidate,
+        edits,
+        editConfig,
+        selection: selectedTiles,
+        terrain
+      });
+      const targetHeight =
+        explicitTargetHeight ??
+        (heights.length === 0
+          ? 0
+          : heights.reduce((total, height) => total + height, 0) / heights.length);
+      const minHeight = heights.length === 0 ? targetHeight : Math.min(...heights);
+      const maxHeight = heights.length === 0 ? targetHeight : Math.max(...heights);
+      const primaryFlatnessPenalty =
+        explicitTargetHeight === undefined || explicitTargetHeight === null
+          ? maxHeight - minHeight
+          : Math.max(...heights.map(height => Math.abs(height - targetHeight)), 0);
+      let score = 0;
+
+      for (const height of heights) {
+        const residual = height - targetHeight;
+        score += residual * residual;
+      }
+
+      for (let index = 0; index < candidate.length; index += 1) {
+        const delta = candidate[index]! - currentValues[index]!;
+        score += delta * delta * SOLVER_REGULARIZATION;
+      }
+
+      return primaryFlatnessPenalty * 1_000_000 + score;
+    }
+  });
+
+  const heightEdits = affectedTiles.map((tile, index) => ({
+    current: getMergedTileState(terrain, edits, tile.tileX, tile.tileZ),
+    heightSteps: optimized[index]!
+  }));
+  const optimizedHeights = getSelectionVertexHeightsForCandidate({
+    affectedTiles,
+    candidate: optimized,
+    edits,
+    editConfig,
+    selection: selectedTiles,
+    terrain
+  });
+  const targetHeight =
+    explicitTargetHeight ??
+    (optimizedHeights.length === 0
+      ? null
+      : optimizedHeights.reduce((total, height) => total + height, 0) / optimizedHeights.length);
+
+  return {
+    haloTiles,
+    heightEdits,
+    targetHeight
+  };
+};
+
+const getSelectionAverageHeight = ({
+  edits,
+  editConfig,
+  selection,
+  terrain
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const heights = getSelectionVertexKeys(selection)
+    .map(vertexKey => {
+      const [vertexXString, vertexZString] = vertexKey.split(':');
+      return getCurrentVertexHeight({
+        edits,
+        editConfig,
+        terrain,
+        vertexX: Number(vertexXString),
+        vertexZ: Number(vertexZString)
+      });
+    })
+    .filter((height): height is number => height !== null);
+
+  if (heights.length === 0) {
+    return null;
+  }
+
+  return heights.reduce((total, height) => total + height, 0) / heights.length;
+};
+
+const shiftFlatAreaHeightEdits = ({
+  currentPlaneHeight,
+  edits,
+  editConfig,
+  mode,
+  selection,
+  terrain
+}: {
+  currentPlaneHeight: number;
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  mode: 'lower' | 'raise';
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const { haloTiles, selectedTiles } = getSelectionAndHaloTiles(terrain, selection);
+  const affectedTiles = [...selectedTiles, ...haloTiles];
+  const requestedHeight =
+    currentPlaneHeight + (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters;
+  const targetHeight = Math.max(WATER_LEVEL, requestedHeight);
+  const stepDelta = Math.round(
+    (targetHeight - currentPlaneHeight) / editConfig.heightStepMeters
+  );
+
+  if (stepDelta === 0 || affectedTiles.length === 0) {
+    return {
+      haloTiles,
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: currentPlaneHeight
+    };
+  }
+
+  const heightEdits = affectedTiles.map(tile => {
+    const current = getMergedTileState(terrain, edits, tile.tileX, tile.tileZ);
+
+    return {
+      current,
+      heightSteps: current.heightSteps + stepDelta
+    };
+  });
+
+  if (
+    heightEdits.some(
+      entry =>
+        entry.heightSteps < -editConfig.maxAbsHeightSteps ||
+        entry.heightSteps > editConfig.maxAbsHeightSteps
+    )
+  ) {
+    return {
+      haloTiles,
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: currentPlaneHeight
+    };
+  }
+
+  return {
+    haloTiles,
+    heightEdits,
+    targetHeight
+  };
+};
+
+const isSelectionFlat = ({
+  edits,
+  editConfig,
+  selection,
+  terrain
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  const heights = getSelectionVertexKeys(selection)
+    .map(vertexKey => {
+      const [vertexXString, vertexZString] = vertexKey.split(':');
+      return getCurrentVertexHeight({
+        edits,
+        editConfig,
+        terrain,
+        vertexX: Number(vertexXString),
+        vertexZ: Number(vertexZString)
+      });
+    })
+    .filter((height): height is number => height !== null);
+
+  return isTileFlat(heights);
+};
+
+export const getAreaHeightPreview = ({
+  edits,
+  editConfig,
+  selection,
+  terrain
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  if (selection.length === 0) {
+    return {
+      haloTiles: [] as TilePoint[],
+      targetHeight: null
+    };
+  }
+
+  const targetHeight = getSelectionAverageHeight({
+    edits,
+    editConfig,
+    selection,
+    terrain
+  });
+  const { haloTiles } = getSelectionAndHaloTiles(terrain, selection);
+
+  return {
+    haloTiles,
+    targetHeight
+  };
+};
+
+export const computeAreaHeightEdits = ({
+  currentPlaneHeight,
+  edits,
+  editConfig,
+  mode,
+  selection,
+  terrain
+}: {
+  currentPlaneHeight?: number | null;
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  mode: 'flatten' | 'lower' | 'raise';
+  selection: readonly TilePoint[];
+  terrain: TerrainTileEditSource;
+}) => {
+  if (selection.length === 0) {
+    return {
+      haloTiles: [] as TilePoint[],
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: null
+    };
+  }
+
+  const averageHeight = getSelectionAverageHeight({
+    edits,
+    editConfig,
+    selection,
+    terrain
+  });
+
+  if (averageHeight === null) {
+    return {
+      haloTiles: [] as TilePoint[],
+      heightEdits: [] as { current: ZarchTileState; heightSteps: number }[],
+      targetHeight: null
+    };
+  }
+
+  if (
+    mode !== 'flatten' &&
+    isSelectionFlat({
+      edits,
+      editConfig,
+      selection,
+      terrain
+    })
+  ) {
+    const resolvedPlaneHeight = currentPlaneHeight ?? averageHeight;
+    const requestedHeight =
+      resolvedPlaneHeight + (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters;
+
+    if (requestedHeight >= WATER_LEVEL) {
+      return shiftFlatAreaHeightEdits({
+        currentPlaneHeight: resolvedPlaneHeight,
+        edits,
+        editConfig,
+        mode,
+        selection,
+        terrain
+      });
+    }
+  }
+
+  const explicitTargetHeight =
+    mode === 'flatten'
+      ? null
+      : Math.max(
+          WATER_LEVEL,
+          (currentPlaneHeight ?? averageHeight) +
+            (mode === 'raise' ? 1 : -1) * editConfig.heightStepMeters
+        );
+
+  const { haloTiles, heightEdits, targetHeight } = solveAreaHeightEditsForTarget({
+    edits,
+    editConfig,
+    explicitTargetHeight,
+    selection,
+    terrain
+  });
+
+  return {
+    haloTiles,
+    heightEdits,
+    targetHeight
+  };
+};
+
+export const computeHeightEdits = ({
+  edits,
+  editConfig,
+  lower,
+  terrain,
+  tileX,
+  tileZ
+}: {
+  edits: ZarchTileDraftEdits;
+  editConfig: ZarchTileEditConfig;
+  lower: boolean;
+  terrain: TerrainTileEditSource;
+  tileX: number;
+  tileZ: number;
+}) =>
+  computeAreaHeightEdits({
+    currentPlaneHeight: null,
+    edits,
+    editConfig,
+    mode: lower ? 'lower' : 'flatten',
+    selection: [{ tileX, tileZ }],
+    terrain
+  }).heightEdits;

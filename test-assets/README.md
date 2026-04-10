@@ -4,6 +4,13 @@ Small GLB fixtures for the static-entities asset upload and review workflow.
 
 ## Files
 
+### `test-cube.glb`
+
+- Intended category: `industrial`
+- Suggested archetype ID: `test-cube`
+- Suggested footprint: `2m x 2m`
+- Notes: plain grounded cube with origin at bottom-center; useful for validating static placement, grounding, and transform/orientation assumptions
+
 ### `low-poly-tank.glb`
 
 - Intended category: `industrial`

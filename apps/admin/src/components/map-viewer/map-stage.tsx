@@ -7,9 +7,15 @@ import {
 import Konva from 'konva';
 import { useEffect, useMemo, useRef } from 'react';
 import { Image, Layer, Rect, Stage } from 'react-konva';
+import type { ZarchTileDraftEdits } from 'carrier-terrain-edit';
 
 import type { Viewport } from '@/hooks/use-map-viewport';
 import { clearBitmapCache, getChunkBitmap } from '@/lib/chunk-bitmap';
+import { createChunkMapTerrain } from '@/lib/map-chunk-terrain';
+import {
+  computeVisibleHeightRange,
+  type TerrainRenderLayer
+} from '@/lib/terrain-render';
 
 import { GridLines } from './grid-lines';
 
@@ -19,8 +25,10 @@ type MapStageProps = {
   canvasHeight: number;
   canvasWidth: number;
   chunks: Map<string, RuntimeMapChunk>;
+  draftEdits?: ZarchTileDraftEdits;
   editConfig: ZarchTileEditConfig | null;
   map: MapMetadata;
+  renderLayer: TerrainRenderLayer;
   viewport: Viewport;
 };
 
@@ -28,8 +36,10 @@ export function MapStage({
   canvasHeight,
   canvasWidth,
   chunks,
+  draftEdits,
   editConfig,
   map,
+  renderLayer,
   viewport
 }: MapStageProps) {
   const terrainLayerRef = useRef<Konva.Layer>(null);
@@ -48,14 +58,44 @@ export function MapStage({
       clearBitmapCache(map.id);
     }, [map.id]);
 
+  const terrain = useMemo(
+    () =>
+      createChunkMapTerrain({
+        chunks,
+        draftEdits,
+        editConfig,
+        map
+      }),
+    [chunks, draftEdits, editConfig, map]
+  );
+
+  const heightRange = useMemo(
+    () =>
+      computeVisibleHeightRange({
+        chunks,
+        draftEdits,
+        editConfig,
+        layer: renderLayer,
+        map
+      }),
+    [chunks, draftEdits, editConfig, map, renderLayer]
+  );
+
   const chunkImages = useMemo(() => Array.from(chunks.values()).map(chunk => ({
       height: chunk.tileHeight,
-      image: getChunkBitmap(chunk, chunks, editConfig),
+      image: getChunkBitmap(chunk, chunks, {
+        draftEdits,
+        editConfig,
+        heightRange,
+        map,
+        renderLayer,
+        terrain
+      }),
       key: `${chunk.chunkX}:${chunk.chunkZ}`,
       width: chunk.tileWidth,
       x: chunk.originTileX,
       y: chunk.originTileZ
-    })), [chunks, editConfig]);
+    })), [chunks, draftEdits, editConfig, heightRange, map, renderLayer, terrain]);
 
   return (
     <Stage

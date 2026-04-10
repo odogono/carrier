@@ -10,10 +10,13 @@ import {
 import { useCallback, useMemo } from 'react';
 
 import { client } from '@/lib/api-client';
+import { getMapEditorCapabilities } from '@/pages/maps/editor/helpers/capabilities';
 import { chunkIntersectsDirtyBounds } from '@/pages/maps/editor/helpers';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export const mapEditorKeys = {
+  activeArchetypes: () => ['maps', 'archetypes', 'active'] as const,
+  assetVersion: (id: string) => ['maps', 'asset-versions', id] as const,
   controlPoints: (mapId: string) =>
     ['maps', mapId, 'editor', 'control-points'] as const,
   derivedIslands: (mapId: string) =>
@@ -21,12 +24,11 @@ export const mapEditorKeys = {
   map: (mapId: string) => ['maps', mapId] as const,
   overview: (mapId: string) => ['maps', mapId, 'editor', 'overview'] as const,
   polygons: (mapId: string) => ['maps', mapId, 'editor', 'polygons'] as const,
-  staticEntities: (mapId: string) =>
-    ['maps', mapId, 'editor', 'static-entities'] as const,
   referencedArchetypes: (mapId: string) =>
     ['maps', mapId, 'editor', 'referenced-archetypes'] as const,
-  activeArchetypes: () => ['maps', 'archetypes', 'active'] as const,
-  assetVersion: (id: string) => ['maps', 'asset-versions', id] as const
+  staticEntities: (mapId: string) =>
+    ['maps', mapId, 'editor', 'static-entities'] as const,
+  tileEditConfig: () => ['zarch', 'tile-edit-config'] as const
 };
 
 const parseChunkQueryKey = (queryKey: readonly unknown[]) => {
@@ -118,48 +120,53 @@ export const useMapEditorData = (mapId: string) => {
   });
 
   const map = mapQuery.data;
-  const authoredEnabled = isInfiniteMap(map);
+  const capabilities = getMapEditorCapabilities(map);
 
   const overviewQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.hasOverviewAuthoring,
     queryFn: () => client.maps.getOverview({ mapId }),
     queryKey: mapEditorKeys.overview(mapId)
   });
 
   const polygonsQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditAuthoredGeometry,
     queryFn: () => client.maps.listSourcePolygons({ mapId, status: 'active' }),
     queryKey: mapEditorKeys.polygons(mapId)
   });
 
   const controlPointsQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditAuthoredGeometry,
     queryFn: () => client.maps.listControlPoints({ mapId }),
     queryKey: mapEditorKeys.controlPoints(mapId)
   });
 
   const derivedIslandsQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditAuthoredGeometry,
     queryFn: () => client.maps.listDerivedIslands({ mapId }),
     queryKey: mapEditorKeys.derivedIslands(mapId)
   });
 
   const staticEntitiesQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditStaticEntities,
     queryFn: () => client.maps.listStaticEntities({ mapId }),
     queryKey: mapEditorKeys.staticEntities(mapId)
   });
 
   const referencedArchetypesQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditStaticEntities,
     queryFn: () => client.maps.listReferencedArchetypes({ mapId }),
     queryKey: mapEditorKeys.referencedArchetypes(mapId)
   });
 
   const activeArchetypesQuery = useQuery({
-    enabled: authoredEnabled,
+    enabled: capabilities.canEditStaticEntities,
     queryFn: () => client.maps.listArchetypes({ status: 'active' }),
     queryKey: mapEditorKeys.activeArchetypes()
+  });
+  const tileEditConfigQuery = useQuery({
+    enabled: true,
+    queryFn: () => client.maps.getTileEditConfig({}),
+    queryKey: mapEditorKeys.tileEditConfig()
   });
 
   const assetVersionIds = useMemo(
@@ -176,7 +183,7 @@ export const useMapEditorData = (mapId: string) => {
   );
 
   const assetVersionQueries = useQueries({
-    queries: authoredEnabled
+    queries: capabilities.canEditStaticEntities
       ? assetVersionIds.map(assetVersionId => ({
           queryFn: () => client.maps.getAssetVersion({ id: assetVersionId }),
           queryKey: mapEditorKeys.assetVersion(assetVersionId),
@@ -196,9 +203,20 @@ export const useMapEditorData = (mapId: string) => {
     [assetVersionQueries]
   );
 
-  const invalidateMapAndAuthoredQueries = useCallback(async () => {
+  const invalidateMapQueries = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: mapEditorKeys.map(mapId) }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.staticEntities(mapId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mapEditorKeys.referencedArchetypes(mapId)
+      })
+    ]);
+  }, [mapId, queryClient]);
+
+  const invalidateAuthoredQueries = useCallback(async () => {
+    await Promise.all([
       queryClient.invalidateQueries({
         queryKey: mapEditorKeys.overview(mapId)
       }),
@@ -210,15 +228,13 @@ export const useMapEditorData = (mapId: string) => {
       }),
       queryClient.invalidateQueries({
         queryKey: mapEditorKeys.derivedIslands(mapId)
-      }),
-      queryClient.invalidateQueries({
-        queryKey: mapEditorKeys.staticEntities(mapId)
-      }),
-      queryClient.invalidateQueries({
-        queryKey: mapEditorKeys.referencedArchetypes(mapId)
       })
     ]);
   }, [mapId, queryClient]);
+
+  const invalidateMapAndAuthoredQueries = useCallback(async () => {
+    await Promise.all([invalidateMapQueries(), invalidateAuthoredQueries()]);
+  }, [invalidateAuthoredQueries, invalidateMapQueries]);
 
   const invalidateIslandMetadataQueries = useCallback(async () => {
     await Promise.all([
@@ -236,7 +252,7 @@ export const useMapEditorData = (mapId: string) => {
     async (
       dirtyBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>
     ) => {
-      await invalidateMapAndAuthoredQueries();
+      await invalidateMapQueries();
 
       if (!map) {
         return;
@@ -259,18 +275,18 @@ export const useMapEditorData = (mapId: string) => {
         }
       });
     },
-    [invalidateMapAndAuthoredQueries, map, mapId, queryClient]
+    [invalidateMapQueries, map, mapId, queryClient]
   );
 
   const invalidateStaticEntityMutation = useCallback(async () => {
-    await invalidateMapAndAuthoredQueries();
+    await invalidateMapQueries();
     await queryClient.invalidateQueries({
       predicate: query => {
         const key = parseChunkQueryKey(query.queryKey);
         return key?.mapId === mapId;
       }
     });
-  }, [invalidateMapAndAuthoredQueries, mapId, queryClient]);
+  }, [invalidateMapQueries, mapId, queryClient]);
 
   const replaceStaticEntityItems = useCallback(
     (replacements: StaticEntityListItem[]) => {
@@ -373,10 +389,7 @@ export const useMapEditorData = (mapId: string) => {
     activeArchetypesQuery,
     appendStaticEntityItems,
     assetVersionsById,
-    staticEntitiesQuery,
-    referencedArchetypesQuery,
-    replaceStaticEntityItems,
-    removeStaticEntityItems,
+    capabilities,
     controlPointsQuery,
     derivedIslandsQuery,
     invalidateIslandMetadataQueries,
@@ -388,7 +401,12 @@ export const useMapEditorData = (mapId: string) => {
     overviewQuery,
     patchControlPoints,
     polygonsQuery,
+    referencedArchetypesQuery,
     reloadAll,
-    replaceSourcePolygons
+    removeStaticEntityItems,
+    replaceSourcePolygons,
+    replaceStaticEntityItems,
+    staticEntitiesQuery,
+    tileEditConfigQuery
   };
 };

@@ -9,10 +9,17 @@ import {
 } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { useMapChunks } from '@/hooks/use-map-chunks';
-import { client } from '@/lib/api-client';
-import { useQuery } from '@tanstack/react-query';
+import { mapEditorKeys } from '@/hooks/use-map-editor-data';
 import { getVisibleChunkRange, useMapViewport } from '@/hooks/use-map-viewport';
+import { client } from '@/lib/api-client';
+import {
+  TERRAIN_RENDER_LAYER_OPTIONS,
+  getTerrainRenderLegend,
+  type TerrainRenderLayer
+} from '@/lib/terrain-render';
+import { useQuery } from '@tanstack/react-query';
 
 import { MapStage } from './map-stage';
 
@@ -24,6 +31,8 @@ type MapViewerProps = {
 export function MapViewer({ map, mapId }: MapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<HTMLDivElement>(null);
+  const [renderLayer, setRenderLayer] =
+    useState<TerrainRenderLayer>('resolved-color');
   const [size, setSize] = useState({ height: 0, width: 0 });
 
   const handleWheelCapture = useCallback((e: WheelEvent<HTMLDivElement>) => {
@@ -33,19 +42,25 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
 
   const measureContainer = useCallback(() => {
     const el = containerRef.current;
-    if (!el) {return;}
+    if (!el) {
+      return;
+    }
     const rect = el.getBoundingClientRect();
     setSize(prev => {
       const w = Math.floor(rect.width);
       const h = Math.floor(rect.height);
-      if (prev.width === w && prev.height === h) {return prev;}
+      if (prev.width === w && prev.height === h) {
+        return prev;
+      }
       return { height: h, width: w };
     });
   }, []);
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) {return;}
+    if (!el) {
+      return;
+    }
 
     measureContainer();
 
@@ -99,13 +114,44 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
   const chunks = useMapChunks(mapId, chunkRange);
   const tileEditConfigQuery = useQuery({
     queryFn: () => client.maps.getTileEditConfig({}),
-    queryKey: ['zarch', 'tile-edit-config']
+    queryKey: mapEditorKeys.tileEditConfig()
   });
+  const legendItems = getTerrainRenderLegend(
+    renderLayer,
+    tileEditConfigQuery.data ?? null
+  );
 
   const zoomPercent = Math.round(viewport.zoom * 100);
 
   return (
     <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3 rounded-md border bg-card/60 p-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              Terrain Layer
+            </div>
+            <div className="text-sm text-foreground">
+              Switch between authored and derived terrain views
+            </div>
+          </div>
+          <div className="w-full sm:w-[220px]">
+            <Select
+              aria-label="Terrain render layer"
+              onChange={event =>
+                setRenderLayer(event.target.value as TerrainRenderLayer)
+              }
+              value={renderLayer}
+            >
+              {TERRAIN_RENDER_LAYER_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      </div>
       <div
         className="relative h-[500px] overflow-hidden rounded-md border bg-[#0a1320]"
         ref={containerRef}
@@ -138,6 +184,7 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
               chunks={chunks}
               editConfig={tileEditConfigQuery.data ?? null}
               map={map}
+              renderLayer={renderLayer}
               viewport={viewport}
             />
           </div>
@@ -172,6 +219,22 @@ export function MapViewer({ map, mapId }: MapViewerProps) {
           </Button>
         </div>
       </div>
+      {legendItems.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {legendItems.map(item => (
+            <div
+              className="flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs text-muted-foreground"
+              key={`${renderLayer}-${item.label}`}
+            >
+              <span
+                className="inline-block h-3 w-3 rounded-sm border border-black/40"
+                style={{ backgroundColor: item.color }}
+              />
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {map.extent.kind === 'finite' ? (

@@ -3,6 +3,7 @@ import {
   Combine,
   GitBranchPlus,
   Hand,
+  Layers3,
   MapPinPlus,
   Move,
   PackagePlus,
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 import type { EditorTool } from '../helpers';
 
 type EditorToolbarProps = {
+  availableTools: EditorTool[];
   booleanActionsVisible: boolean;
   canApplyDifference: boolean;
   canApplyUnionLike: boolean;
@@ -43,6 +45,7 @@ const toolOptions: Array<{
 }> = [
   { icon: ScanSearch, label: 'Select', tool: 'select' },
   { icon: Hand, label: 'Pan', tool: 'pan' },
+  { icon: Layers3, label: 'Terrain', tool: 'terrain' as EditorTool },
   { icon: PackagePlus, label: 'Place Entity', tool: 'place-entity' },
   { icon: GitBranchPlus, label: 'Draw Polygon', tool: 'draw-polygon' },
   { icon: Move, label: 'Edit Vertices', tool: 'edit-vertices' },
@@ -50,6 +53,7 @@ const toolOptions: Array<{
 ];
 
 export const EditorToolbar = ({
+  availableTools,
   booleanActionsVisible,
   canApplyDifference,
   canApplyUnionLike,
@@ -71,7 +75,9 @@ export const EditorToolbar = ({
     <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
       <ToolbarSection eyebrow="Mode" title="Choose the active editing mode">
         <div className="flex flex-wrap gap-2">
-          {toolOptions.map(option => {
+          {toolOptions
+            .filter(option => availableTools.includes(option.tool))
+            .map(option => {
             const isActive = tool === option.tool;
             const Icon = option.icon;
             const commonProps = {
@@ -147,7 +153,7 @@ export const EditorToolbar = ({
                 {option.label}
               </Button>
             );
-          })}
+            })}
         </div>
       </ToolbarSection>
 

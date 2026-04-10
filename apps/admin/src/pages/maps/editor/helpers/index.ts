@@ -12,6 +12,7 @@ export { DEFAULT_SOURCE_POLYGON_PARAMS } from 'carrier-contracts';
 export type EditorTool =
   | 'pan'
   | 'select'
+  | 'terrain'
   | 'place-entity'
   | 'draw-polygon'
   | 'edit-vertices'

@@ -13,7 +13,7 @@
     },
     "apps/admin": {
       "name": "carrier-admin",
-      "version": "0.7.0",
+      "version": "0.8.1",
       "dependencies": {
         "@orpc/client": "^1.13.9",
         "@orpc/contract": "^1.13.9",
@@ -28,6 +28,7 @@
         "@tanstack/react-router": "^1.167.5",
         "carrier-contracts": "workspace:*",
         "carrier-preview": "workspace:*",
+        "carrier-terrain-edit": "workspace:*",
         "clsx": "^2.1.1",
         "jotai": "^2.18.1",
         "konva": "^10.2.3",
@@ -93,7 +94,7 @@
     },
     "apps/client": {
       "name": "carrier-client",
-      "version": "0.7.0",
+      "version": "0.8.1",
       "dependencies": {
         "@orpc/client": "^1.13.9",
         "@orpc/contract": "^1.13.9",
@@ -107,6 +108,7 @@
         "@tanstack/react-router": "^1.167.5",
         "@tanstack/react-router-devtools": "^1.166.9",
         "carrier-contracts": "workspace:*",
+        "carrier-terrain-edit": "workspace:*",
         "clsx": "^2.1.1",
         "jotai": "^2.18.1",
         "leva": "^0.10.1",
@@ -143,7 +145,7 @@
     },
     "packages/contracts": {
       "name": "carrier-contracts",
-      "version": "0.7.0",
+      "version": "0.8.1",
       "dependencies": {
         "@orpc/contract": "^1.13.4",
         "@orpc/server": "^1.13.4",
@@ -157,6 +159,13 @@
       "dependencies": {
         "carrier-contracts": "workspace:*",
         "three": "^0.183.2",
+      },
+    },
+    "packages/terrain-edit": {
+      "name": "carrier-terrain-edit",
+      "version": "0.1.0",
+      "dependencies": {
+        "carrier-contracts": "workspace:*",
       },
     },
   },
@@ -756,6 +765,8 @@
     "carrier-contracts": ["carrier-contracts@workspace:packages/contracts"],
 
     "carrier-preview": ["carrier-preview@workspace:packages/preview"],
+
+    "carrier-terrain-edit": ["carrier-terrain-edit@workspace:packages/terrain-edit"],
 
     "chalk": ["chalk@4.1.2", "", { "dependencies": { "ansi-styles": "^4.1.0", "supports-color": "^7.1.0" } }, "sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA=="],
 

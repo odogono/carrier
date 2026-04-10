@@ -1,12 +1,27 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import {
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  type RefObject
+} from 'react';
 
 import {
+  BoxGeometry,
+  EdgesGeometry,
   Group,
   InstancedMesh,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
+  MeshBasicMaterial,
   Object3D,
+  Raycaster,
   type BufferGeometry,
-  type Material
+  type Intersection,
+  type Material,
+  type PerspectiveCamera,
+  type Vector2
 } from 'three';
 import { useFrame } from '@react-three/fiber';
 
@@ -66,9 +81,37 @@ type InstancedEntry = {
   mesh: InstancedMesh<BufferGeometry, Material>;
 };
 
+export type EntityRaycastResult = {
+  entityId: string;
+};
+
+export type ZarchStaticEntitiesHandle = {
+  raycastToEntity: (
+    pointer: { clientX: number; clientY: number },
+    rect: DOMRect,
+    raycaster: Raycaster,
+    ndc: Vector2,
+    camera: PerspectiveCamera,
+    intersections: Intersection[]
+  ) => EntityRaycastResult | null;
+};
+
+type PlacementPreview = {
+  archetypeId: string;
+  assetVersionId: string;
+  worldX: number;
+  worldZ: number;
+  valid: boolean;
+} | null;
+
 type ZarchStaticEntitiesProps = {
+  entityEditEnabled: boolean;
+  handleRef: RefObject<ZarchStaticEntitiesHandle | null>;
+  hoveredEntityId: string | null;
   map: MapMetadata;
+  placementPreview: PlacementPreview;
   runtimeRef: RefObject<ZarchRuntimeState>;
+  selectedEntityId: string | null;
 };
 
 const assetRuntimeCache = new Map<string, AssetRuntimeCacheEntry>();
@@ -148,13 +191,21 @@ const disposeInstancedEntry = (entry: InstancedEntry) => {
 };
 
 export const ZarchStaticEntities = ({
+  handleRef,
+  hoveredEntityId,
   map,
-  runtimeRef
+  placementPreview,
+  runtimeRef,
+  selectedEntityId
 }: ZarchStaticEntitiesProps) => {
   const cloneEntriesRef = useRef(new Map<string, CloneEntry>());
   const instancedEntriesRef = useRef(new Map<string, InstancedEntry>());
   const instanceDummyRef = useRef(new Object3D());
   const rootRef = useRef<Group>(null);
+  const selectionOutlineRef = useRef<LineSegments | null>(null);
+  const hoverOutlineRef = useRef<LineSegments | null>(null);
+  const previewMeshRef = useRef<Group | null>(null);
+  const previewAssetVersionIdRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const configRef = useSceneConfigRef();
 
@@ -219,10 +270,97 @@ export const ZarchStaticEntities = ({
     }
 
     instancedEntriesRef.current.clear();
+
+    if (previewMeshRef.current) {
+      previewMeshRef.current.removeFromParent();
+      previewMeshRef.current = null;
+      previewAssetVersionIdRef.current = null;
+    }
   };
 
   useEffect(() => cleanupEntries(), [map.id]);
   useEffect(() => cleanupEntries, []);
+
+  // Set up selection/hover outlines
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const outlineMaterial = new LineBasicMaterial({
+      color: 0xf6d84a,
+      depthTest: false
+    });
+    const hoverMaterial = new LineBasicMaterial({
+      color: 0xd6bf68,
+      depthTest: false,
+      opacity: 0.6,
+      transparent: true
+    });
+    const boxGeo = new EdgesGeometry(new BoxGeometry(1, 1, 1));
+
+    const selectionOutline = new LineSegments(boxGeo, outlineMaterial);
+    selectionOutline.visible = false;
+    selectionOutline.renderOrder = 15;
+    root.add(selectionOutline);
+    selectionOutlineRef.current = selectionOutline;
+
+    const hoverOutline = new LineSegments(boxGeo.clone(), hoverMaterial);
+    hoverOutline.visible = false;
+    hoverOutline.renderOrder = 14;
+    root.add(hoverOutline);
+    hoverOutlineRef.current = hoverOutline;
+
+    return () => {
+      selectionOutline.removeFromParent();
+      hoverOutline.removeFromParent();
+      outlineMaterial.dispose();
+      hoverMaterial.dispose();
+      boxGeo.dispose();
+    };
+  }, []);
+
+  // Expose raycast handle
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      raycastToEntity: (pointer, rect, raycaster, ndc, camera, intersections) => {
+        if (rect.width === 0 || rect.height === 0) return null;
+
+        ndc.set(
+          ((pointer.clientX - rect.left) / rect.width) * 2 - 1,
+          -(((pointer.clientY - rect.top) / rect.height) * 2 - 1)
+        );
+        raycaster.setFromCamera(ndc, camera);
+
+        const targets: Object3D[] = [];
+        for (const entry of cloneEntriesRef.current.values()) {
+          if (entry.object.visible) {
+            targets.push(entry.object);
+          }
+        }
+
+        if (targets.length === 0) return null;
+
+        intersections.length = 0;
+        raycaster.intersectObjects(targets, true, intersections);
+
+        const hit = intersections[0];
+        if (!hit) return null;
+
+        let current: Object3D | null = hit.object;
+        while (current) {
+          const entityId = current.userData.entityId as string | undefined;
+          if (entityId) {
+            return { entityId };
+          }
+          current = current.parent;
+        }
+
+        return null;
+      }
+    }),
+    []
+  );
 
   useFrame(() => {
     const root = rootRef.current;
@@ -377,6 +515,7 @@ export const ZarchStaticEntities = ({
       if (!cloneEntry) {
         const object = assetRuntime.runtime.normalized.object.clone(true);
         setModelShadowProps(object);
+        object.userData.entityId = entity.id;
         root.add(object);
         cloneEntry = {
           assetVersionId: assetVersion.id,
@@ -468,6 +607,131 @@ export const ZarchStaticEntities = ({
 
       instancedEntry.mesh.count = 0;
       instancedEntry.mesh.visible = false;
+    }
+
+    // Selection/hover outlines
+    const selectionOutline = selectionOutlineRef.current;
+    const hoverOutline = hoverOutlineRef.current;
+
+    if (selectionOutline) {
+      const selEntry = selectedEntityId
+        ? cloneEntriesRef.current.get(selectedEntityId)
+        : null;
+
+      if (selEntry?.object.visible) {
+        const pos = selEntry.object.position;
+        const scl = selEntry.object.scale;
+        selectionOutline.position.copy(pos);
+        selectionOutline.position.y += scl.y * 0.5;
+        selectionOutline.scale.set(scl.x * 1.1, scl.y * 1.1, scl.z * 1.1);
+        selectionOutline.rotation.copy(selEntry.object.rotation);
+        selectionOutline.visible = true;
+      } else {
+        selectionOutline.visible = false;
+      }
+    }
+
+    if (hoverOutline) {
+      const hovEntry =
+        hoveredEntityId && hoveredEntityId !== selectedEntityId
+          ? cloneEntriesRef.current.get(hoveredEntityId)
+          : null;
+
+      if (hovEntry?.object.visible) {
+        const pos = hovEntry.object.position;
+        const scl = hovEntry.object.scale;
+        hoverOutline.position.copy(pos);
+        hoverOutline.position.y += scl.y * 0.5;
+        hoverOutline.scale.set(scl.x * 1.05, scl.y * 1.05, scl.z * 1.05);
+        hoverOutline.rotation.copy(hovEntry.object.rotation);
+        hoverOutline.visible = true;
+      } else {
+        hoverOutline.visible = false;
+      }
+    }
+
+    // Placement preview ghost
+    const preview = placementPreview;
+    const previewGroup = previewMeshRef.current;
+
+    if (preview && root) {
+      const assetRuntime = ensureAssetRuntime(preview.assetVersionId);
+
+      if (assetRuntime.runtime) {
+        if (
+          previewAssetVersionIdRef.current !== preview.assetVersionId ||
+          !previewGroup
+        ) {
+          // Remove old preview
+          if (previewGroup) {
+            previewGroup.removeFromParent();
+          }
+
+          const ghost = assetRuntime.runtime.normalized.object.clone(true);
+          ghost.traverse((child: Object3D) => {
+            if (child instanceof Mesh) {
+              child.material = new MeshBasicMaterial({
+                color: preview.valid ? 0x66ff66 : 0xff6666,
+                opacity: 0.4,
+                transparent: true,
+                depthWrite: false
+              });
+            }
+          });
+          ghost.renderOrder = 13;
+          root.add(ghost);
+          previewMeshRef.current = ghost;
+          previewAssetVersionIdRef.current = preview.assetVersionId;
+        }
+
+        const ghost = previewMeshRef.current;
+        if (ghost) {
+          const sceneX = preview.worldX * worldScale;
+          const sceneZ = preview.worldZ * worldScale;
+
+          // Compute grounding for preview
+          const grounding = getStaticEntityGrounding({
+            assetVersion: (() => {
+              const archetype = archetypesById.get(preview.archetypeId);
+              const av = archetype
+                ? assetVersionsById.get(archetype.assetVersionId)
+                : null;
+              return (
+                av ?? {
+                  footprint: { widthMeters: 1, depthMeters: 1 },
+                  maxHeightDeltaMeters: 100
+                }
+              );
+            })(),
+            entity: {
+              position: { x: preview.worldX, z: preview.worldZ },
+              rotation: { yaw: 0 },
+              scale: 1,
+              yOffset: 0
+            },
+            terrains
+          });
+
+          ghost.position.set(
+            sceneX,
+            grounding ? grounding.effectiveY : 0,
+            sceneZ
+          );
+          ghost.scale.set(worldScale, worldScale, worldScale);
+
+          // Update material color based on validity
+          const isValid = grounding ? grounding.valid : false;
+          ghost.traverse((child: Object3D) => {
+            if (child instanceof Mesh && child.material instanceof MeshBasicMaterial) {
+              child.material.color.set(isValid ? 0x66ff66 : 0xff6666);
+            }
+          });
+
+          ghost.visible = true;
+        }
+      }
+    } else if (previewGroup) {
+      previewGroup.visible = false;
     }
   });
 

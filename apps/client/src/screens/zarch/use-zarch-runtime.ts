@@ -1,6 +1,7 @@
 import {
   type KeyboardEvent,
   type PointerEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef
@@ -76,10 +77,23 @@ export type ZarchInputState = {
   shipFireHeld: boolean;
 };
 
+type EditorMode = 'terrain' | 'entities';
+
+type EntityEditCallbacks = {
+  onCloseCatalog: () => void;
+  onClearSelection: () => void;
+  onDeleteEntity: () => void;
+  onRotateEntity: (direction: 'cw' | 'ccw') => void;
+  selectedEntityId: string | null;
+  catalogOpen: boolean;
+};
+
 type UseZarchRuntimeArgs = {
   containerElement: HTMLElement | null;
   editEnabled: boolean;
   editTool: 'height' | 'set-color' | 'set-type';
+  editorMode: EditorMode;
+  entityEditCallbacksRef: RefObject<EntityEditCallbacks | null>;
 };
 
 const PREVENT_SCROLL_KEYS = new Set([
@@ -93,7 +107,9 @@ const PREVENT_SCROLL_KEYS = new Set([
 export const useZarchRuntime = ({
   containerElement,
   editEnabled,
-  editTool
+  editTool,
+  editorMode,
+  entityEditCallbacksRef
 }: UseZarchRuntimeArgs) => {
   const configRef = useSceneConfigRef();
   const runtimeRef = useRef<ZarchRuntimeState>({
@@ -170,6 +186,30 @@ export const useZarchRuntime = ({
 
       if (PREVENT_SCROLL_KEYS.has(event.key)) {
         event.preventDefault();
+      }
+
+      // Entity mode keyboard shortcuts
+      if (editEnabled && editorMode === 'entities') {
+        const callbacks = entityEditCallbacksRef.current;
+        if (callbacks) {
+          if (event.code === 'Escape') {
+            if (callbacks.catalogOpen) {
+              callbacks.onCloseCatalog();
+            } else if (callbacks.selectedEntityId) {
+              callbacks.onClearSelection();
+            }
+            event.preventDefault();
+          } else if (event.code === 'KeyR' && callbacks.selectedEntityId) {
+            callbacks.onRotateEntity(event.shiftKey ? 'ccw' : 'cw');
+            event.preventDefault();
+          } else if (
+            (event.code === 'Delete' || event.code === 'Backspace') &&
+            callbacks.selectedEntityId
+          ) {
+            callbacks.onDeleteEntity();
+            event.preventDefault();
+          }
+        }
       }
     };
 
@@ -339,7 +379,7 @@ export const useZarchRuntime = ({
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp
     };
-  }, [configRef, editEnabled, editTool]);
+  }, [configRef, editEnabled, editTool, editorMode, entityEditCallbacksRef]);
 
   return {
     containerProps,
