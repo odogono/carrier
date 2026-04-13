@@ -67,6 +67,8 @@ Terrain-affecting mutations bump the map revision and invalidate generated chunk
 
 The repository implementation lives in `apps/api/src/maps/repository.ts`.
 
+For the detailed chunk payload model, including height samples, binary decoding, tile override layers, and static entity inclusion, see [map-chunks.md](./map-chunks.md).
+
 ### `wrapped-classic`
 
 - Metadata is persisted in `maps`.
@@ -217,6 +219,7 @@ Gameplay terrain loading lives under `apps/client/src/screens/zarch` and `apps/c
 
 - terrain loading supports both finite and infinite maps through one shared chunk path
 - chunk loading uses signed coordinates
+- chunk payload structure and height-step sampling are described in [map-chunks.md](./map-chunks.md)
 - wrapped finite maps keep toroidal sampling and wrapped chunk prefetch
 - infinite maps use unbounded chunk windows and origin-based camera defaults
 - the minimap remains finite-map-only behavior
