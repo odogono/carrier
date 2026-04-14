@@ -63,11 +63,14 @@ export type CanvasDragState =
       startPoint: WorldPoint;
     }
   | {
+      currentScale: number;
       currentYaw: number;
       entity: StaticEntity;
       kind: 'static-entity-rotate';
       pointerId: number;
       startAngle: number;
+      startRadius: number;
+      startScale: number;
       startYaw: number;
     }
   | {

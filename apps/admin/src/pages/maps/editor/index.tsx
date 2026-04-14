@@ -74,6 +74,7 @@ import {
   mergeWorldBounds,
   nextIslandPolygonSelection,
   nextOrderedSelection,
+  pointInBounds,
   pointInPolygon,
   polygonIntersectsBounds,
   snapWorldPoint,
@@ -1214,7 +1215,8 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
                 ...item.entity,
                 rotation: {
                   yaw: dragState.currentYaw
-                }
+                },
+                scale: dragState.currentScale
               }
             }
           : item
@@ -1415,13 +1417,17 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
       if (dragState?.kind === 'static-entity-rotate') {
         const world = toWorldPoint(event);
-        const currentYaw =
-          (Math.atan2(
-            world.x - dragState.entity.position.x,
-            -(world.z - dragState.entity.position.z)
-          ) *
-            180) /
-          Math.PI;
+        const dx = world.x - dragState.entity.position.x;
+        const dz = world.z - dragState.entity.position.z;
+        const currentYaw = (Math.atan2(dx, -dz) * 180) / Math.PI;
+        const currentRadius = Math.hypot(dx, dz);
+        const currentScale = Math.min(
+          Math.max(
+            dragState.startScale * (currentRadius / dragState.startRadius),
+            0.01
+          ),
+          1000
+        );
 
         suppressCanvasClickRef.current = true;
         suppressEntityClickRef.current = dragState.entity.id;
@@ -1429,6 +1435,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           current?.kind === 'static-entity-rotate'
             ? {
                 ...current,
+                currentScale,
                 currentYaw
               }
             : current
@@ -1519,50 +1526,39 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           clearSelections();
           setPolygonDraft(null);
         } else {
-          const selectedIds = polygons
+          const selectedPolygonIds = polygons
             .filter(polygon =>
               polygonIntersectsBounds(polygon.vertices, dragState.bounds)
             )
             .map(polygon => polygon.id);
 
-          if (selectedIds.length === 1) {
-            const polygon = polygons.find(
-              candidate => candidate.id === selectedIds[0]
-            );
-            updateSnapshot(
-              current => ({
-                ...current,
-                controlPointDraft: null,
-                entityDraft: null,
-                islandDraft: null,
-                polygonControlPointDrafts: [],
-                polygonDraft: polygon ? createPolygonDraft(polygon) : null,
-                selectedControlPointId: null,
-                selectedEntityIds: [],
-                selectedIslandId: null,
-                selectedPolygonIds: selectedIds,
-                tool: current.tool
-              }),
-              true
-            );
-          } else {
-            updateSnapshot(
-              current => ({
-                ...current,
-                controlPointDraft: null,
-                entityDraft: null,
-                islandDraft: null,
-                polygonControlPointDrafts: [],
-                polygonDraft: null,
-                selectedControlPointId: null,
-                selectedEntityIds: [],
-                selectedIslandId: null,
-                selectedPolygonIds: selectedIds,
-                tool: current.tool
-              }),
-              true
-            );
-          }
+          const marqueeSelectedEntityIds = staticEntityItems
+            .filter(item => pointInBounds(item.entity.position, dragState.bounds))
+            .map(item => item.entity.id);
+
+          const shouldCreatePolygonDraft =
+            selectedPolygonIds.length === 1 &&
+            marqueeSelectedEntityIds.length === 0;
+          const polygon = shouldCreatePolygonDraft
+            ? polygons.find(candidate => candidate.id === selectedPolygonIds[0])
+            : undefined;
+
+          updateSnapshot(
+            current => ({
+              ...current,
+              controlPointDraft: null,
+              entityDraft: null,
+              islandDraft: null,
+              polygonControlPointDrafts: [],
+              polygonDraft: polygon ? createPolygonDraft(polygon) : null,
+              selectedControlPointId: null,
+              selectedEntityIds: marqueeSelectedEntityIds,
+              selectedIslandId: null,
+              selectedPolygonIds,
+              tool: current.tool
+            }),
+            true
+          );
           suppressCanvasClickRef.current = true;
         }
       }
@@ -1639,14 +1635,16 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       }
 
       if (dragState?.kind === 'static-entity-rotate') {
-        const changed =
+        const yawChanged =
           Math.abs(dragState.currentYaw - dragState.startYaw) >= 0.001;
+        const scaleChanged =
+          Math.abs(dragState.currentScale - dragState.startScale) >= 0.001;
 
-        if (changed) {
-          void saveRotatedEntity(
-            dragState.entity.id,
-            dragState.currentYaw
-          ).finally(() => {
+        if (yawChanged || scaleChanged) {
+          void saveRotatedEntity(dragState.entity.id, {
+            scale: scaleChanged ? dragState.currentScale : undefined,
+            yaw: dragState.currentYaw
+          }).finally(() => {
             setDragState(null);
           });
         } else {
@@ -1679,6 +1677,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       setDragState,
       setPolygonControlPointDrafts,
       setPolygonDraft,
+      staticEntityItems,
       toTilePoint,
       tool,
       updateSnapshot
@@ -1901,18 +1900,29 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
       event.stopPropagation();
       interactionRef.current?.setPointerCapture(event.pointerId);
+      const world = toWorldPoint(event);
+      const startRadius = Math.max(
+        Math.hypot(
+          world.x - entity.position.x,
+          world.z - entity.position.z
+        ),
+        0.0001
+      );
       setDragState({
+        currentScale: entity.scale,
         currentYaw: entity.rotation.yaw,
         entity,
         kind: 'static-entity-rotate',
         pointerId: event.pointerId,
         startAngle: entity.rotation.yaw,
+        startRadius,
+        startScale: entity.scale,
         startYaw: entity.rotation.yaw
       });
       suppressCanvasClickRef.current = false;
       suppressEntityClickRef.current = null;
     },
-    [interactionRef, setDragState, tool]
+    [interactionRef, setDragState, toWorldPoint, tool]
   );
 
   const handlePolygonPointerDown = useCallback(

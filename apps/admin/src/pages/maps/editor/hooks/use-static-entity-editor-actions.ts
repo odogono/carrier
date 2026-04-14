@@ -242,25 +242,32 @@ export const useStaticEntityEditorActions = ({
   );
 
   const saveRotatedEntity = useCallback(
-    async (entityId: string, yaw: number) => {
+    async (
+      entityId: string,
+      transform: { scale?: number; yaw: number }
+    ) => {
       if (editorRevision === null) {
         return;
       }
 
+      const scaleChanged = transform.scale !== undefined;
       await runAction('rotate-static-entity', async () => {
         try {
           const result = await client.maps.updateStaticEntity({
             expectedRevision: editorRevision,
             id: entityId,
             mapId,
-            rotation: { yaw }
+            rotation: { yaw: transform.yaw },
+            ...(scaleChanged ? { scale: transform.scale } : {})
           });
 
           const nextRevision = await refreshAfterMutation(result.mapRevision);
           setEditorRevision(nextRevision);
           onSelectEntities([result.entity.id]);
           onSetEntityDraft(createStaticEntityDraft(result.entity));
-          toast.success('Entity rotation saved');
+          toast.success(
+            scaleChanged ? 'Entity transform saved' : 'Entity rotation saved'
+          );
         } catch (error) {
           toast.error(toMessage(error, 'Failed to rotate entity'));
         }
