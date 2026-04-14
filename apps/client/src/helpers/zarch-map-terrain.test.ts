@@ -127,6 +127,13 @@ describe('server-backed zarch terrain', () => {
       2,
       3
     ]);
+    expect(getMapChunkQueryKey('map-1', 2, 3, 7)).toEqual([
+      'map-chunk',
+      'map-1',
+      2,
+      3,
+      7
+    ]);
     expect(tileHash(7, 13)).toBe(tileHash(7, 13));
     expect(getTreeType(3, 9)).toBe(getTreeType(3, 9));
     expect(clampZoom(ZOOM_MIN - 1)).toBe(ZOOM_MIN);
@@ -150,7 +157,10 @@ describe('server-backed zarch terrain', () => {
 
   test('reads heights from the query cache and respects map bounds', () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(map.id, 0, 0, map.revision),
+      chunk00
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,
@@ -170,7 +180,10 @@ describe('server-backed zarch terrain', () => {
 
   test('samples world-space height and normal continuously', () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(map.id, 0, 0, map.revision),
+      chunk00
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,
@@ -194,11 +207,14 @@ describe('server-backed zarch terrain', () => {
     const tileHeightSteps = new Int8Array(32 * 32);
     tileHeightSteps[1 + 32] = 2;
 
-    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), {
-      ...chunk00,
-      heights: new Float32Array(33 * 33),
-      tileHeightSteps
-    } satisfies RuntimeMapChunk);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(map.id, 0, 0, map.revision),
+      {
+        ...chunk00,
+        heights: new Float32Array(33 * 33),
+        tileHeightSteps
+      } satisfies RuntimeMapChunk
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,
@@ -216,10 +232,53 @@ describe('server-backed zarch terrain', () => {
     expect(terrain.sampleHeightAtWorld(36, 36)).toBe(2);
   });
 
+  test('ignores chunks cached for a previous map revision', () => {
+    const queryClient = new QueryClient();
+    const currentMap = {
+      ...map,
+      revision: 2
+    };
+    const staleChunk = {
+      ...chunk00,
+      heights: new Float32Array(33 * 33).fill(99)
+    } satisfies RuntimeMapChunk;
+
+    queryClient.setQueryData(
+      getMapChunkQueryKey(currentMap.id, 0, 0, 1),
+      staleChunk
+    );
+
+    const terrain = createServerMapTerrain({
+      editConfig,
+      map: currentMap,
+      prefetchChunk: () => {},
+      queryClient
+    });
+
+    expect(terrain.sampleHeight(0, 0)).toBeNull();
+
+    queryClient.setQueryData(
+      getMapChunkQueryKey(currentMap.id, 0, 0, currentMap.revision),
+      chunk00
+    );
+
+    expect(
+      createServerMapTerrain({
+        editConfig,
+        map: currentMap,
+        prefetchChunk: () => {},
+        queryClient
+      }).sampleHeight(0, 0)
+    ).toBe(0);
+  });
+
   test('requests visible chunks with a one-ring prefetch window', () => {
     const requested: string[] = [];
     const queryClient = new QueryClient();
-    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(map.id, 0, 0, map.revision),
+      chunk00
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,
@@ -242,7 +301,10 @@ describe('server-backed zarch terrain', () => {
 
   test('marks a tile as unloaded until all corner samples are cached', () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0), chunk00);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(map.id, 0, 0, map.revision),
+      chunk00
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,
@@ -257,13 +319,25 @@ describe('server-backed zarch terrain', () => {
 
   test('wraps sample and tile lookup for wrapped-classic maps', () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 0, 0), {
-      ...chunk00,
-      mapId: wrappedMap.id
-    });
-    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 1, 0), chunk10);
-    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 0, 1), chunk01);
-    queryClient.setQueryData(getMapChunkQueryKey(wrappedMap.id, 1, 1), chunk11);
+    queryClient.setQueryData(
+      getMapChunkQueryKey(wrappedMap.id, 0, 0, wrappedMap.revision),
+      {
+        ...chunk00,
+        mapId: wrappedMap.id
+      }
+    );
+    queryClient.setQueryData(
+      getMapChunkQueryKey(wrappedMap.id, 1, 0, wrappedMap.revision),
+      chunk10
+    );
+    queryClient.setQueryData(
+      getMapChunkQueryKey(wrappedMap.id, 0, 1, wrappedMap.revision),
+      chunk01
+    );
+    queryClient.setQueryData(
+      getMapChunkQueryKey(wrappedMap.id, 1, 1, wrappedMap.revision),
+      chunk11
+    );
 
     const terrain = createServerMapTerrain({
       editConfig,

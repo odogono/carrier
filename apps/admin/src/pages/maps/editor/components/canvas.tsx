@@ -74,6 +74,13 @@ type StaticEntityCanvasItem = {
   entity: StaticEntity;
 };
 
+const fallbackStaticEntityFootprint: Pick<AssetVersion, 'footprint'> = {
+  footprint: {
+    depthMeters: 10,
+    widthMeters: 10
+  }
+};
+
 const renderTerrainTileRect = (
   rect: { height: number; width: number; x: number; z: number },
   key: string,
@@ -649,30 +656,29 @@ export const EditorCanvas = ({
                   : null}
                 {entityItems.map(item => {
                   const selected = selectedEntitySet.has(item.entity.id);
-                  const overlay = item.assetVersion
-                    ? getStaticEntityOverlayGeometry({
-                        assetVersion: item.assetVersion,
-                        entity: item.entity
-                      })
-                    : null;
+                  const assetVersion =
+                    item.assetVersion ?? fallbackStaticEntityFootprint;
+                  const overlay = getStaticEntityOverlayGeometry({
+                    assetVersion,
+                    entity: item.entity
+                  });
                   const facingPoint = getStaticEntityFacingIndicator({
                     entity: item.entity,
                     lengthMeters:
-                      (item.assetVersion?.footprint.depthMeters ?? 10) * 0.5 + 4
+                      assetVersion.footprint.depthMeters *
+                        item.entity.scale *
+                        0.5 +
+                      4
                   });
                   const anchor = toScreenPoint(item.entity.position);
                   const facingScreen = toScreenPoint(facingPoint);
-                  const handleScreen = overlay
-                    ? toScreenPoint(overlay.handle)
-                    : null;
-                  const footprintPoints = overlay
-                    ? overlay.corners
-                        .map(point => {
-                          const screen = toScreenPoint(point);
-                          return `${screen.x},${screen.z}`;
-                        })
-                        .join(' ')
-                    : '';
+                  const handleScreen = toScreenPoint(overlay.handle);
+                  const footprintPoints = overlay.corners
+                    .map(point => {
+                      const screen = toScreenPoint(point);
+                      return `${screen.x},${screen.z}`;
+                    })
+                    .join(' ');
                   const disabled = item.entity.state === 'disabled';
                   const warning = item.diagnostics.status === 'warning';
                   const stroke = disabled
@@ -695,45 +701,17 @@ export const EditorCanvas = ({
                       : warning
                         ? 'rgba(245,158,11,0.14)'
                         : 'rgba(148,163,184,0.08)';
+                  const strokeDasharray = disabled
+                    ? '10 6'
+                    : item.assetVersion
+                      ? undefined
+                      : '6 4';
 
                   return (
                     <g key={item.entity.id}>
-                      {overlay ? (
-                        <polygon
-                          data-testid="editor-static-entity"
-                          fill={fill}
-                          onClick={event => {
-                            STOP_PROPAGATION(event);
-                            onStaticEntityClick(
-                              event as unknown as MouseEvent<SVGElement>,
-                              item.entity
-                            );
-                          }}
-                          onPointerDown={event =>
-                            onStaticEntityPointerDown(
-                              event as unknown as PointerEvent<SVGElement>,
-                              item.entity
-                            )
-                          }
-                          points={footprintPoints}
-                          stroke={stroke}
-                          strokeDasharray={disabled ? '10 6' : undefined}
-                          strokeWidth={selected ? 3 : 2}
-                        />
-                      ) : null}
-                      <line
-                        pointerEvents="none"
-                        stroke={stroke}
-                        strokeWidth={2}
-                        x1={anchor.x}
-                        x2={facingScreen.x}
-                        y1={anchor.z}
-                        y2={facingScreen.z}
-                      />
-                      <circle
-                        cx={anchor.x}
-                        cy={anchor.z}
-                        fill={selected ? '#ffffff' : stroke}
+                      <polygon
+                        data-testid="editor-static-entity"
+                        fill={fill}
                         onClick={event => {
                           STOP_PROPAGATION(event);
                           onStaticEntityClick(
@@ -747,13 +725,32 @@ export const EditorCanvas = ({
                             item.entity
                           )
                         }
-                        r={selected ? 7 : 5}
+                        points={footprintPoints}
                         stroke={stroke}
-                        strokeWidth={2}
+                        strokeDasharray={strokeDasharray}
+                        strokeLinejoin="round"
+                        strokeWidth={selected ? 3.5 : 2.5}
+                      />
+                      <line
+                        pointerEvents="none"
+                        stroke={stroke}
+                        strokeWidth={selected ? 2.5 : 2}
+                        x1={anchor.x}
+                        x2={facingScreen.x}
+                        y1={anchor.z}
+                        y2={facingScreen.z}
+                      />
+                      <circle
+                        cx={anchor.x}
+                        cy={anchor.z}
+                        fill={selected ? '#ffffff' : 'transparent'}
+                        pointerEvents="none"
+                        r={selected ? 3 : 2}
+                        stroke={stroke}
+                        strokeWidth={selected ? 2 : 1.5}
                       />
                       {selected &&
                       selectedEntityIds.length === 1 &&
-                      handleScreen &&
                       tool === 'select' ? (
                         <>
                           <line

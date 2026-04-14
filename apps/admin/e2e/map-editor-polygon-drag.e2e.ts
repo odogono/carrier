@@ -1,7 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { expect, test, type APIRequestContext } from '@playwright/test';
 
 const apiPort = process.env.E2E_API_PORT ?? '16021';
 const apiBase = `http://localhost:${apiPort}/api`;
+const testAssetPath = resolve(
+  fileURLToPath(new URL('../../../test-assets/test-cube.glb', import.meta.url))
+);
 
 type SeedRequest = {
   get: (
@@ -12,6 +19,81 @@ type SeedRequest = {
     url: string,
     options?: { data?: unknown; headers?: Record<string, string> }
   ) => Promise<{ json: () => Promise<unknown>; ok: () => boolean }>;
+};
+
+const uploadReadyTestCubeArchetype = async (
+  request: APIRequestContext,
+  suffix: string
+): Promise<{ archetypeId: string }> => {
+  const fileName = `test-cube-${suffix}.glb`;
+  const uploadRes = await request.post(`${apiBase}/maps/assets`, {
+    multipart: {
+      file: {
+        buffer: readFileSync(testAssetPath),
+        mimeType: 'model/gltf-binary',
+        name: fileName
+      }
+    }
+  });
+  expect(uploadRes.ok()).toBeTruthy();
+  const uploaded = (await uploadRes.json()) as { id: string };
+
+  await expect
+    .poll(
+      async () => {
+        const assetRes = await request.get(
+          `${apiBase}/maps/assets/${uploaded.id}`
+        );
+        expect(assetRes.ok()).toBeTruthy();
+        const asset = (await assetRes.json()) as { status: string };
+        return asset.status;
+      },
+      { timeout: 30_000 }
+    )
+    .toBe('review');
+
+  const approvedRes = await request.post(
+    `${apiBase}/maps/assets/${uploaded.id}/approve`
+  );
+  expect(approvedRes.ok()).toBeTruthy();
+
+  const archetypeId = `test-cube-${suffix}`;
+  const archetypeRes = await request.post(`${apiBase}/maps/archetypes`, {
+    data: {
+      assetVersionId: uploaded.id,
+      category: 'building',
+      id: archetypeId,
+      name: `Test Cube ${suffix}`,
+      status: 'active',
+      tags: ['e2e']
+    },
+    headers: { 'Content-Type': 'application/json' }
+  });
+  expect(archetypeRes.ok()).toBeTruthy();
+
+  return { archetypeId };
+};
+
+const seedWrappedClassicMap = async (
+  request: SeedRequest,
+  suffix: string
+): Promise<{ mapId: string }> => {
+  const mapRes = await request.post(`${apiBase}/maps`, {
+    data: {
+      generator: 'diamond-square',
+      heightMeters: 1280,
+      kind: 'wrapped-classic',
+      name: `e2e finite entity ${suffix}`,
+      seed: `e2e-finite-entity-${suffix}`,
+      widthMeters: 1280
+    },
+    headers: { 'Content-Type': 'application/json' }
+  });
+  expect(mapRes.ok()).toBeTruthy();
+  const map = (await mapRes.json()) as { id: string };
+  expect(map.id).toBeTruthy();
+
+  return { mapId: map.id };
 };
 
 const fetchIslandIds = async (
@@ -150,7 +232,7 @@ test('selected polygon drag tracks pointer without initial jump', async ({
 
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Selection', exact: true })
+    page.getByRole('button', { exact: true, name: 'Selection' })
   ).toBeVisible();
 
   const stage = page.getByTestId('editor-stage');
@@ -173,7 +255,7 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   await overlayPolygon.click({ force: true });
 
   await expect(
-    page.getByRole('heading', { name: 'Polygon', exact: true })
+    page.getByRole('heading', { exact: true, name: 'Polygon' })
   ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Terrain Parameters' })
@@ -203,6 +285,57 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   expect(Math.abs(shiftX - deltaPx)).toBeLessThan(4);
 });
 
+test('finite map entity placement refreshes overlay and outliner editing entrypoint', async ({
+  page,
+  request
+}, testInfo): Promise<void> => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ height: 900, width: 1600 });
+  const suffix = `finite-${testInfo.workerIndex}-${Date.now()}`;
+  await uploadReadyTestCubeArchetype(request, suffix);
+  const { mapId } = await seedWrappedClassicMap(request, suffix);
+
+  await page.goto(`/maps/${mapId}/editor`);
+  const stage = page.getByTestId('editor-stage');
+  await expect(stage).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
+
+  await stage.getByRole('button', { name: 'Place Entity' }).click();
+
+  const stageBox = await stage.boundingBox();
+  expect(stageBox).not.toBeNull();
+  await page.mouse.click(
+    stageBox!.x + stageBox!.width * 0.55,
+    stageBox!.y + stageBox!.height * 0.55
+  );
+
+  await expect(stage.getByTestId('editor-static-entity')).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(stage.getByTestId('editor-canvas-status')).toContainText(
+    'Place Entity'
+  );
+
+  await page.getByRole('button', { name: 'Entities' }).click();
+  await expect(page.getByTestId('static-entity-placed-count')).toContainText(
+    '1'
+  );
+
+  const placedRow = page.getByTestId('static-entity-outliner-row').first();
+  await expect(placedRow).toContainText(`Test Cube ${suffix}`);
+  await placedRow.click();
+
+  await expect(
+    page.getByRole('button', { exact: true, name: 'Selection' })
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.getByRole('heading', { exact: true, name: 'Static Entity' })
+  ).toBeVisible();
+  await expect(page.getByLabel('Yaw')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Duplicate' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+});
+
 test('derived island rows match map selection and multi-island drag moves both islands', async ({
   page,
   request
@@ -226,7 +359,7 @@ test('derived island rows match map selection and multi-island drag moves both i
     .getByTestId(`derived-island-row-${islandIds[1]}`)
     .click({ modifiers: ['Shift'] });
 
-  await page.getByRole('button', { name: 'Selection', exact: true }).click();
+  await page.getByRole('button', { exact: true, name: 'Selection' }).click();
   await expect(
     page.getByText(
       '2 islands selected. Use the canvas to drag them together or use the boolean tools above when the selection order matters.'
@@ -295,12 +428,12 @@ test('selecting a control point switches the inspector context', async ({
   await controlPoint.click({ force: true });
 
   await expect(
-    page.getByRole('heading', { name: 'Control Point', exact: true })
+    page.getByRole('heading', { exact: true, name: 'Control Point' })
   ).toBeVisible();
   await expect(page.getByLabel('Type')).toBeVisible();
   await expect(page.getByLabel('Strength')).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Polygon', exact: true })
+    page.getByRole('heading', { exact: true, name: 'Polygon' })
   ).toHaveCount(0);
 });
 
@@ -316,7 +449,7 @@ test('terrain editing exposes canvas-first controls and shortcuts', async ({
   const stage = page.getByTestId('editor-stage');
   await expect(stage).toBeVisible();
 
-  await stage.getByRole('button', { name: 'Terrain', exact: true }).click();
+  await stage.getByRole('button', { exact: true, name: 'Terrain' }).click();
 
   await expect(stage.getByTestId('editor-canvas-status')).toContainText(
     'Terrain Height'

@@ -669,7 +669,7 @@ const MainInner = () => {
   const referencedArchetypesQuery = useQuery({
     enabled: editorMode === 'entities' && editState.enabled && !!map,
     queryFn: () => client.maps.listReferencedArchetypes({ mapId: map!.id }),
-    queryKey: ['map-referenced-archetypes', map?.id],
+    queryKey: ['map-referenced-archetypes', map?.id, map?.revision],
     staleTime: 60_000
   });
 
@@ -716,7 +716,9 @@ const MainInner = () => {
           (query.queryKey[0] === 'maps' && query.queryKey.length === 1)
       }),
       queryClient.invalidateQueries({
-        queryKey: ['map-referenced-archetypes', map.id]
+        predicate: query =>
+          query.queryKey[0] === 'map-referenced-archetypes' &&
+          query.queryKey[1] === map.id
       })
     ]);
   }, [map, queryClient]);

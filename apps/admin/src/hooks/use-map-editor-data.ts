@@ -1,17 +1,17 @@
 import {
-  type AssetVersion,
   isInfiniteMap,
+  type AssetVersion,
   type ControlPoint,
   type MapMetadata,
-  type StaticEntityListItem,
   type SourcePolygon,
+  type StaticEntityListItem,
   type WorldBounds
 } from 'carrier-contracts/types';
 import { useCallback, useMemo } from 'react';
 
 import { client } from '@/lib/api-client';
-import { getMapEditorCapabilities } from '@/pages/maps/editor/helpers/capabilities';
 import { chunkIntersectsDirtyBounds } from '@/pages/maps/editor/helpers';
+import { getMapEditorCapabilities } from '@/pages/maps/editor/helpers/capabilities';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export const mapEditorKeys = {
@@ -345,39 +345,53 @@ export const useMapEditorData = (mapId: string) => {
   const reloadAll = useCallback(async (): Promise<MapMetadata | null> => {
     const nextMap = await queryClient.fetchQuery({
       queryFn: () => client.maps.find({ id: mapId }),
-      queryKey: mapEditorKeys.map(mapId)
+      queryKey: mapEditorKeys.map(mapId),
+      staleTime: 0
     });
+    const nextCapabilities = getMapEditorCapabilities(nextMap);
 
     if (isInfiniteMap(nextMap)) {
       await Promise.all([
         queryClient.fetchQuery({
           queryFn: () => client.maps.getOverview({ mapId }),
-          queryKey: mapEditorKeys.overview(mapId)
+          queryKey: mapEditorKeys.overview(mapId),
+          staleTime: 0
         }),
         queryClient.fetchQuery({
           queryFn: () =>
             client.maps.listSourcePolygons({ mapId, status: 'active' }),
-          queryKey: mapEditorKeys.polygons(mapId)
+          queryKey: mapEditorKeys.polygons(mapId),
+          staleTime: 0
         }),
         queryClient.fetchQuery({
           queryFn: () => client.maps.listControlPoints({ mapId }),
-          queryKey: mapEditorKeys.controlPoints(mapId)
+          queryKey: mapEditorKeys.controlPoints(mapId),
+          staleTime: 0
         }),
         queryClient.fetchQuery({
           queryFn: () => client.maps.listDerivedIslands({ mapId }),
-          queryKey: mapEditorKeys.derivedIslands(mapId)
-        }),
+          queryKey: mapEditorKeys.derivedIslands(mapId),
+          staleTime: 0
+        })
+      ]);
+    }
+
+    if (nextCapabilities.canEditStaticEntities) {
+      await Promise.all([
         queryClient.fetchQuery({
           queryFn: () => client.maps.listStaticEntities({ mapId }),
-          queryKey: mapEditorKeys.staticEntities(mapId)
+          queryKey: mapEditorKeys.staticEntities(mapId),
+          staleTime: 0
         }),
         queryClient.fetchQuery({
           queryFn: () => client.maps.listReferencedArchetypes({ mapId }),
-          queryKey: mapEditorKeys.referencedArchetypes(mapId)
+          queryKey: mapEditorKeys.referencedArchetypes(mapId),
+          staleTime: 0
         }),
         queryClient.fetchQuery({
           queryFn: () => client.maps.listArchetypes({ status: 'active' }),
-          queryKey: mapEditorKeys.activeArchetypes()
+          queryKey: mapEditorKeys.activeArchetypes(),
+          staleTime: 0
         })
       ]);
     }

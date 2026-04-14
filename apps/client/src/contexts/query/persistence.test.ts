@@ -8,7 +8,7 @@ import {
 describe('query persistence', () => {
   test('uses the latest cache buster', () => {
     expect(QUERY_CACHE_BUSTER).toBe(
-      'carrier-client-2026-03-27-zarch-model-cache'
+      'carrier-client-2026-04-14-static-entity-revisioned-chunks'
     );
   });
 

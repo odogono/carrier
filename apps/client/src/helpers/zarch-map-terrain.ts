@@ -36,8 +36,21 @@ const getFiniteChunkCount = (tileCount: number, chunkSizeTiles: number) =>
 const wrapCoordinate = (value: number, size: number) =>
   size <= 0 ? 0 : positiveModulo(value, size);
 
-export const getMapChunkQueryKey = (mapId: string, chunkX: number, chunkZ: number) =>
-  ['map-chunk', mapId, chunkX, chunkZ] as const satisfies QueryKey;
+export const getMapChunkQueryKey = (
+  mapId: string,
+  chunkX: number,
+  chunkZ: number,
+  revision?: number
+) =>
+  revision === undefined
+    ? (['map-chunk', mapId, chunkX, chunkZ] as const satisfies QueryKey)
+    : ([
+        'map-chunk',
+        mapId,
+        chunkX,
+        chunkZ,
+        revision
+      ] as const satisfies QueryKey);
 
 export const getMapMetadataQueryKey = (mapId: string) =>
   ['map', mapId] as const satisfies QueryKey;
@@ -110,7 +123,9 @@ const getChunkForSample = (
       const chunkZ = Math.min(Math.floor(sampleZ / chunkSize), maxChunkZ);
 
       return (
-        queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
+        queryClient.getQueryData<RuntimeMapChunk>(
+          getMapChunkQueryKey(map.id, chunkX, chunkZ, map.revision)
+        ) ??
         null
       );
     }
@@ -127,7 +142,9 @@ const getChunkForSample = (
     );
 
     return (
-      queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
+      queryClient.getQueryData<RuntimeMapChunk>(
+        getMapChunkQueryKey(map.id, chunkX, chunkZ, map.revision)
+      ) ??
       null
     );
   }
@@ -137,7 +154,9 @@ const getChunkForSample = (
   const chunkZ = Math.floor(sampleZ / chunkSize);
 
   return (
-    queryClient.getQueryData<RuntimeMapChunk>(getMapChunkQueryKey(map.id, chunkX, chunkZ)) ??
+    queryClient.getQueryData<RuntimeMapChunk>(
+      getMapChunkQueryKey(map.id, chunkX, chunkZ, map.revision)
+    ) ??
     null
   );
 };

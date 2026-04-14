@@ -77,7 +77,12 @@ export const useServerMapTerrain = () => {
         decodeMapChunkBinary(
           await client.maps.getChunkBinary({ chunkX, chunkZ, mapId: activeMap.id })
         ),
-      queryKey: getMapChunkQueryKey(activeMap.id, chunkX, chunkZ),
+      queryKey: getMapChunkQueryKey(
+        activeMap.id,
+        chunkX,
+        chunkZ,
+        activeMap.revision
+      ),
       staleTime: MAP_CHUNK_CACHE_MS
     });
   });

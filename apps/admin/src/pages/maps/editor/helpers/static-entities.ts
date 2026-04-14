@@ -123,17 +123,19 @@ export const snapWorldPoint = (
 };
 
 export const getStaticEntityOverlayGeometry = ({
-  entity,
-  assetVersion
+  assetVersion,
+  entity
 }: {
   assetVersion: Pick<AssetVersion, 'footprint'>;
-  entity: Pick<StaticEntity, 'position' | 'rotation'>;
+  entity: Pick<StaticEntity, 'position' | 'rotation' | 'scale'>;
 }): StaticEntityOverlayGeometry => {
+  const depthMeters = assetVersion.footprint.depthMeters * entity.scale;
+  const widthMeters = assetVersion.footprint.widthMeters * entity.scale;
   const samples = getGroundingSamplePoints({
     anchorX: entity.position.x,
     anchorZ: entity.position.z,
-    depthMeters: assetVersion.footprint.depthMeters,
-    widthMeters: assetVersion.footprint.widthMeters,
+    depthMeters,
+    widthMeters,
     yawDegrees: entity.rotation.yaw
   });
   const byLabel = new Map(samples.map(sample => [sample.label, sample]));
@@ -155,10 +157,7 @@ export const getStaticEntityOverlayGeometry = ({
     z: frontMidpoint.z - entity.position.z
   };
   const frontLength = Math.hypot(frontVector.x, frontVector.z) || 1;
-  const handleDistance =
-    Math.max(assetVersion.footprint.widthMeters, assetVersion.footprint.depthMeters) *
-      0.25 +
-    8;
+  const handleDistance = Math.max(widthMeters, depthMeters) * 0.25 + 8;
 
   return {
     corners: [frontLeft, frontRight, backRight, backLeft],
@@ -191,10 +190,10 @@ export const getStaticEntityGroundingDiagnostics = ({
   map,
   terrains: precomputedTerrains
 }: {
-  assetVersion: Pick<
-    AssetVersion,
-    'footprint' | 'maxHeightDeltaMeters'
-  > | null | undefined;
+  assetVersion:
+    | Pick<AssetVersion, 'footprint' | 'maxHeightDeltaMeters'>
+    | null
+    | undefined;
   chunks: Map<string, RuntimeMapChunk>;
   entity: Pick<StaticEntity, 'position' | 'rotation' | 'yOffset'>;
   map: MapMetadata;
@@ -256,7 +255,7 @@ export const buildDuplicateStaticEntityLabel = (
   const existing = new Set(
     Array.from(existingLabels)
       .map(value => value?.trim())
-      .filter((value): value is string => Boolean(value))
+      .filter(Boolean)
   );
   const firstCandidate = `${trimmed} Copy`;
 
@@ -300,7 +299,12 @@ export const filterStaticEntityItems = (
   }
 
   return items.filter(item =>
-    [item.entity.id, item.entity.label ?? '', item.archetype.id, item.archetype.name]
+    [
+      item.entity.id,
+      item.entity.label ?? '',
+      item.archetype.id,
+      item.archetype.name
+    ]
       .map(value => value.toLowerCase())
       .some(value => value.includes(query))
   );

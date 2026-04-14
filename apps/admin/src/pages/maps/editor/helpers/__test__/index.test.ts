@@ -15,11 +15,11 @@ import {
   chunkIntersectsDirtyBounds,
   filterArchetypeCatalog,
   filterStaticEntityItems,
-  getStaticEntityGroundingDiagnostics,
-  getStaticEntityOverlayGeometry,
   getChunkWorldBounds,
   getExactSelectedIslands,
   getIslandsBySelectedPolygons,
+  getStaticEntityGroundingDiagnostics,
+  getStaticEntityOverlayGeometry,
   mergeWorldBounds,
   nextIslandPolygonSelection,
   nextOrderedSelection,
@@ -249,7 +249,8 @@ describe('editor utilities', () => {
       },
       entity: {
         position: { x: 0, z: 0 },
-        rotation: { yaw: 90 }
+        rotation: { yaw: 90 },
+        scale: 1
       }
     });
 
@@ -257,11 +258,36 @@ describe('editor utilities', () => {
     expect(overlay.corners[0].z).toBeCloseTo(-10, 5);
     expect(overlay.handle.x).toBeGreaterThan(overlay.frontMidpoint.x);
 
+    const scaledOverlay = getStaticEntityOverlayGeometry({
+      assetVersion: {
+        footprint: {
+          depthMeters: 10,
+          widthMeters: 20
+        }
+      },
+      entity: {
+        position: { x: 0, z: 0 },
+        rotation: { yaw: 90 },
+        scale: 2
+      }
+    });
+
+    expect(scaledOverlay.corners[0].x).toBeCloseTo(10, 5);
+    expect(scaledOverlay.corners[0].z).toBeCloseTo(-20, 5);
+
     expect(
-      snapWorldPoint({ x: 13.2, z: 27.7 }, infiniteMap.resolution.metersPerTile, 'tile')
+      snapWorldPoint(
+        { x: 13.2, z: 27.7 },
+        infiniteMap.resolution.metersPerTile,
+        'tile'
+      )
     ).toEqual({ x: 10, z: 30 });
     expect(
-      snapWorldPoint({ x: 13.2, z: 27.7 }, infiniteMap.resolution.metersPerTile, 'meter')
+      snapWorldPoint(
+        { x: 13.2, z: 27.7 },
+        infiniteMap.resolution.metersPerTile,
+        'meter'
+      )
     ).toEqual({ x: 13, z: 28 });
   });
 
@@ -324,11 +350,7 @@ describe('editor utilities', () => {
     const chunk = {
       chunkX: 0,
       chunkZ: 0,
-      heights: new Float32Array([
-        0, 0, 0,
-        0, 4, 0,
-        0, 0, 0
-      ]),
+      heights: new Float32Array([0, 0, 0, 0, 4, 0, 0, 0, 0]),
       layers: {
         height: {
           encoding: 'float32' as const,

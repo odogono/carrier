@@ -211,7 +211,7 @@ export const ZarchStaticEntities = ({
 
   const archetypesQuery = useQuery({
     queryFn: () => client.maps.listReferencedArchetypes({ mapId: map.id }),
-    queryKey: ['map-referenced-archetypes', map.id],
+    queryKey: ['map-referenced-archetypes', map.id, map.revision],
     staleTime: 60_000
   });
 
@@ -422,7 +422,12 @@ export const ZarchStaticEntities = ({
             ? chunkZ
             : wrapWorldCoordinate(chunkZ, wrappedChunkCountZ);
         const chunk = queryClient.getQueryData<RuntimeMapChunk>(
-          getMapChunkQueryKey(map.id, requestedChunkX, requestedChunkZ)
+          getMapChunkQueryKey(
+            map.id,
+            requestedChunkX,
+            requestedChunkZ,
+            map.revision
+          )
         );
 
         if (!chunk) {

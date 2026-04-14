@@ -1246,6 +1246,7 @@ export const EditorSidebar = ({
                 />
                 <InspectorStat
                   label="Placed"
+                  testId="static-entity-placed-count"
                   value={`${counts.staticEntities}`}
                 />
               </div>
@@ -1431,16 +1432,19 @@ export const EditorSidebar = ({
                           ? 'border-emerald-400/60 bg-emerald-500/10 text-foreground'
                           : 'border-border bg-background hover:border-emerald-300/50 hover:bg-accent/40'
                       )}
+                      data-testid="static-entity-outliner-row"
                       key={item.entity.id}
-                      onClick={event =>
+                      onClick={event => {
                         onSelectStaticEntities(
                           nextOrderedSelection(
                             selectedEntityIds,
                             item.entity.id,
                             event.shiftKey
                           )
-                        )
-                      }
+                        );
+                        setActiveTab('selection');
+                        onSelectTool('select');
+                      }}
                       type="button"
                     >
                       <div className="min-w-0">
@@ -1593,6 +1597,7 @@ const TabButton = ({
   onClick: () => void;
 }) => (
   <button
+    aria-pressed={active}
     className={cn(
       'inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
       active
@@ -1650,8 +1655,19 @@ const ActionBar = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
-const InspectorStat = ({ label, value }: { label: string; value: string }) => (
-  <div className="rounded-lg border border-border/70 bg-background/70 px-3 py-2">
+const InspectorStat = ({
+  label,
+  testId,
+  value
+}: {
+  label: string;
+  testId?: string;
+  value: string;
+}) => (
+  <div
+    className="rounded-lg border border-border/70 bg-background/70 px-3 py-2"
+    data-testid={testId}
+  >
     <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
       {label}
     </div>
