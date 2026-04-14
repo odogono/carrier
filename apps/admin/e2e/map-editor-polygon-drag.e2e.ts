@@ -148,9 +148,7 @@ test('selected polygon drag tracks pointer without initial jump', async ({
   await page.goto(`/maps/${mapId}/editor`);
   await polygonsLoaded;
 
-  await expect(
-    page.getByRole('heading', { name: 'Contextual Controls' })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Selection', exact: true })
   ).toBeVisible();
@@ -214,9 +212,7 @@ test('derived island rows match map selection and multi-island drag moves both i
   const { islandIds, mapId } = await seedMapWithTwoIslands(request);
 
   await page.goto(`/maps/${mapId}/editor`);
-  await expect(
-    page.getByRole('heading', { name: 'Contextual Controls' })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
 
   const stage = page.getByTestId('editor-stage');
   await page.getByRole('button', { name: 'Islands' }).click();
@@ -292,9 +288,7 @@ test('selecting a control point switches the inspector context', async ({
   const { mapId } = await seedMapWithPolygonAndControl(request);
 
   await page.goto(`/maps/${mapId}/editor`);
-  await expect(
-    page.getByRole('heading', { name: 'Contextual Controls' })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
 
   const controlPoint = page.getByTestId('editor-control-point-handle').first();
   await expect(controlPoint).toBeVisible({ timeout: 30_000 });
@@ -308,4 +302,66 @@ test('selecting a control point switches the inspector context', async ({
   await expect(
     page.getByRole('heading', { name: 'Polygon', exact: true })
   ).toHaveCount(0);
+});
+
+test('terrain editing exposes canvas-first controls and shortcuts', async ({
+  page,
+  request
+}): Promise<void> => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ height: 900, width: 1600 });
+  const { mapId } = await seedMapWithSquarePolygon(request);
+
+  await page.goto(`/maps/${mapId}/editor`);
+  const stage = page.getByTestId('editor-stage');
+  await expect(stage).toBeVisible();
+
+  await stage.getByRole('button', { name: 'Terrain', exact: true }).click();
+
+  await expect(stage.getByTestId('editor-canvas-status')).toContainText(
+    'Terrain Height'
+  );
+  await expect(stage.getByTestId('editor-canvas-status')).toContainText(
+    'Drag across the map to select terrain tiles'
+  );
+  await expect(stage.getByTestId('editor-terrain-dock')).toBeVisible();
+  await expect(stage.getByLabel('Canvas terrain render layer')).toBeVisible();
+  await expect(stage.getByLabel('Canvas terrain tool')).toBeVisible();
+  await expect(stage.getByTestId('terrain-selection-count')).toContainText(
+    '0 selected'
+  );
+  await expect(stage.getByRole('button', { name: 'Flatten' })).toBeDisabled();
+  await expect(page.getByText(/from the sidebar/i)).toHaveCount(0);
+
+  const box = await stage.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(
+    box!.x + box!.width / 2 - 24,
+    box!.y + box!.height / 2 - 24
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    box!.x + box!.width / 2 + 24,
+    box!.y + box!.height / 2 + 24,
+    {
+      steps: 6
+    }
+  );
+  await page.mouse.up();
+
+  await expect(stage.getByRole('button', { name: 'Flatten' })).toBeEnabled();
+  await stage.getByRole('button', { name: 'Flatten' }).click();
+  await expect(stage.getByTestId('terrain-dirty-count')).not.toContainText(
+    '0 pending'
+  );
+  await expect(
+    stage.getByRole('button', { name: 'Save terrain edits' })
+  ).toBeEnabled();
+  await expect(
+    stage.getByRole('button', { name: 'Cancel terrain edits' })
+  ).toBeEnabled();
+
+  await stage.getByRole('button', { name: 'Shortcuts' }).click();
+  await expect(stage.getByText('Ctrl/Cmd+Z')).toBeVisible();
+  await expect(stage.getByText('Esc clears drafts or selection')).toBeVisible();
 });

@@ -1,9 +1,9 @@
 import {
   type ControlPoint,
   type DerivedIsland,
+  type SourcePolygon,
   type StaticEntity,
   type StaticEntityListItem,
-  type SourcePolygon,
   type ZarchTileEditConfig
 } from 'carrier-contracts/types';
 import {
@@ -55,20 +55,19 @@ import {
   useMapViewport,
   worldToTilePoint
 } from '@/hooks/use-map-viewport';
-import { Link, useParams } from '@tanstack/react-router';
 import { client } from '@/lib/api-client';
 import { createChunkMapTerrain } from '@/lib/map-chunk-terrain';
 import { type TerrainRenderLayer } from '@/lib/terrain-render';
+import { Link, useParams } from '@tanstack/react-router';
 
 import { EditorCanvas } from './components/canvas';
 import { EditorSidebar } from './components/sidebar';
-import { EditorToolbar } from './components/toolbar';
 import {
   canDeleteVertex,
   canSavePolygonDraft,
+  filterArchetypeCatalog,
   getExactSelectedIslands,
   getIslandsBySelectedPolygons,
-  filterArchetypeCatalog,
   getStaticEntityGroundingDiagnostics,
   getStaticEntitySnapMode,
   getTerrainGrids,
@@ -296,7 +295,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     [exactSelectedIslands]
   );
   const referencedArchetypeIds = useMemo(
-    () => new Set((referencedArchetypesQuery.data ?? []).map(archetype => archetype.id)),
+    () =>
+      new Set(
+        (referencedArchetypesQuery.data ?? []).map(archetype => archetype.id)
+      ),
     [referencedArchetypesQuery.data]
   );
 
@@ -352,14 +354,13 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     setTerrainPointerMode(null);
     setTerrainSavePending(false);
     setTerrainRenderLayer('resolved-color');
-    setTerrainState(createZarchTileEditState(tileEditConfig ?? FALLBACK_TILE_EDIT_CONFIG));
+    setTerrainState(
+      createZarchTileEditState(tileEditConfig ?? FALLBACK_TILE_EDIT_CONFIG)
+    );
   }, [id, tileEditConfig]);
 
   useEffect(() => {
-    if (
-      !activeCatalogArchetypeId &&
-      filteredCatalogArchetypes.length > 0
-    ) {
+    if (!activeCatalogArchetypeId && filteredCatalogArchetypes.length > 0) {
       setActiveCatalogArchetypeId(filteredCatalogArchetypes[0]!.id);
     }
   }, [activeCatalogArchetypeId, filteredCatalogArchetypes]);
@@ -480,7 +481,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       const nextEntity =
         entityIds.length === 1
           ? (staticEntityItems.find(item => item.entity.id === entityIds[0]) ??
-              null)
+            null)
           : null;
 
       updateSnapshot(
@@ -541,12 +542,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   );
 
   useEffect(() => {
-    if (
-      !map ||
-      size.width <= 0 ||
-      size.height <= 0 ||
-      initialFitRef.current
-    ) {
+    if (!map || size.width <= 0 || size.height <= 0 || initialFitRef.current) {
       return;
     }
 
@@ -654,43 +650,48 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           tile.tileZ
         )
       : null;
-  }, [baseTerrain, terrainDraftEdits, terrainState.hoveredTile, terrainState.selectedTile]);
+  }, [
+    baseTerrain,
+    terrainDraftEdits,
+    terrainState.hoveredTile,
+    terrainState.selectedTile
+  ]);
 
-  const staticEntityViews = useMemo(
-    () => {
-      const terrains = map ? getTerrainGrids(chunks, map) : undefined;
-      return staticEntityItems.map(item => {
-        const assetVersion = assetVersionsById.get(item.archetype.assetVersionId);
-        return {
-          ...item,
-          assetVersion: assetVersion ?? null,
-          diagnostics: map
-            ? getStaticEntityGroundingDiagnostics({
-                assetVersion,
-                chunks,
-                entity: item.entity,
-                map,
-                terrains
-              })
-            : { status: 'pending' as const }
-        };
-      });
-    },
-    [assetVersionsById, chunks, map, staticEntityItems]
-  );
+  const staticEntityViews = useMemo(() => {
+    const terrains = map ? getTerrainGrids(chunks, map) : undefined;
+    return staticEntityItems.map(item => {
+      const assetVersion = assetVersionsById.get(item.archetype.assetVersionId);
+      return {
+        ...item,
+        assetVersion: assetVersion ?? null,
+        diagnostics: map
+          ? getStaticEntityGroundingDiagnostics({
+              assetVersion,
+              chunks,
+              entity: item.entity,
+              map,
+              terrains
+            })
+          : { status: 'pending' as const }
+      };
+    });
+  }, [assetVersionsById, chunks, map, staticEntityItems]);
   const selectedEntity = useMemo(
     () =>
       selectedEntityIds.length === 1
-        ? (staticEntityViews.find(item => item.entity.id === selectedEntityIds[0]) ??
-            null)
+        ? (staticEntityViews.find(
+            item => item.entity.id === selectedEntityIds[0]
+          ) ?? null)
         : null,
     [selectedEntityIds, staticEntityViews]
   );
   const selectedStaticEntities = useMemo(
     () =>
       selectedEntityIds
-        .map(id =>
-          staticEntityViews.find(item => item.entity.id === id)?.entity ?? null
+        .map(
+          id =>
+            staticEntityViews.find(item => item.entity.id === id)?.entity ??
+            null
         )
         .filter((entity): entity is StaticEntity => entity !== null),
     [selectedEntityIds, staticEntityViews]
@@ -706,31 +707,13 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     }
   }, [entityDraft, selectedEntity, selectedEntityIds, setEntityDraft]);
 
-  const applyTerrainTypeAtTile = useCallback(
-    (tile: TilePoint) => {
-      if (!baseTerrain) {
-        return;
-      }
-
-      dispatchTerrain({
-        current: getMergedTileState(
-          baseTerrain,
-          terrainDraftEdits,
-          tile.tileX,
-          tile.tileZ
-        ),
-        tileX: tile.tileX,
-        tileZ: tile.tileZ,
-        toolOverride: 'set-type',
-        type: 'apply-tool'
-      });
-    },
-    [baseTerrain, dispatchTerrain, terrainDraftEdits]
-  );
-
   const applyTerrainHeightSelection = useCallback(
     (mode: 'flatten' | 'raise' | 'lower') => {
-      if (!baseTerrain || !tileEditConfig || terrainSelectedHeightTiles.length === 0) {
+      if (
+        !baseTerrain ||
+        !tileEditConfig ||
+        terrainSelectedHeightTiles.length === 0
+      ) {
         return;
       }
 
@@ -747,7 +730,8 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         return;
       }
 
-      const anchorTile = terrainState.selectedTile ?? terrainSelectedHeightTiles[0]!;
+      const anchorTile =
+        terrainState.selectedTile ?? terrainSelectedHeightTiles[0]!;
 
       dispatchTerrain({
         current: getMergedTileState(
@@ -793,7 +777,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       setEditorRevision(response.mapRevision);
       await invalidateTerrainMutation(response.dirtyBounds);
       setTerrainState(current => ({
-        ...createZarchTileEditState(tileEditConfig ?? FALLBACK_TILE_EDIT_CONFIG),
+        ...createZarchTileEditState(
+          tileEditConfig ?? FALLBACK_TILE_EDIT_CONFIG
+        ),
         enabled: current.enabled,
         hoveredTile: current.hoveredTile,
         selectedTile: current.selectedTile
@@ -802,7 +788,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     } catch (error) {
       dispatchTerrain({
         saveError:
-          error instanceof Error ? error.message : 'Failed to save terrain edits',
+          error instanceof Error
+            ? error.message
+            : 'Failed to save terrain edits',
         type: 'set-save-error'
       });
       toast.error(
@@ -852,7 +840,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   ]);
 
   useEffect(() => {
-    if (!baseTerrain || !tileEditConfig || tool !== 'terrain' || terrainState.tool !== 'height') {
+    if (
+      !baseTerrain ||
+      !tileEditConfig ||
+      tool !== 'terrain' ||
+      terrainState.tool !== 'height'
+    ) {
       dispatchTerrain({
         lastSolvedPlaneHeight: null,
         previewHaloTiles: [],
@@ -1198,7 +1191,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           entity.id,
           {
             ...entity,
-            position: translateWorldPoint(entity.position, dragState.currentDelta)
+            position: translateWorldPoint(
+              entity.position,
+              dragState.currentDelta
+            )
           }
         ])
       );
@@ -1257,17 +1253,12 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           type: 'set-selected-tile'
         });
 
-        if (terrainState.tool === 'height') {
-          setTerrainPointerMode('height-select');
-          dispatchTerrain({
-            tileX: tile.tileX,
-            tileZ: tile.tileZ,
-            type: 'begin-height-selection-box'
-          });
-        } else {
-          setTerrainPointerMode('type-paint');
-          applyTerrainTypeAtTile(tile);
-        }
+        setTerrainPointerMode('height-select');
+        dispatchTerrain({
+          tileX: tile.tileX,
+          tileZ: tile.tileZ,
+          type: 'begin-height-selection-box'
+        });
         return;
       }
 
@@ -1305,12 +1296,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       }
     },
     [
-      applyTerrainTypeAtTile,
       dispatchTerrain,
       dragState,
       onViewportPointerDown,
       setDragState,
-      terrainState.tool,
       toTilePoint,
       toWorldPoint,
       tool
@@ -1336,11 +1325,6 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
             tileZ: tile.tileZ,
             type: 'update-height-selection-box'
           });
-          return;
-        }
-
-        if (terrainPointerMode === 'type-paint') {
-          applyTerrainTypeAtTile(tile);
           return;
         }
 
@@ -1478,7 +1462,6 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       onViewportPointerMove(event);
     },
     [
-      applyTerrainTypeAtTile,
       dispatchTerrain,
       dragState,
       onViewportPointerMove,
@@ -1640,7 +1623,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           void saveDraggedEntities(
             dragState.entities.map(entity => ({
               ...entity,
-              position: translateWorldPoint(entity.position, dragState.currentDelta)
+              position: translateWorldPoint(
+                entity.position,
+                dragState.currentDelta
+              )
             }))
           ).finally(() => {
             setDragState(null);
@@ -2254,10 +2240,6 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     capabilities.canEditAuthoredGeometry &&
     selectedPolygonIds.length >= 2 &&
     !polygonDraft;
-  const canApplyDifference =
-    capabilities.canEditAuthoredGeometry &&
-    selectedPolygonIds.length === 2 &&
-    !polygonDraft;
   const activeCanUndo = tool === 'terrain' ? terrainState.canUndo : canUndo;
   const activeCanRedo = tool === 'terrain' ? terrainState.canRedo : canRedo;
   const hasUnsavedChanges =
@@ -2301,6 +2283,85 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           selectedPolygonCount: selectedPolygonIds.length,
           tool
         });
+  const focusSelectionBounds = useMemo(() => {
+    if (tool === 'terrain' && map) {
+      const terrainFocusTiles =
+        terrainSelectedHeightTiles.length > 0
+          ? terrainSelectedHeightTiles
+          : terrainState.selectedTile
+            ? [terrainState.selectedTile]
+            : [];
+
+      if (terrainFocusTiles.length > 0) {
+        const metersPerTile = map.resolution.metersPerTile;
+        return terrainFocusTiles.reduce<ReturnType<typeof mergeWorldBounds>>(
+          (bounds, tile) =>
+            mergeWorldBounds(bounds, {
+              maxX: (tile.tileX + 1) * metersPerTile,
+              maxZ: (tile.tileZ + 1) * metersPerTile,
+              minX: tile.tileX * metersPerTile,
+              minZ: tile.tileZ * metersPerTile
+            }),
+          null
+        );
+      }
+    }
+
+    const polygonBounds = selectedPolygonIds.reduce<
+      ReturnType<typeof mergeWorldBounds>
+    >((bounds, polygonId) => {
+      const polygon = polygons.find(candidate => candidate.id === polygonId);
+      return mergeWorldBounds(bounds, polygon?.bbox ?? null);
+    }, null);
+
+    if (polygonBounds) {
+      return polygonBounds;
+    }
+
+    return exactSelectedIslands.reduce<ReturnType<typeof mergeWorldBounds>>(
+      (bounds, island) => mergeWorldBounds(bounds, island.bbox),
+      null
+    );
+  }, [
+    exactSelectedIslands,
+    map,
+    polygons,
+    selectedPolygonIds,
+    terrainSelectedHeightTiles,
+    terrainState.selectedTile,
+    tool
+  ]);
+  const canFocusSelection = Boolean(
+    focusSelectionBounds || selectedControlPoint || selectedEntity
+  );
+  const focusSelection = useCallback(() => {
+    if (!map) {
+      return;
+    }
+
+    if (focusSelectionBounds) {
+      fitToWorldBounds(
+        expandBounds(focusSelectionBounds, map.resolution.metersPerTile * 2)
+      );
+      return;
+    }
+
+    if (selectedEntity) {
+      recenterOnWorldPoint(selectedEntity.entity.position);
+      return;
+    }
+
+    if (selectedControlPoint) {
+      recenterOnWorldPoint(selectedControlPoint);
+    }
+  }, [
+    fitToWorldBounds,
+    focusSelectionBounds,
+    map,
+    recenterOnWorldPoint,
+    selectedControlPoint,
+    selectedEntity
+  ]);
 
   if (mapQuery.isLoading) {
     return <div className="text-muted-foreground">Loading editor...</div>;
@@ -2334,9 +2395,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
                 : undefined
           }
           variant={
-            pendingAnyAction || hasUnsavedChanges
-              ? 'outline'
-              : 'secondary'
+            pendingAnyAction || hasUnsavedChanges ? 'outline' : 'secondary'
           }
         >
           {pendingAnyAction
@@ -2347,34 +2406,14 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
         </Badge>
       </div>
 
-      <EditorToolbar
-        availableTools={availableTools}
-        booleanActionsVisible={canApplyUnionLike}
-        canApplyDifference={canApplyDifference}
-        canApplyUnionLike={canApplyUnionLike}
-        canRedo={activeCanRedo}
-        canUndo={activeCanUndo}
-        onApplyBoolean={operation => void applyBooleanOperation(operation)}
-        onBeginControlPoint={beginControlPoint}
-        onBeginDrawPolygon={beginDrawPolygon}
-        onBeginPlaceEntity={beginPlaceEntity}
-        onBeginVertexEdit={beginVertexEdit}
-        onRedo={() =>
-          tool === 'terrain' ? dispatchTerrain({ type: 'redo' }) : void redo()
-        }
-        onSelectTool={nextTool =>
-          nextTool === 'terrain' ? beginTerrain() : setTool(nextTool, true)
-        }
-        onUndo={() =>
-          tool === 'terrain' ? dispatchTerrain({ type: 'undo' }) : void undo()
-        }
-        pendingAction={pendingAnyAction}
-        selectedPolygon={Boolean(selectedPolygon)}
-        tool={tool}
-      />
-
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <EditorCanvas
+          availableTools={availableTools}
+          booleanActionsVisible={canApplyUnionLike}
+          canApplyUnionLike={canApplyUnionLike}
+          canFocusSelection={canFocusSelection}
+          canRedo={activeCanRedo}
+          canUndo={activeCanUndo}
           chunks={chunks}
           commitDrawPolygon={commitDrawPolygon}
           containerRef={containerRef}
@@ -2388,6 +2427,44 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           interactionRef={interactionRef}
           map={map}
           nextActionHint={nextActionHint}
+          onApplyBoolean={operation => void applyBooleanOperation(operation)}
+          onApplyTerrainHeightSelection={applyTerrainHeightSelection}
+          onApplyTerrainTypeSelection={typeId => {
+            if (!baseTerrain || terrainSelectedHeightTiles.length === 0) {
+              return;
+            }
+            dispatchTerrain({
+              selectedTypeId: typeId,
+              type: 'set-selected-type-id'
+            });
+            const anchorTile =
+              terrainState.selectedTile ?? terrainSelectedHeightTiles[0]!;
+            dispatchTerrain({
+              current: getMergedTileState(
+                baseTerrain,
+                terrainDraftEdits,
+                anchorTile.tileX,
+                anchorTile.tileZ
+              ),
+              selectedTypeIdOverride: typeId,
+              tileEdits: terrainSelectedHeightTiles.map(tile => ({
+                current: getMergedTileState(
+                  baseTerrain,
+                  terrainDraftEdits,
+                  tile.tileX,
+                  tile.tileZ
+                )
+              })),
+              tileX: anchorTile.tileX,
+              tileZ: anchorTile.tileZ,
+              toolOverride: 'set-type',
+              type: 'apply-tool'
+            });
+          }}
+          onBeginControlPoint={beginControlPoint}
+          onBeginDrawPolygon={beginDrawPolygon}
+          onBeginPlaceEntity={beginPlaceEntity}
+          onBeginVertexEdit={beginVertexEdit}
           onCanvasClick={handleCanvasClick}
           onCanvasKeyDown={handleKeyDown}
           onCanvasPointerCancel={handleCanvasPointerCancel}
@@ -2395,32 +2472,89 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           onCanvasPointerLeave={handleCanvasPointerLeave}
           onCanvasPointerMove={handleCanvasPointerMove}
           onCanvasPointerUp={handleCanvasPointerUp}
+          onClearTerrainSelection={() =>
+            dispatchTerrain({ type: 'clear-height-selection' })
+          }
           onControlPointClick={handleControlPointClick}
           onControlPointPointerDown={handleControlPointPointerDown}
+          onFocusSelection={focusSelection}
           onPolygonClick={handlePolygonClick}
           onPolygonPointerDown={handlePolygonPointerDown}
+          onRedo={() =>
+            tool === 'terrain' ? dispatchTerrain({ type: 'redo' }) : void redo()
+          }
+          onResetTerrainEdits={() => dispatchTerrain({ type: 'reset-draft' })}
+          onSaveTerrainEdits={() => void saveTerrainEdits()}
+          onSelectTool={nextTool =>
+            nextTool === 'terrain' ? beginTerrain() : setTool(nextTool, true)
+          }
+          onSetTerrainColorIndex={colorIndex => {
+            dispatchTerrain({
+              selectedColorIndex: colorIndex,
+              type: 'set-selected-color-index'
+            });
+            if (baseTerrain && terrainSelectedHeightTiles.length > 0) {
+              const anchorTile =
+                terrainState.selectedTile ?? terrainSelectedHeightTiles[0]!;
+              dispatchTerrain({
+                current: getMergedTileState(
+                  baseTerrain,
+                  terrainDraftEdits,
+                  anchorTile.tileX,
+                  anchorTile.tileZ
+                ),
+                selectedColorIndexOverride: colorIndex,
+                tileEdits: terrainSelectedHeightTiles.map(tile => ({
+                  current: getMergedTileState(
+                    baseTerrain,
+                    terrainDraftEdits,
+                    tile.tileX,
+                    tile.tileZ
+                  )
+                })),
+                tileX: anchorTile.tileX,
+                tileZ: anchorTile.tileZ,
+                toolOverride: 'set-color',
+                type: 'apply-tool'
+              });
+            }
+          }}
+          onSetTerrainLayer={setTerrainRenderLayer}
+          onSetTerrainTool={nextTool =>
+            dispatchTerrain({ tool: nextTool, type: 'set-tool' })
+          }
           onStaticEntityClick={handleStaticEntityClick}
           onStaticEntityPointerDown={handleStaticEntityPointerDown}
           onStaticEntityRotatePointerDown={handleStaticEntityRotatePointerDown}
-          onTerrainLayerChange={setTerrainRenderLayer}
+          onUndo={() =>
+            tool === 'terrain' ? dispatchTerrain({ type: 'undo' }) : void undo()
+          }
           onWheel={onWheel}
           onWheelCapture={handleWheelCapture}
           overlayPolygons={renderedPolygons}
+          pendingAction={pendingAnyAction}
           polygonDraft={polygonDraft}
           selectedControlPointId={selectedControlPointId}
           selectedEntityIds={selectedEntityIds}
+          selectedPolygon={Boolean(selectedPolygon)}
           selectedPolygonIds={selectedPolygonIds}
           selectionSummary={selectionSummary}
           setDragState={setDragState}
           setPolygonDraft={setPolygonDraft}
           size={size}
+          terrainDirtyCount={terrainDirtyEdits.length}
           terrainDraftEdits={terrainDraftEdits}
           terrainHeightSelectionTiles={terrainSelectedHeightTiles}
           terrainHoveredTile={terrainState.hoveredTile}
+          terrainInspectedTile={terrainInspectedTile}
           terrainPreviewHaloTiles={terrainPreviewHaloTiles}
           terrainRenderLayer={terrainRenderLayer}
+          terrainSavePending={terrainSavePending}
+          terrainSelectedColorIndex={terrainState.selectedColorIndex}
+          terrainSelectedHeightTileCount={terrainSelectedHeightTiles.length}
           terrainSelectedTile={terrainState.selectedTile}
-          terrainTool={terrainState.tool === 'set-type' ? 'set-type' : 'height'}
+          terrainSelectedTypeId={terrainState.selectedTypeId ?? ''}
+          terrainTool={terrainState.tool}
           tool={tool}
           toolLabel={toolLabel}
           toScreenPoint={toScreenPoint}
@@ -2459,36 +2593,32 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           islandDraft={islandDraft}
           islandInspectorDraft={islandInspectorDraft}
           nextActionHint={nextActionHint}
-          onApplyBulkEntityEdit={draft =>
-            void applyBulkEntityEdit(draft)
-          }
-          onApplyTerrainHeightSelection={applyTerrainHeightSelection}
+          onApplyBulkEntityEdit={draft => void applyBulkEntityEdit(draft)}
           onBeginControlPoint={beginControlPoint}
           onBeginDrawPolygon={beginDrawPolygon}
           onBeginPlaceEntity={beginPlaceEntity}
           onBeginTerrain={beginTerrain}
-          onClearTerrainSelection={() =>
-            dispatchTerrain({ type: 'clear-height-selection' })
-          }
           onDuplicateStaticEntities={() => void duplicateSelectedEntities()}
           onJumpToEntity={entity =>
             recenterOnWorldPoint(entity.entity.position)
           }
-          onPickCatalogArchetype={archetypeId => setActiveCatalogArchetypeId(archetypeId)}
+          onPickCatalogArchetype={archetypeId =>
+            setActiveCatalogArchetypeId(archetypeId)
+          }
           onRecenter={recenterOnWorldPoint}
           onResetControlPointDraft={resetControlPointDraft}
           onResetEntityDraft={() =>
             setEntityDraft(
-              selectedEntity ? createStaticEntityDraft(selectedEntity.entity) : null
+              selectedEntity
+                ? createStaticEntityDraft(selectedEntity.entity)
+                : null
             )
           }
           onResetPolygonDraft={resetPolygonDraft}
-          onResetTerrainEdits={() => dispatchTerrain({ type: 'reset-draft' })}
           onSaveControlPointDraft={() => void saveControlPointDraft()}
           onSaveEntityDraft={() => void applyEntityDraft()}
           onSaveIslandDraft={() => void saveIslandDraft()}
           onSavePolygonDraft={() => void savePolygonDraft()}
-          onSaveTerrainEdits={() => void saveTerrainEdits()}
           onSelectIsland={selectIsland}
           onSelectStaticEntities={selectEntityIds}
           onSelectTool={nextTool =>
@@ -2501,13 +2631,6 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           onSetOutlinerArchetypeId={setActiveOutlinerArchetypeId}
           onSetOutlinerCategory={setActiveOutlinerCategory}
           onSetOutlinerSearch={setActiveOutlinerSearch}
-          onSetTerrainLayer={setTerrainRenderLayer}
-          onSetTerrainTool={nextTool =>
-            dispatchTerrain({ tool: nextTool, type: 'set-tool' })
-          }
-          onSetTerrainTypeId={typeId =>
-            dispatchTerrain({ selectedTypeId: typeId, type: 'set-selected-type-id' })
-          }
           overviewBounds={overviewBounds}
           overviewClusters={overviewQuery.data?.clusters ?? EMPTY_CLUSTERS}
           pendingAction={pendingAnyAction}
@@ -2531,11 +2654,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           setPolygonDraft={setPolygonDraft}
           staticEntityItems={filteredStaticEntityViews}
           terrainDirtyCount={terrainDirtyEdits.length}
-          terrainEditConfig={tileEditConfig}
           terrainInspectedTile={terrainInspectedTile}
           terrainLayer={terrainRenderLayer}
           terrainPreviewHaloCount={terrainPreviewHaloTiles.length}
-          terrainSavePending={terrainSavePending}
           terrainSelectedHeightTileCount={terrainSelectedHeightTiles.length}
           terrainState={terrainState}
           viewportBounds={viewportWorldBounds}
@@ -2637,8 +2758,8 @@ const getTerrainSelectionSummary = (
 
 const getTerrainNextActionHint = (terrainTool: ZarchTileEditTool) =>
   terrainTool === 'height'
-    ? 'Drag a rectangular terrain selection, then flatten, raise, or lower it from the sidebar.'
-    : 'Choose a tile type in the sidebar, then click or drag across terrain to paint it.';
+    ? 'Drag across the map to select terrain tiles, then choose a height action.'
+    : 'Drag across the map to select terrain tiles, then choose a tile type in the canvas dock.';
 
 const getSelectionSummary = ({
   canEditAuthoredGeometry,
@@ -2709,7 +2830,9 @@ const getSelectionSummary = ({
     return 'Ready to place a static entity';
   }
 
-  return canEditAuthoredGeometry ? 'Nothing selected' : 'Ready to inspect terrain or entities';
+  return canEditAuthoredGeometry
+    ? 'Nothing selected'
+    : 'Ready to inspect terrain or entities';
 };
 
 const getNextActionHint = ({

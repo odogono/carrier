@@ -7,9 +7,9 @@ import type {
   StaticEntity,
   StaticEntityListItem,
   WorldBounds,
-  WorldPoint,
-  ZarchTileEditConfig
+  WorldPoint
 } from 'carrier-contracts/types';
+import type { ZarchTileEditState, ZarchTileState } from 'carrier-terrain-edit';
 import {
   Compass,
   Focus,
@@ -26,16 +26,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import {
-  TERRAIN_RENDER_LAYER_OPTIONS,
-  type TerrainRenderLayer
-} from '@/lib/terrain-render';
+import { type TerrainRenderLayer } from '@/lib/terrain-render';
 import { cn } from '@/lib/utils';
-import type {
-  ZarchTileEditState,
-  ZarchTileEditTool,
-  ZarchTileState
-} from 'carrier-terrain-edit';
 
 import {
   DEFAULT_SOURCE_POLYGON_PARAMS,
@@ -44,16 +36,16 @@ import {
   type EditorTool,
   type StaticEntityGroundingDiagnostics
 } from '../helpers';
+import type {
+  MapEditorCapabilities,
+  SidebarTab
+} from '../helpers/capabilities';
 import {
   createControlPointDraft,
   createIslandDraft,
   createPolygonDraft,
   parseNumber
 } from '../helpers/drafts';
-import type {
-  MapEditorCapabilities,
-  SidebarTab
-} from '../helpers/capabilities';
 import type {
   ControlPointDraft,
   IslandDraft,
@@ -100,12 +92,10 @@ type EditorSidebarProps = {
     scale?: number;
     state?: StaticEntity['state'];
   }) => void;
-  onApplyTerrainHeightSelection: (mode: 'flatten' | 'raise' | 'lower') => void;
   onBeginControlPoint: () => void;
   onBeginDrawPolygon: () => void;
   onBeginPlaceEntity: () => void;
   onBeginTerrain: () => void;
-  onClearTerrainSelection: () => void;
   onDuplicateStaticEntities: () => void;
   onJumpToEntity: (entity: StaticEntitySidebarItem) => void;
   onPickCatalogArchetype: (archetypeId: string) => void;
@@ -113,12 +103,10 @@ type EditorSidebarProps = {
   onResetControlPointDraft: () => void;
   onResetEntityDraft: () => void;
   onResetPolygonDraft: () => void;
-  onResetTerrainEdits: () => void;
   onSaveControlPointDraft: () => void;
   onSaveEntityDraft: () => void;
   onSaveIslandDraft: () => void;
   onSavePolygonDraft: () => void;
-  onSaveTerrainEdits: () => void;
   onSelectIsland: (
     islandId: string,
     options?: { additive?: boolean; recenter?: boolean }
@@ -136,9 +124,6 @@ type EditorSidebarProps = {
     value: StaticEntityListItem['archetype']['category'] | 'all'
   ) => void;
   onSetOutlinerSearch: (value: string) => void;
-  onSetTerrainLayer: (value: TerrainRenderLayer) => void;
-  onSetTerrainTool: (tool: ZarchTileEditTool) => void;
-  onSetTerrainTypeId: (typeId: string) => void;
   overviewBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
   overviewClusters: ReadonlyArray<{
     bbox: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'>;
@@ -198,11 +183,9 @@ type EditorSidebarProps = {
   ) => void;
   staticEntityItems: StaticEntitySidebarItem[];
   terrainDirtyCount: number;
-  terrainEditConfig: ZarchTileEditConfig | null;
   terrainInspectedTile: ZarchTileState | null;
   terrainLayer: TerrainRenderLayer;
   terrainPreviewHaloCount: number;
-  terrainSavePending: boolean;
   terrainSelectedHeightTileCount: number;
   terrainState: ZarchTileEditState;
   viewportBounds: Pick<WorldBounds, 'maxX' | 'maxZ' | 'minX' | 'minZ'> | null;
@@ -233,12 +216,10 @@ export const EditorSidebar = ({
   islandInspectorDraft,
   nextActionHint,
   onApplyBulkEntityEdit,
-  onApplyTerrainHeightSelection,
   onBeginControlPoint,
   onBeginDrawPolygon,
   onBeginPlaceEntity,
   onBeginTerrain,
-  onClearTerrainSelection,
   onDuplicateStaticEntities,
   onJumpToEntity,
   onPickCatalogArchetype,
@@ -246,12 +227,10 @@ export const EditorSidebar = ({
   onResetControlPointDraft,
   onResetEntityDraft,
   onResetPolygonDraft,
-  onResetTerrainEdits,
   onSaveControlPointDraft,
   onSaveEntityDraft,
   onSaveIslandDraft,
   onSavePolygonDraft,
-  onSaveTerrainEdits,
   onSelectIsland,
   onSelectStaticEntities,
   onSelectTool,
@@ -262,9 +241,6 @@ export const EditorSidebar = ({
   onSetOutlinerArchetypeId,
   onSetOutlinerCategory,
   onSetOutlinerSearch,
-  onSetTerrainLayer,
-  onSetTerrainTool,
-  onSetTerrainTypeId,
   overviewBounds,
   overviewClusters,
   pendingAction,
@@ -288,11 +264,9 @@ export const EditorSidebar = ({
   setPolygonDraft,
   staticEntityItems,
   terrainDirtyCount,
-  terrainEditConfig,
   terrainInspectedTile,
   terrainLayer,
   terrainPreviewHaloCount,
-  terrainSavePending,
   terrainSelectedHeightTileCount,
   terrainState,
   viewportBounds
@@ -347,11 +321,9 @@ export const EditorSidebar = ({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Inspector
+              Selection
             </div>
-            <h3 className="text-xl font-semibold tracking-tight">
-              Contextual Controls
-            </h3>
+            <h3 className="text-xl font-semibold tracking-tight">Inspector</h3>
             <p className="text-sm text-muted-foreground">{selectionSummary}</p>
           </div>
           <Badge
@@ -412,119 +384,50 @@ export const EditorSidebar = ({
               />
 
               {activeTool === 'terrain' ? (
-                <>
-                  <SectionShell
-                    description="Choose the visualized terrain layer and active terrain tool."
-                    title="Terrain"
-                  >
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InspectorStat
-                        label="Dirty"
-                        value={`${terrainDirtyCount}`}
-                      />
-                      <InspectorStat
-                        label="Selected"
-                        value={`${terrainSelectedHeightTileCount}`}
-                      />
+                <SectionShell
+                  description="Terrain actions are on the canvas dock. Use this panel for the selected tile and draft details."
+                  title="Terrain Details"
+                >
+                  <div className="rounded-lg border border-border/70 bg-background/60 p-3">
+                    <div className="text-sm font-medium text-foreground">
+                      {terrainSelectedHeightTileCount > 0
+                        ? `${terrainSelectedHeightTileCount} tiles selected`
+                        : 'No terrain tiles selected'}
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="terrain-layer">Render Layer</Label>
-                        <Select
-                          id="terrain-layer"
-                          onChange={event =>
-                            onSetTerrainLayer(
-                              event.target.value as TerrainRenderLayer
-                            )
-                          }
-                          value={terrainLayer}
-                        >
-                          {TERRAIN_RENDER_LAYER_OPTIONS.map(option => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="terrain-tool">Terrain Tool</Label>
-                        <Select
-                          id="terrain-tool"
-                          onChange={event =>
-                            onSetTerrainTool(
-                              event.target.value as ZarchTileEditTool
-                            )
-                          }
-                          value={terrainState.tool}
-                        >
-                          <option value="height">Height</option>
-                          <option value="set-type">Type</option>
-                        </Select>
-                      </div>
-                    </div>
-                    {terrainState.tool === 'set-type' && terrainEditConfig ? (
-                      <div className="space-y-2">
-                        <Label htmlFor="terrain-type">Tile Type</Label>
-                        <Select
-                          id="terrain-type"
-                          onChange={event =>
-                            onSetTerrainTypeId(event.target.value)
-                          }
-                          value={terrainState.selectedTypeId}
-                        >
-                          {terrainEditConfig.tileTypes.map(tileType => (
-                            <option key={tileType.id} value={tileType.id}>
-                              {tileType.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-                    ) : null}
-                    {terrainState.tool === 'height' ? (
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <InspectorStat
-                          label="Halo"
-                          value={`${terrainPreviewHaloCount}`}
-                        />
-                        <InspectorStat
-                          label="Plane"
-                          value={
-                            terrainState.lastSolvedPlaneHeight === null
-                              ? '—'
-                              : `${terrainState.lastSolvedPlaneHeight.toFixed(1)}m`
-                          }
-                        />
-                        <InspectorStat
-                          label="Status"
-                          value={
-                            terrainSelectedHeightTileCount > 0
-                              ? 'Selection ready'
-                              : 'Select tiles'
-                          }
-                        />
-                      </div>
-                    ) : null}
-                  </SectionShell>
-
-                  <SectionShell
-                    description="Hover or select a tile on the canvas to inspect its authored state."
-                    title="Terrain Inspector"
-                  >
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InspectorStat
-                        label="Tile"
-                        value={
-                          terrainInspectedTile
-                            ? `${terrainInspectedTile.tileX}, ${terrainInspectedTile.tileZ}`
-                            : '—'
-                        }
-                      />
-                      <InspectorStat
-                        label="Type"
-                        value={terrainInspectedTile?.typeId ?? '—'}
-                      />
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Drag on the canvas to select tiles, then use the canvas
+                      dock to change height, type, color, or save the draft.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InspectorStat
+                      label="Pending"
+                      value={`${terrainDirtyCount}`}
+                    />
+                    <InspectorStat
+                      label="Layer"
+                      value={formatTerrainRenderLayer(terrainLayer)}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InspectorStat
+                      label="Tile"
+                      value={
+                        terrainInspectedTile
+                          ? `${terrainInspectedTile.tileX}, ${terrainInspectedTile.tileZ}`
+                          : '—'
+                      }
+                    />
+                    <InspectorStat
+                      label="Type"
+                      value={terrainInspectedTile?.typeId ?? '—'}
+                    />
+                  </div>
+                  <details className="rounded-lg border border-border/70 bg-background/50 p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-foreground">
+                      Terrain diagnostics
+                    </summary>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <InspectorStat
                         label="Height Steps"
                         value={
@@ -541,9 +444,21 @@ export const EditorSidebar = ({
                             : `${terrainInspectedTile?.colorIndex ?? '—'}`
                         }
                       />
+                      <InspectorStat
+                        label="Halo"
+                        value={`${terrainPreviewHaloCount}`}
+                      />
+                      <InspectorStat
+                        label="Plane"
+                        value={
+                          terrainState.lastSolvedPlaneHeight === null
+                            ? '—'
+                            : `${terrainState.lastSolvedPlaneHeight.toFixed(1)}m`
+                        }
+                      />
                     </div>
-                  </SectionShell>
-                </>
+                  </details>
+                </SectionShell>
               ) : null}
 
               {activeTool !== 'terrain' && currentEntityForInspector ? (
@@ -1132,56 +1047,6 @@ export const EditorSidebar = ({
               ) : null}
             </div>
 
-            {activeTool === 'terrain' ? (
-              <ActionBar>
-                {terrainState.tool === 'height' ? (
-                  <>
-                    <Button
-                      disabled={terrainSelectedHeightTileCount === 0}
-                      onClick={() => onApplyTerrainHeightSelection('flatten')}
-                    >
-                      Flatten
-                    </Button>
-                    <Button
-                      disabled={terrainSelectedHeightTileCount === 0}
-                      onClick={() => onApplyTerrainHeightSelection('raise')}
-                      variant="outline"
-                    >
-                      Raise
-                    </Button>
-                    <Button
-                      disabled={terrainSelectedHeightTileCount === 0}
-                      onClick={() => onApplyTerrainHeightSelection('lower')}
-                      variant="outline"
-                    >
-                      Lower
-                    </Button>
-                    <Button
-                      disabled={terrainSelectedHeightTileCount === 0}
-                      onClick={onClearTerrainSelection}
-                      variant="outline"
-                    >
-                      Clear
-                    </Button>
-                  </>
-                ) : null}
-                <Button
-                  disabled={terrainDirtyCount === 0 || terrainSavePending}
-                  onClick={onSaveTerrainEdits}
-                >
-                  <Save className="h-4 w-4" />
-                  {terrainSavePending ? 'Saving…' : 'Save'}
-                </Button>
-                <Button
-                  disabled={terrainDirtyCount === 0}
-                  onClick={onResetTerrainEdits}
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-              </ActionBar>
-            ) : null}
-
             {activeTool !== 'terrain' && currentEntityForInspector ? (
               <ActionBar>
                 <Button disabled={!entityDirty} onClick={onSaveEntityDraft}>
@@ -1222,10 +1087,10 @@ export const EditorSidebar = ({
               </ActionBar>
             ) : null}
 
-              {canEditAuthoredGeometry &&
-              activeTool !== 'terrain' &&
-              !currentEntityForInspector &&
-              currentPolygonForInspector ? (
+            {canEditAuthoredGeometry &&
+            activeTool !== 'terrain' &&
+            !currentEntityForInspector &&
+            currentPolygonForInspector ? (
               <ActionBar>
                 <Button
                   disabled={
@@ -1741,6 +1606,12 @@ const TabButton = ({
     {label}
   </button>
 );
+
+const formatTerrainRenderLayer = (layer: TerrainRenderLayer) =>
+  layer
+    .split('-')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 
 const InspectorCallout = ({
   description,
