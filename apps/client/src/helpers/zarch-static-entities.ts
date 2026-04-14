@@ -5,28 +5,11 @@ import type {
   StaticEntity
 } from 'carrier-contracts/types';
 
-import { TILE } from '@/helpers/zarch-terrain';
+import { TILE, type ZarchTerrain } from '@/helpers/zarch-terrain';
 
 export type StaticEntityGroundingResult = {
   effectiveY: number;
   valid: boolean;
-};
-
-export type TerrainGridEntry = {
-  maxX: number;
-  maxZ: number;
-  minX: number;
-  minZ: number;
-  terrain: PreviewTerrainGrid;
-};
-
-type PreviewTerrainGrid = {
-  heights: Float32Array;
-  originX: number;
-  originZ: number;
-  sampleSpacing: number;
-  samplesHigh: number;
-  samplesWide: number;
 };
 
 const rotateOffset = (x: number, z: number, yawRadians: number) => {
@@ -72,108 +55,6 @@ const getGroundingSamplePoints = ({
   });
 };
 
-const sampleTerrainHeight = (
-  terrain: PreviewTerrainGrid,
-  x: number,
-  z: number
-) => {
-  const localX = (x - terrain.originX) / terrain.sampleSpacing;
-  const localZ = (z - terrain.originZ) / terrain.sampleSpacing;
-
-  if (
-    localX < 0 ||
-    localZ < 0 ||
-    localX > terrain.samplesWide - 1 ||
-    localZ > terrain.samplesHigh - 1
-  ) {
-    return null;
-  }
-
-  const x0 = Math.floor(localX);
-  const z0 = Math.floor(localZ);
-  const x1 = Math.min(x0 + 1, terrain.samplesWide - 1);
-  const z1 = Math.min(z0 + 1, terrain.samplesHigh - 1);
-  const tx = localX - x0;
-  const tz = localZ - z0;
-  const rowStride = terrain.samplesWide;
-  const h00 = terrain.heights[z0 * rowStride + x0];
-  const h10 = terrain.heights[z0 * rowStride + x1];
-  const h01 = terrain.heights[z1 * rowStride + x0];
-  const h11 = terrain.heights[z1 * rowStride + x1];
-
-  if (
-    h00 === undefined ||
-    h10 === undefined ||
-    h01 === undefined ||
-    h11 === undefined
-  ) {
-    return null;
-  }
-
-  const top = h00 * (1 - tx) + h10 * tx;
-  const bottom = h01 * (1 - tx) + h11 * tx;
-  return top * (1 - tz) + bottom * tz;
-};
-
-const terrainGridFromRuntimeChunk = (
-  chunk: RuntimeMapChunk,
-  metersPerTile: number
-): PreviewTerrainGrid => ({
-  heights: chunk.heights,
-  originX: chunk.originTileX * metersPerTile,
-  originZ: chunk.originTileZ * metersPerTile,
-  sampleSpacing: metersPerTile,
-  samplesHigh: chunk.samplesHigh,
-  samplesWide: chunk.samplesWide
-});
-
-const getChunkWorldBounds = (
-  map: Pick<MapMetadata, 'resolution'>,
-  chunk: RuntimeMapChunk
-) => {
-  const sizeMeters = map.resolution.metersPerTile;
-
-  return {
-    maxX: (chunk.originTileX + chunk.tileWidth) * sizeMeters,
-    maxZ: (chunk.originTileZ + chunk.tileHeight) * sizeMeters,
-    minX: chunk.originTileX * sizeMeters,
-    minZ: chunk.originTileZ * sizeMeters
-  };
-};
-
-export const getTerrainGrids = (
-  chunks: RuntimeMapChunk[],
-  map: Pick<MapMetadata, 'resolution'>
-): TerrainGridEntry[] =>
-  chunks.map(chunk => ({
-    ...getChunkWorldBounds(map, chunk),
-    terrain: terrainGridFromRuntimeChunk(chunk, map.resolution.metersPerTile)
-  }));
-
-const resolveTerrainHeight = (
-  terrains: TerrainGridEntry[],
-  point: Pick<StaticEntity['position'], 'x' | 'z'>
-) => {
-  for (const terrain of terrains) {
-    if (
-      point.x < terrain.minX ||
-      point.x > terrain.maxX ||
-      point.z < terrain.minZ ||
-      point.z > terrain.maxZ
-    ) {
-      continue;
-    }
-
-    const height = sampleTerrainHeight(terrain.terrain, point.x, point.z);
-
-    if (height !== null) {
-      return height;
-    }
-  }
-
-  return null;
-};
-
 export const collectChunkStaticEntities = (chunks: RuntimeMapChunk[]) => {
   const entitiesById = new Map<string, StaticEntity>();
 
@@ -211,12 +92,15 @@ export const getStaticEntityScenePosition = ({
 export const getStaticEntityGrounding = ({
   assetVersion,
   entity,
-  terrains
+  map,
+  terrain
 }: {
   assetVersion: Pick<AssetVersion, 'footprint' | 'maxHeightDeltaMeters'>;
   entity: Pick<StaticEntity, 'position' | 'rotation' | 'scale' | 'yOffset'>;
-  terrains: TerrainGridEntry[];
+  map: Pick<MapMetadata, 'resolution'>;
+  terrain: Pick<ZarchTerrain, 'sampleHeightAtWorld'>;
 }): StaticEntityGroundingResult | null => {
+  const sceneScale = getSceneMetersScale(map);
   const samplePoints = getGroundingSamplePoints({
     anchorX: entity.position.x,
     anchorZ: entity.position.z,
@@ -227,7 +111,10 @@ export const getStaticEntityGrounding = ({
   const heights: number[] = [];
 
   for (const point of samplePoints) {
-    const height = resolveTerrainHeight(terrains, point);
+    const height = terrain.sampleHeightAtWorld(
+      point.x * sceneScale,
+      point.z * sceneScale
+    );
 
     if (height === null) {
       return null;
@@ -238,11 +125,14 @@ export const getStaticEntityGrounding = ({
 
   const minHeight = Math.min(...heights);
   const maxHeight = Math.max(...heights);
-  const averageHeight =
-    heights.reduce((sum, value) => sum + value, 0) / heights.length;
+  const centerHeight = heights[0];
+
+  if (centerHeight === undefined) {
+    return null;
+  }
 
   return {
-    effectiveY: averageHeight + entity.yOffset,
+    effectiveY: centerHeight + entity.yOffset,
     valid: maxHeight - minHeight <= assetVersion.maxHeightDeltaMeters
   };
 };

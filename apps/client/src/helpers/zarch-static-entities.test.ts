@@ -1,3 +1,4 @@
+/* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
 import type {
   AssetVersion,
@@ -7,11 +8,16 @@ import type {
 } from 'carrier-contracts/types';
 
 import {
+  createServerMapTerrain,
+  getMapChunkQueryKey
+} from '@/helpers/zarch-map-terrain';
+import { QueryClient } from '@tanstack/react-query';
+
+import {
   collectChunkStaticEntities,
   getSceneMetersScale,
   getStaticEntityGrounding,
-  getStaticEntityScenePosition,
-  getTerrainGrids
+  getStaticEntityScenePosition
 } from './zarch-static-entities';
 
 const map: MapMetadata = {
@@ -142,16 +148,63 @@ describe('zarch static entity helpers', () => {
     });
   });
 
-  test('computes footprint-aware grounding and applies yOffset', () => {
+  test('grounds static entities on the center terrain height and applies yOffset', () => {
+    const terrain = {
+      sampleHeightAtWorld: (x: number, z: number) =>
+        x === 12 && z === 12 ? 10 : 2
+    };
+
     expect(
       getStaticEntityGrounding({
         assetVersion,
         entity: baseEntity,
-        terrains: getTerrainGrids([chunk], map)
+        map,
+        terrain
       })
     ).toEqual({
-      effectiveY: 3.5,
-      valid: true
+      effectiveY: 12,
+      valid: false
     });
+  });
+
+  test('grounds static entities against edited terrain height steps', () => {
+    const queryClient = new QueryClient();
+    const tileHeightSteps = new Int8Array(32 * 32);
+    tileHeightSteps[1 + 32] = 2;
+
+    queryClient.setQueryData(getMapChunkQueryKey(map.id, 0, 0, map.revision), {
+      ...chunk,
+      heights: new Float32Array(33 * 33),
+      samplesHigh: 33,
+      samplesWide: 33,
+      tileHeight: 32,
+      tileHeightSteps,
+      tileWidth: 32
+    } satisfies RuntimeMapChunk);
+
+    const terrain = createServerMapTerrain({
+      editConfig: {
+        heightStepMeters: 4,
+        maxAbsHeightSteps: 16,
+        palette: [],
+        tileTypes: [{ id: 'normal', label: 'Normal' }]
+      },
+      map,
+      prefetchChunk: () => {},
+      queryClient
+    });
+
+    expect(
+      getStaticEntityGrounding({
+        assetVersion,
+        entity: {
+          ...baseEntity,
+          position: { x: 15, z: 15 },
+          yOffset: 0
+        },
+        map,
+        terrain
+      })?.effectiveY
+    ).toBe(4.5);
   });
 });

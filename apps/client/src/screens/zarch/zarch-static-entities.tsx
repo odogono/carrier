@@ -21,6 +21,7 @@ import {
   type Intersection,
   type Material,
   type PerspectiveCamera,
+  type Plane,
   type Vector2
 } from 'three';
 import { useFrame } from '@react-three/fiber';
@@ -45,10 +46,13 @@ import {
 import {
   collectChunkStaticEntities,
   getSceneMetersScale,
-  getStaticEntityGrounding,
-  getTerrainGrids
+  getStaticEntityGrounding
 } from '@/helpers/zarch-static-entities';
-import { TILE, getLandscapeViewMetrics } from '@/helpers/zarch-terrain';
+import {
+  TILE,
+  getLandscapeViewMetrics,
+  type ZarchTerrain
+} from '@/helpers/zarch-terrain';
 import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -105,6 +109,7 @@ type PlacementPreview = {
 } | null;
 
 type ZarchStaticEntitiesProps = {
+  clippingPlanes: Plane[];
   entityEditEnabled: boolean;
   handleRef: RefObject<ZarchStaticEntitiesHandle | null>;
   hoveredEntityId: string | null;
@@ -112,6 +117,7 @@ type ZarchStaticEntitiesProps = {
   placementPreview: PlacementPreview;
   runtimeRef: RefObject<ZarchRuntimeState>;
   selectedEntityId: string | null;
+  terrain: ZarchTerrain;
 };
 
 const assetRuntimeCache = new Map<string, AssetRuntimeCacheEntry>();
@@ -190,13 +196,56 @@ const disposeInstancedEntry = (entry: InstancedEntry) => {
   entry.mesh.geometry.dispose();
 };
 
+const applyMaterialClippingPlanes = (
+  material: Material | Material[],
+  clippingPlanes: Plane[],
+  clipShadows: boolean
+) => {
+  const materials = Array.isArray(material) ? material : [material];
+
+  for (const targetMaterial of materials) {
+    const clippedMaterial = targetMaterial as Material & {
+      clippingPlanes?: Plane[] | null;
+      clipShadows?: boolean;
+    };
+
+    clippedMaterial.clippingPlanes = clippingPlanes;
+    clippedMaterial.clipShadows = clipShadows;
+    targetMaterial.needsUpdate = true;
+  }
+};
+
+const applyObjectClippingPlanes = (
+  object: Object3D,
+  clippingPlanes: Plane[],
+  clipShadows: boolean
+) => {
+  object.traverse(child => {
+    const renderable = child as Partial<{
+      material: Material | Material[];
+    }>;
+
+    if (!renderable.material) {
+      return;
+    }
+
+    applyMaterialClippingPlanes(
+      renderable.material,
+      clippingPlanes,
+      clipShadows
+    );
+  });
+};
+
 export const ZarchStaticEntities = ({
+  clippingPlanes,
   handleRef,
   hoveredEntityId,
   map,
   placementPreview,
   runtimeRef,
-  selectedEntityId
+  selectedEntityId,
+  terrain
 }: ZarchStaticEntitiesProps) => {
   const cloneEntriesRef = useRef(new Map<string, CloneEntry>());
   const instancedEntriesRef = useRef(new Map<string, InstancedEntry>());
@@ -287,10 +336,12 @@ export const ZarchStaticEntities = ({
     if (!root) return;
 
     const outlineMaterial = new LineBasicMaterial({
+      clippingPlanes,
       color: 0xf6d84a,
       depthTest: false
     });
     const hoverMaterial = new LineBasicMaterial({
+      clippingPlanes,
       color: 0xd6bf68,
       depthTest: false,
       opacity: 0.6,
@@ -317,13 +368,20 @@ export const ZarchStaticEntities = ({
       hoverMaterial.dispose();
       boxGeo.dispose();
     };
-  }, []);
+  }, [clippingPlanes]);
 
   // Expose raycast handle
   useImperativeHandle(
     handleRef,
     () => ({
-      raycastToEntity: (pointer, rect, raycaster, ndc, camera, intersections) => {
+      raycastToEntity: (
+        pointer,
+        rect,
+        raycaster,
+        ndc,
+        camera,
+        intersections
+      ) => {
         if (rect.width === 0 || rect.height === 0) return null;
 
         ndc.set(
@@ -457,7 +515,6 @@ export const ZarchStaticEntities = ({
         scale: number;
       }>
     >();
-    const terrains = getTerrainGrids(visibleChunks, map);
 
     for (const entity of collectChunkStaticEntities(visibleChunks)) {
       const archetype = archetypesById.get(entity.archetypeId);
@@ -483,7 +540,8 @@ export const ZarchStaticEntities = ({
       const grounding = getStaticEntityGrounding({
         assetVersion,
         entity,
-        terrains
+        map,
+        terrain
       });
       if (!grounding) {
         continue;
@@ -520,6 +578,7 @@ export const ZarchStaticEntities = ({
       if (!cloneEntry) {
         const object = assetRuntime.runtime.normalized.object.clone(true);
         setModelShadowProps(object);
+        applyObjectClippingPlanes(object, clippingPlanes, true);
         object.userData.entityId = entity.id;
         root.add(object);
         cloneEntry = {
@@ -569,6 +628,7 @@ export const ZarchStaticEntities = ({
           Math.max(transforms.length, 1)
         );
         mesh.castShadow = true;
+        applyMaterialClippingPlanes(mesh.material, clippingPlanes, true);
         mesh.count = 0;
         mesh.frustumCulled = false;
         mesh.receiveShadow = true;
@@ -676,6 +736,7 @@ export const ZarchStaticEntities = ({
           ghost.traverse((child: Object3D) => {
             if (child instanceof Mesh) {
               child.material = new MeshBasicMaterial({
+                clippingPlanes,
                 color: preview.valid ? 0x66ff66 : 0xff6666,
                 opacity: 0.4,
                 transparent: true,
@@ -714,7 +775,8 @@ export const ZarchStaticEntities = ({
               scale: 1,
               yOffset: 0
             },
-            terrains
+            map,
+            terrain
           });
 
           ghost.position.set(
@@ -727,7 +789,10 @@ export const ZarchStaticEntities = ({
           // Update material color based on validity
           const isValid = grounding ? grounding.valid : false;
           ghost.traverse((child: Object3D) => {
-            if (child instanceof Mesh && child.material instanceof MeshBasicMaterial) {
+            if (
+              child instanceof Mesh &&
+              child.material instanceof MeshBasicMaterial
+            ) {
               child.material.color.set(isValid ? 0x66ff66 : 0xff6666);
             }
           });

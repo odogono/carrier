@@ -12,26 +12,21 @@ import { Canvas } from '@react-three/fiber';
 
 import {
   isFiniteMap,
+  type AssetVersion,
   type MapMetadata,
+  type StaticEntity,
   type ZarchTileEditConfig
 } from 'carrier-contracts/types';
 import { Provider as JotaiProvider } from 'jotai';
 import { Leva, LevaPanel, button, useControls, useCreateStore } from 'leva';
 import { createLog } from 'odgn-ts-helpers/log';
 
-import type {
-  AssetVersion,
-  StaticEntity
-} from 'carrier-contracts/types';
-
 import { palette } from '@/components/leva-palette-plugin';
 // import { ThemeTogglePortal } from '@/components/theme/toggle-portal';
 import { client, connectApi } from '@/helpers/api-link';
 import { ensurePlaneToArrayCompat } from '@/helpers/three-plane-compat';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
-import {
-  collectChunkStaticEntities
-} from '@/helpers/zarch-static-entities';
+import { collectChunkStaticEntities } from '@/helpers/zarch-static-entities';
 import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DevSceneControls,
@@ -40,15 +35,15 @@ import {
   type DevSceneControlFolderState,
   type LevaControlFolder
 } from '@/hooks/use-scene-controls';
-import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
+import { ZarchEntityCatalog } from './zarch/zarch-entity-catalog';
 import {
   createZarchEntityEditState,
   reduceZarchEntityEditState
 } from './zarch/zarch-entity-edit';
-import { ZarchEntityCatalog } from './zarch/zarch-entity-catalog';
 import { ZarchEntityEditHud } from './zarch/zarch-entity-edit-hud';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
@@ -58,11 +53,11 @@ import {
   computeAreaHeightEdits,
   createEditedTerrain,
   createZarchTileEditState,
-  getDraftEdits,
   getAreaHeightPreview,
+  getDraftEdits,
   getHeightSelectionTiles,
-  getPreviewHaloTiles,
   getMergedTileState,
+  getPreviewHaloTiles,
   getTerrainTileState,
   reduceZarchTileEditState
 } from './zarch/zarch-tile-edit';
@@ -76,15 +71,27 @@ ensurePlaneToArrayCompat();
 
 type LevaUiState = {
   collapsed: boolean;
+  edit: LevaPanelUiState;
   folderState: DevSceneControlFolderState;
+  position: LevaPanelUiState['position'];
+};
+
+type LevaPanelUiState = {
+  collapsed: boolean;
   position: {
     x?: number;
     y?: number;
   };
 };
 
+const DEFAULT_LEVA_PANEL_UI_STATE: LevaPanelUiState = {
+  collapsed: false,
+  position: {}
+};
+
 const DEFAULT_LEVA_UI_STATE: LevaUiState = {
   collapsed: false,
+  edit: DEFAULT_LEVA_PANEL_UI_STATE,
   folderState: {},
   position: {}
 };
@@ -98,6 +105,28 @@ const FALLBACK_TILE_EDIT_CONFIG: ZarchTileEditConfig = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
+
+const readLevaPanelUiState = (
+  value: unknown,
+  fallback: LevaPanelUiState
+): LevaPanelUiState => {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const position = isRecord(value.position) ? value.position : {};
+
+  return {
+    collapsed:
+      typeof value.collapsed === 'boolean'
+        ? value.collapsed
+        : fallback.collapsed,
+    position: {
+      x: typeof position.x === 'number' ? position.x : fallback.position.x,
+      y: typeof position.y === 'number' ? position.y : fallback.position.y
+    }
+  };
+};
 
 const readLevaUiState = (): LevaUiState => {
   if (typeof window === 'undefined') {
@@ -118,13 +147,15 @@ const readLevaUiState = (): LevaUiState => {
     }
 
     const folderState = isRecord(parsed.folderState) ? parsed.folderState : {};
-    const position = isRecord(parsed.position) ? parsed.position : {};
+    const editState = readLevaPanelUiState(
+      parsed.edit,
+      DEFAULT_LEVA_PANEL_UI_STATE
+    );
+    const viewState = readLevaPanelUiState(parsed, DEFAULT_LEVA_UI_STATE);
 
     return {
-      collapsed:
-        typeof parsed.collapsed === 'boolean'
-          ? parsed.collapsed
-          : DEFAULT_LEVA_UI_STATE.collapsed,
+      collapsed: viewState.collapsed,
+      edit: editState,
       folderState: Object.fromEntries(
         LEVA_CONTROL_FOLDERS.map(folderName => [
           folderName,
@@ -133,10 +164,7 @@ const readLevaUiState = (): LevaUiState => {
             : false
         ])
       ) as DevSceneControlFolderState,
-      position: {
-        x: typeof position.x === 'number' ? position.x : undefined,
-        y: typeof position.y === 'number' ? position.y : undefined
-      }
+      position: viewState.position
     };
   } catch (error) {
     log.warn('Failed to read persisted Leva state', error);
@@ -178,7 +206,9 @@ const MainInner = () => {
     undefined,
     createZarchEntityEditState
   );
-  const [editorMode, setEditorMode] = useState<'terrain' | 'entities'>('terrain');
+  const [editorMode, setEditorMode] = useState<'terrain' | 'entities'>(
+    'terrain'
+  );
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
   }, []);
@@ -254,7 +284,10 @@ const MainInner = () => {
       return '--';
     }
 
-    const value = activeTerrain.getTileAverageHeight(target.tileX, target.tileZ);
+    const value = activeTerrain.getTileAverageHeight(
+      target.tileX,
+      target.tileZ
+    );
     return value === null ? '--' : value.toFixed(2);
   }, [
     activeTerrain,
@@ -316,6 +349,16 @@ const MainInner = () => {
     [updateLevaUiState]
   );
 
+  const handleEditLevaCollapsedChange = useCallback(
+    (collapsed: boolean) => {
+      updateLevaUiState(current => ({
+        ...current,
+        edit: { ...current.edit, collapsed }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
   const handleLevaDrag = useCallback(
     (position: { x?: number; y?: number }) => {
       updateLevaUiState(current => ({
@@ -323,6 +366,22 @@ const MainInner = () => {
         position: {
           x: position.x,
           y: position.y
+        }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleEditLevaDrag = useCallback(
+    (position: { x?: number; y?: number }) => {
+      updateLevaUiState(current => ({
+        ...current,
+        edit: {
+          ...current.edit,
+          position: {
+            x: position.x,
+            y: position.y
+          }
         }
       }));
     },
@@ -485,7 +544,12 @@ const MainInner = () => {
       }
 
       const tileEdits = selectedHeightTiles.map(tile => ({
-        current: getMergedTileState(terrain, editState.edits, tile.tileX, tile.tileZ)
+        current: getMergedTileState(
+          terrain,
+          editState.edits,
+          tile.tileX,
+          tile.tileZ
+        )
       }));
 
       if (tileEdits.length === 0) {
@@ -561,7 +625,12 @@ const MainInner = () => {
       const anchorTile = editState.selectedTile ?? selectedHeightTiles[0]!;
 
       dispatchEdit({
-        current: getMergedTileState(terrain, editState.edits, anchorTile.tileX, anchorTile.tileZ),
+        current: getMergedTileState(
+          terrain,
+          editState.edits,
+          anchorTile.tileX,
+          anchorTile.tileZ
+        ),
         heightEdits: result.heightEdits,
         lastSolvedPlaneHeight: result.targetHeight,
         previewHaloTiles: result.haloTiles,
@@ -683,14 +752,16 @@ const MainInner = () => {
     if (!entityEditState.selectedEntityId || !map) return null;
 
     const chunks: any[] = [];
-    queryClient.getQueriesData({ queryKey: ['map-chunk', map.id] }).forEach(
-      ([, data]) => {
+    queryClient
+      .getQueriesData({ queryKey: ['map-chunk', map.id] })
+      .forEach(([, data]) => {
         if (data) chunks.push(data);
-      }
-    );
+      });
 
     const entities = collectChunkStaticEntities(chunks);
-    return entities.find(e => e.id === entityEditState.selectedEntityId) ?? null;
+    return (
+      entities.find(e => e.id === entityEditState.selectedEntityId) ?? null
+    );
   }, [entityEditState.selectedEntityId, map, queryClient]);
 
   // Active archetype's asset version ID for preview
@@ -768,16 +839,17 @@ const MainInner = () => {
         dispatchEntityEdit({ type: 'set-pending', action: null });
       }
     },
-    [entityEditState.activeArchetypeId, entityEditState.pendingAction, invalidateEntityQueries, map]
+    [
+      entityEditState.activeArchetypeId,
+      entityEditState.pendingAction,
+      invalidateEntityQueries,
+      map
+    ]
   );
 
   const handleRotateEntity = useCallback(
     async (direction: 'cw' | 'ccw') => {
-      if (
-        !map ||
-        !selectedEntity ||
-        entityEditState.pendingAction
-      ) {
+      if (!map || !selectedEntity || entityEditState.pendingAction) {
         return;
       }
 
@@ -785,7 +857,8 @@ const MainInner = () => {
       dispatchEntityEdit({ type: 'set-error', error: null });
 
       const yawDelta = direction === 'cw' ? 45 : -45;
-      const newYaw = ((selectedEntity.rotation.yaw + yawDelta) % 360 + 360) % 360;
+      const newYaw =
+        (((selectedEntity.rotation.yaw + yawDelta) % 360) + 360) % 360;
 
       try {
         await client.maps.updateStaticEntity({
@@ -808,7 +881,52 @@ const MainInner = () => {
         dispatchEntityEdit({ type: 'set-pending', action: null });
       }
     },
-    [entityEditState.pendingAction, invalidateEntityQueries, map, selectedEntity]
+    [
+      entityEditState.pendingAction,
+      invalidateEntityQueries,
+      map,
+      selectedEntity
+    ]
+  );
+
+  const handleSetEntityYOffset = useCallback(
+    async (yOffset: number) => {
+      if (!map || !selectedEntity || entityEditState.pendingAction) {
+        return;
+      }
+
+      dispatchEntityEdit({ action: 'Updating height', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
+
+      try {
+        await client.maps.updateStaticEntity({
+          expectedRevision: map.revision,
+          id: selectedEntity.id,
+          mapId: map.id,
+          yOffset
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Failed to update entity height';
+        dispatchEntityEdit({
+          error: message.includes('Expected revision')
+            ? 'Revision conflict: reload and retry.'
+            : message,
+          type: 'set-error'
+        });
+      } finally {
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
+      }
+    },
+    [
+      entityEditState.pendingAction,
+      invalidateEntityQueries,
+      map,
+      selectedEntity
+    ]
   );
 
   const handleDeleteEntity = useCallback(async () => {
@@ -843,7 +961,12 @@ const MainInner = () => {
     } finally {
       dispatchEntityEdit({ type: 'set-pending', action: null });
     }
-  }, [entityEditState.pendingAction, entityEditState.selectedEntityId, invalidateEntityQueries, map]);
+  }, [
+    entityEditState.pendingAction,
+    entityEditState.selectedEntityId,
+    invalidateEntityQueries,
+    map
+  ]);
 
   // Entity edit callbacks for runtime keyboard shortcuts
   const entityEditCallbacks = useMemo(() => {
@@ -947,13 +1070,23 @@ const MainInner = () => {
       previewHaloTiles: preview.haloTiles,
       type: 'set-height-preview'
     });
-  }, [editConfig, editState.edits, editState.tool, selectedHeightTiles, terrain]);
+  }, [
+    editConfig,
+    editState.edits,
+    editState.tool,
+    selectedHeightTiles,
+    terrain
+  ]);
 
   const [editControls, setEditControls] = useControls(
     () => ({
       enabled: {
         label: 'Enabled',
-        onChange: (value: boolean, _path: string, context: { initial: boolean }) => {
+        onChange: (
+          value: boolean,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
           if (context.initial) {
             return;
           }
@@ -965,7 +1098,11 @@ const MainInner = () => {
       },
       tool: {
         label: 'Tool',
-        onChange: (value: typeof editState.tool, _path: string, context: { initial: boolean }) => {
+        onChange: (
+          value: typeof editState.tool,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
           if (context.initial) {
             return;
           }
@@ -985,7 +1122,11 @@ const MainInner = () => {
       },
       selectedTypeId: {
         label: 'Tile type',
-        onChange: (value: string, _path: string, context: { initial: boolean }) => {
+        onChange: (
+          value: string,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
           if (context.initial) {
             return;
           }
@@ -1012,7 +1153,11 @@ const MainInner = () => {
           onSelect: handlePaletteSelection,
           selected: selectedColorValue
         }),
-        onChange: (value: string, _path: string, context: { initial: boolean }) => {
+        onChange: (
+          value: string,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
           if (context.initial) {
             return;
           }
@@ -1039,17 +1184,24 @@ const MainInner = () => {
         disabled: !editState.canRedo
       }),
       Flatten: button(() => applyHeightSelection('flatten'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+        disabled:
+          editState.tool !== 'height' || selectedHeightTiles.length === 0
       }),
       Raise: button(() => applyHeightSelection('raise'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+        disabled:
+          editState.tool !== 'height' || selectedHeightTiles.length === 0
       }),
       Lower: button(() => applyHeightSelection('lower'), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
+        disabled:
+          editState.tool !== 'height' || selectedHeightTiles.length === 0
       }),
-      ClearSelection: button(() => dispatchEdit({ type: 'clear-height-selection' }), {
-        disabled: editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
+      ClearSelection: button(
+        () => dispatchEdit({ type: 'clear-height-selection' }),
+        {
+          disabled:
+            editState.tool !== 'height' || selectedHeightTiles.length === 0
+        }
+      ),
       Save: button(() => void handleSaveTileEdits(), {
         disabled: dirtyEditCount === 0 || isSavingEdits
       }),
@@ -1171,7 +1323,6 @@ const MainInner = () => {
     setEditControls
   ]);
 
-
   if (isLoading) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-black text-white">
@@ -1263,14 +1414,15 @@ const MainInner = () => {
         {editState.enabled && (
           <ZarchEntityEditHud
             archetypes={catalogArchetypes}
-            editorMode={editorMode}
             editEnabled={editState.enabled}
+            editorMode={editorMode}
             entityEditState={entityEditState}
             onCatalogToggle={handleCatalogToggle}
             onDeleteEntity={() => void handleDeleteEntity()}
             onRotateEntity={direction => void handleRotateEntity(direction)}
             onSetEditorMode={handleSetEditorMode}
             onSetEnabled={handleSetEditEnabled}
+            onSetEntityYOffset={yOffset => void handleSetEntityYOffset(yOffset)}
             onSetTool={handleSetEntityTool}
             selectedEntity={selectedEntity}
           />
@@ -1308,7 +1460,18 @@ const MainInner = () => {
           )}
       </div>
       {editorMode === 'terrain' && (
-        <LevaPanel store={editLevaStore} titleBar={{ title: 'Edit' }} />
+        <LevaPanel
+          collapsed={{
+            collapsed: levaUiState.edit.collapsed,
+            onChange: handleEditLevaCollapsedChange
+          }}
+          store={editLevaStore}
+          titleBar={{
+            onDragEnd: handleEditLevaDrag,
+            position: levaUiState.edit.position,
+            title: 'Edit'
+          }}
+        />
       )}
       {/* <ThemeTogglePortal /> */}
     </>

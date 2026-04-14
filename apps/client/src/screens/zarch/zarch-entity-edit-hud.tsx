@@ -1,3 +1,5 @@
+import type { FocusEvent, KeyboardEvent } from 'react';
+
 import type { Archetype, StaticEntity } from 'carrier-contracts/types';
 
 import type {
@@ -9,14 +11,15 @@ type EditorMode = 'terrain' | 'entities';
 
 type ZarchEntityEditHudProps = {
   archetypes: Archetype[];
-  editorMode: EditorMode;
   editEnabled: boolean;
+  editorMode: EditorMode;
   entityEditState: ZarchEntityEditState;
   onCatalogToggle: () => void;
   onDeleteEntity: () => void;
   onRotateEntity: (direction: 'cw' | 'ccw') => void;
   onSetEditorMode: (mode: EditorMode) => void;
   onSetEnabled: (enabled: boolean) => void;
+  onSetEntityYOffset: (yOffset: number) => void;
   onSetTool: (tool: ZarchEntityEditTool) => void;
   selectedEntity: StaticEntity | null;
 };
@@ -26,28 +29,75 @@ const TOOL_LABELS: Record<ZarchEntityEditTool, string> = {
   select: 'Select'
 };
 
+const blurInputOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+  if (event.key !== 'Enter') {
+    return;
+  }
+
+  event.currentTarget.blur();
+};
+
+export const getCommittedEntityYOffset = ({
+  currentYOffset,
+  value
+}: {
+  currentYOffset: number;
+  value: string;
+}) => {
+  if (value.trim() === '') {
+    return null;
+  }
+
+  const nextYOffset = Number(value);
+
+  if (!Number.isFinite(nextYOffset) || nextYOffset === currentYOffset) {
+    return null;
+  }
+
+  return nextYOffset;
+};
+
 export const ZarchEntityEditHud = ({
   archetypes,
-  editorMode,
   editEnabled,
+  editorMode,
   entityEditState,
   onCatalogToggle,
   onDeleteEntity,
   onRotateEntity,
   onSetEditorMode,
   onSetEnabled,
+  onSetEntityYOffset,
   onSetTool,
   selectedEntity
 }: ZarchEntityEditHudProps) => {
   const activeArchetype = entityEditState.activeArchetypeId
-    ? archetypes.find(a => a.id === entityEditState.activeArchetypeId) ?? null
+    ? (archetypes.find(a => a.id === entityEditState.activeArchetypeId) ?? null)
     : null;
 
   const hasSelection = entityEditState.selectedEntityId !== null;
   const isPending = entityEditState.pendingAction !== null;
 
+  const handleYOffsetBlur = (event: FocusEvent<HTMLInputElement>) => {
+    if (!selectedEntity || isPending) {
+      return;
+    }
+
+    const nextYOffset = getCommittedEntityYOffset({
+      currentYOffset: selectedEntity.yOffset,
+      value: event.currentTarget.value
+    });
+
+    if (nextYOffset === null) {
+      event.currentTarget.value = String(selectedEntity.yOffset);
+      return;
+    }
+
+    onSetEntityYOffset(nextYOffset);
+  };
+
   return (
-    <div className="pointer-events-auto absolute left-3 top-10 z-20 flex max-w-[min(56rem,calc(100vw-1.5rem))] flex-col gap-2 rounded border border-[#c8a000] bg-[#111] px-3 py-2 font-mono text-[12px] text-[#e8d060] shadow-[0_0_0_1px_rgba(0,0,0,0.45)]">
+    <div className="pointer-events-auto absolute top-10 left-3 z-20 flex max-w-[min(56rem,calc(100vw-1.5rem))] flex-col gap-2 rounded border border-[#c8a000] bg-[#111] px-3 py-2 font-mono text-[12px] text-[#e8d060] shadow-[0_0_0_1px_rgba(0,0,0,0.45)]">
       {/* Row 1: Enable + Mode strip */}
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -149,15 +199,37 @@ export const ZarchEntityEditHud = ({
             {selectedEntity && (
               <>
                 <span>
-                  Selected: <span className="text-[#ffe58a]">{selectedEntity.label ?? selectedEntity.id}</span>
+                  Selected:{' '}
+                  <span className="text-[#ffe58a]">
+                    {selectedEntity.label ?? selectedEntity.id}
+                  </span>
                 </span>
                 <span>Yaw: {selectedEntity.rotation.yaw}</span>
+                <span>Offset: {selectedEntity.yOffset.toFixed(1)}m</span>
               </>
             )}
             {isPending && (
-              <span className="text-[#9edcff]">{entityEditState.pendingAction}...</span>
+              <span className="text-[#9edcff]">
+                {entityEditState.pendingAction}...
+              </span>
             )}
           </div>
+          {selectedEntity && (
+            <label className="flex w-fit items-center gap-2 text-[#d6bf68]">
+              <span>Height Offset</span>
+              <input
+                className="w-20 rounded border border-[#6d5800] bg-[#1d1800] px-2 py-1 text-[#ffe58a] outline-none focus:border-[#c8a000] disabled:opacity-40"
+                defaultValue={selectedEntity.yOffset}
+                disabled={isPending}
+                key={`${selectedEntity.id}:${selectedEntity.yOffset}`}
+                onBlur={handleYOffsetBlur}
+                onKeyDown={blurInputOnEnter}
+                step="0.1"
+                type="number"
+              />
+              <span>m</span>
+            </label>
+          )}
         </>
       )}
 

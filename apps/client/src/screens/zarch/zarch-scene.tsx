@@ -675,7 +675,9 @@ export const ZarchScene = ({
   selectedHeightTiles,
   terrain
 }: ZarchSceneProps) => {
-  const staticEntitiesHandleRef = useRef<ZarchStaticEntitiesHandle | null>(null);
+  const staticEntitiesHandleRef = useRef<ZarchStaticEntitiesHandle | null>(
+    null
+  );
   const entityPlacementPreviewRef = useRef<{
     worldX: number;
     worldZ: number;
@@ -687,7 +689,7 @@ export const ZarchScene = ({
   const backgroundColor = useSceneConfigValue('backgroundColor');
   const cameraRef = useRef<PerspectiveCamera>(null);
   const cameraFov = useSceneConfigValue('cameraFov');
-  const clipPlanesRef = useRef<Plane[] | null>(null);
+  const clipPlanes = useMemo(() => createClipPlanes(), []);
   const directionalIntensity = useSceneConfigValue('directionalIntensity');
   const landscapeClipScale = useSceneConfigValue('landscapeClipScale');
   const directionalPosition = useSceneConfigValue('directionalPosition');
@@ -740,7 +742,8 @@ export const ZarchScene = ({
     );
   }, [shipModelQuery.data, shipRuntimeEntityQuery.data]);
   const selectedTileKeys = useMemo(
-    () => new Set(selectedHeightTiles.map(tile => `${tile.tileX}:${tile.tileZ}`)),
+    () =>
+      new Set(selectedHeightTiles.map(tile => `${tile.tileX}:${tile.tileZ}`)),
     [selectedHeightTiles]
   );
   const particleSurface = useMemo(
@@ -776,20 +779,17 @@ export const ZarchScene = ({
       return;
     }
 
-    const clipPlanes = createClipPlanes();
     const pools = createScenePools(clipPlanes);
 
-    clipPlanesRef.current = clipPlanes;
     poolsRef.current = pools;
     world.add(pools.root);
 
     return () => {
       world.remove(pools.root);
       disposeScenePools(pools.root);
-      clipPlanesRef.current = null;
       poolsRef.current = null;
     };
-  }, []);
+  }, [clipPlanes]);
 
   useEffect(() => {
     const shipObject = shipGroupRef.current;
@@ -819,13 +819,12 @@ export const ZarchScene = ({
     const particleSystem = particleSystemRef.current;
     const runtime = runtimeRef.current;
     const input = inputRef.current;
-    const clipPlanes = clipPlanesRef.current;
     const pools = poolsRef.current;
     const dt = Math.min(delta, 0.05);
     const forward = forwardRef.current;
     const right = rightRef.current;
 
-    if (!camera || !clipPlanes || !pools) {
+    if (!camera || !pools) {
       return;
     }
 
@@ -1250,7 +1249,10 @@ export const ZarchScene = ({
 
     let selectionHighlightIndex = 0;
     for (const tile of selectedHeightTiles) {
-      if (!terrain.containsTile(tile.tileX, tile.tileZ) || !terrain.isTileLoaded(tile.tileX, tile.tileZ)) {
+      if (
+        !terrain.containsTile(tile.tileX, tile.tileZ) ||
+        !terrain.isTileLoaded(tile.tileX, tile.tileZ)
+      ) {
         continue;
       }
 
@@ -1293,7 +1295,10 @@ export const ZarchScene = ({
 
     let haloHighlightIndex = 0;
     for (const tile of previewHaloTiles) {
-      if (!terrain.containsTile(tile.tileX, tile.tileZ) || !terrain.isTileLoaded(tile.tileX, tile.tileZ)) {
+      if (
+        !terrain.containsTile(tile.tileX, tile.tileZ) ||
+        !terrain.isTileLoaded(tile.tileX, tile.tileZ)
+      ) {
         continue;
       }
 
@@ -1326,7 +1331,11 @@ export const ZarchScene = ({
       }
     }
 
-    for (let index = haloHighlightIndex; index < pools.haloHighlightPool.length; index += 1) {
+    for (
+      let index = haloHighlightIndex;
+      index < pools.haloHighlightPool.length;
+      index += 1
+    ) {
       pools.haloHighlightPool[index]!.visible = false;
     }
 
@@ -1355,8 +1364,19 @@ export const ZarchScene = ({
       }
 
       // Terrain hit for placement preview
-      if (entityEditState?.tool === 'place' && entityEditState.activeArchetypeId) {
-        const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+      if (
+        entityEditState?.tool === 'place' &&
+        entityEditState.activeArchetypeId
+      ) {
+        const tile = raycastToTile(
+          input.hoverPointer,
+          rect,
+          particleRaycaster,
+          particleNdc,
+          camera,
+          pools.tilePool,
+          intersections
+        );
         if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
           const hit = intersections[0];
           if (hit) {
@@ -1381,9 +1401,20 @@ export const ZarchScene = ({
       pools.tileHighlight.visible = false;
     } else if (editEnabled && editorMode === 'terrain' && input.hoverPointer) {
       const rect = state.gl.domElement.getBoundingClientRect();
-      const tile = raycastToTile(input.hoverPointer, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
-      const validTile = tile && terrain.isTileLoaded(tile.gx, tile.gz) ? tile : null;
-      onEditTileHover(validTile ? { tileX: validTile.gx, tileZ: validTile.gz } : null);
+      const tile = raycastToTile(
+        input.hoverPointer,
+        rect,
+        particleRaycaster,
+        particleNdc,
+        camera,
+        pools.tilePool,
+        intersections
+      );
+      const validTile =
+        tile && terrain.isTileLoaded(tile.gx, tile.gz) ? tile : null;
+      onEditTileHover(
+        validTile ? { tileX: validTile.gx, tileZ: validTile.gz } : null
+      );
 
       if (validTile && input.editBrushActive) {
         if (input.editBrushStarted) {
@@ -1396,19 +1427,21 @@ export const ZarchScene = ({
 
       if (validTile) {
         const { gx, gz } = validTile;
-        const highlightHeights = getDisplayTileHeights({
-          seaY: config.seaY,
-          selectedHeightPlane,
-          selectedTileKeys,
-          terrain,
-          tileX: gx,
-          tileZ: gz
-        })?.heights ?? null;
+        const highlightHeights =
+          getDisplayTileHeights({
+            seaY: config.seaY,
+            selectedHeightPlane,
+            selectedTileKeys,
+            terrain,
+            tileX: gx,
+            tileZ: gz
+          })?.heights ?? null;
 
         if (highlightHeights) {
           const hlX = gx * TILE - runtime.camera.x;
           const hlZ = gz * TILE - runtime.camera.z;
-          const hlPositions = pools.tileHighlight.geometry.attributes.position as BufferAttribute;
+          const hlPositions = pools.tileHighlight.geometry.attributes
+            .position as BufferAttribute;
           const yOffset = 0.15;
           const [hh00, hh10, hh01, hh11] = highlightHeights;
           hlPositions.setXYZ(0, hlX, hh00 + yOffset, hlZ);
@@ -1452,8 +1485,19 @@ export const ZarchScene = ({
           intersections
         );
         onEntitySelect(entityHit?.entityId ?? null);
-      } else if (entityEditState?.tool === 'place' && entityEditState.activeArchetypeId) {
-        const tile = raycastToTile(tap, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+      } else if (
+        entityEditState?.tool === 'place' &&
+        entityEditState.activeArchetypeId
+      ) {
+        const tile = raycastToTile(
+          tap,
+          rect,
+          particleRaycaster,
+          particleNdc,
+          camera,
+          pools.tilePool,
+          intersections
+        );
         if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
           const hit = intersections[0];
           if (hit) {
@@ -1468,7 +1512,15 @@ export const ZarchScene = ({
       const rect = state.gl.domElement.getBoundingClientRect();
       const tap = input.queuedEditTap;
       input.queuedEditTap = null;
-      const tile = raycastToTile(tap, rect, particleRaycaster, particleNdc, camera, pools.tilePool, intersections);
+      const tile = raycastToTile(
+        tap,
+        rect,
+        particleRaycaster,
+        particleNdc,
+        camera,
+        pools.tilePool,
+        intersections
+      );
 
       if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
         onEditTileActivate(tile.gx, tile.gz, tap.shiftKey);
@@ -1636,6 +1688,7 @@ export const ZarchScene = ({
           ) : null}
         </group>
         <ZarchStaticEntities
+          clippingPlanes={clipPlanes}
           entityEditEnabled={editEnabled && editorMode === 'entities'}
           handleRef={staticEntitiesHandleRef}
           hoveredEntityId={entityEditState?.hoveredEntityId ?? null}
@@ -1656,6 +1709,7 @@ export const ZarchScene = ({
           }
           runtimeRef={runtimeRef}
           selectedEntityId={entityEditState?.selectedEntityId ?? null}
+          terrain={terrain}
         />
       </group>
       <ambientLight intensity={ambientIntensity} ref={ambientRef} />
