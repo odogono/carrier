@@ -24,10 +24,10 @@
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@nkzw/eslint-config": "^3.3.0",
     "@types/bun": "latest",
-    "@types/node": "^25.5.0",
-    "eslint": "^10.0.3",
-    "knip": "^5.88.1",
-    "prettier": "^3.8.1"
+    "@types/node": "^25.6.0",
+    "eslint": "^10.2.0",
+    "knip": "^6.4.1",
+    "prettier": "^3.8.3"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -35,12 +35,12 @@
   "dependencies": {
     "@elysiajs/bearer": "^1.4.3",
     "@elysiajs/cors": "^1.4.1",
-    "@orpc/client": "^1.13.9",
-    "@orpc/contract": "^1.13.9",
-    "@orpc/openapi": "^1.13.9",
-    "@orpc/openapi-client": "^1.13.9",
-    "@orpc/server": "^1.13.9",
-    "@orpc/zod": "^1.13.9",
+    "@orpc/client": "^1.13.14",
+    "@orpc/contract": "^1.13.14",
+    "@orpc/openapi": "^1.13.14",
+    "@orpc/openapi-client": "^1.13.14",
+    "@orpc/server": "^1.13.14",
+    "@orpc/zod": "^1.13.14",
     "carrier-contracts": "workspace:*",
     "elysia": "^1.4.28",
     "odgn-query": "^0.3.1",

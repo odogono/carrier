@@ -32,9 +32,11 @@ import {
 import { PerspectiveCamera as PerspectiveCameraImpl } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 
-import type { MapMetadata } from 'carrier-contracts/types';
+import type { MapMetadata, StaticEntity } from 'carrier-contracts/types';
 
 import { client } from '@/helpers/api-link';
+import { isMeshObject } from '@/helpers/three-model-utils';
+import { getSceneMetersScale } from '@/helpers/zarch-static-entities';
 import {
   TILE,
   clampZoom,
@@ -54,7 +56,14 @@ import {
   createShipBullet,
   stepZarchBullet
 } from './zarch-bullets';
+import {
+  getEntityDragPosition,
+  getEntityHandleScale,
+  getEntityRotateYaw,
+  type EntityWorldPoint
+} from './zarch-entity-transform';
 import { wrapWorldCoordinate } from './zarch-minimap';
+import { getWorldAlignedNavigationAcceleration } from './zarch-navigation';
 import {
   PARTICLE_ASPECT_BY_KIND,
   PARTICLE_CAPACITY,
@@ -70,9 +79,11 @@ import {
   getPlayerShipExhaustOrigin,
   stepPlayerShip
 } from './zarch-player-ship';
+import { TAP_MAX_MOVEMENT_PX } from './zarch-pointer';
 import { loadZarchRuntimeEntityModel } from './zarch-runtime-entity-model';
 import {
   ZarchStaticEntities,
+  type EntityTransformPreview,
   type ZarchStaticEntitiesHandle
 } from './zarch-static-entities';
 
@@ -117,6 +128,73 @@ const raycastToTile = (
   return { gx, gz };
 };
 
+const getTileWorldPointFromLastRaycast = ({
+  intersections,
+  map,
+  runtime
+}: {
+  intersections: Intersection[];
+  map: MapMetadata;
+  runtime: ZarchRuntimeState;
+}): EntityWorldPoint | null => {
+  const hit = intersections[0];
+
+  if (!hit) {
+    return null;
+  }
+
+  const worldScale = getSceneMetersScale(map);
+
+  return {
+    x: (hit.point.x + runtime.camera.x) / worldScale,
+    z: (hit.point.z + runtime.camera.z) / worldScale
+  };
+};
+
+const raycastToHorizontalWorldPoint = ({
+  camera,
+  ndc,
+  plane,
+  planeY,
+  pointer,
+  raycaster,
+  rect,
+  runtime,
+  target,
+  worldScale
+}: {
+  camera: PerspectiveCamera;
+  ndc: Vector2;
+  plane: Plane;
+  planeY: number;
+  pointer: { clientX: number; clientY: number };
+  raycaster: Raycaster;
+  rect: DOMRect;
+  runtime: ZarchRuntimeState;
+  target: Vector3;
+  worldScale: number;
+}): EntityWorldPoint | null => {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+
+  ndc.set(
+    ((pointer.clientX - rect.left) / rect.width) * 2 - 1,
+    -(((pointer.clientY - rect.top) / rect.height) * 2 - 1)
+  );
+  raycaster.setFromCamera(ndc, camera);
+  plane.setComponents(0, 1, 0, -planeY);
+
+  const hit = raycaster.ray.intersectPlane(plane, target);
+
+  return hit
+    ? {
+        x: (hit.x + runtime.camera.x) / worldScale,
+        z: (hit.z + runtime.camera.z) / worldScale
+      }
+    : null;
+};
+
 type TreeMeshEntry = {
   pine: Group;
   round: Group;
@@ -144,6 +222,35 @@ type EntityEditSceneState = {
   tool: 'place' | 'select';
 };
 
+type EntityTransformDragState =
+  | {
+      active: boolean;
+      entity: StaticEntity;
+      kind: 'move';
+      planeY: number;
+      preview: EntityTransformPreview;
+      startClientX: number;
+      startClientY: number;
+      startEntityPosition: EntityWorldPoint;
+      startPointer: EntityWorldPoint;
+    }
+  | {
+      active: boolean;
+      entity: StaticEntity;
+      kind: 'rotate';
+      planeY: number;
+      preview: EntityTransformPreview;
+      startClientX: number;
+      startClientY: number;
+      startPointer: EntityWorldPoint;
+      startScale: number;
+      startYaw: number;
+    }
+  | {
+      kind: 'camera';
+      lastClientX: number;
+    };
+
 type ZarchSceneProps = {
   editEnabled: boolean;
   editorMode: EditorMode;
@@ -151,12 +258,21 @@ type ZarchSceneProps = {
   inputRef: RefObject<ZarchInputState>;
   map: MapMetadata;
   onEditTileActivate: (tileX: number, tileZ: number, shiftKey: boolean) => void;
+  onEditTileBlankActivate: () => void;
   onEditTileHover: (tile: { tileX: number; tileZ: number } | null) => void;
   onEditTileSelectionStart: (tileX: number, tileZ: number) => void;
   onEditTileSelectionUpdate: (tileX: number, tileZ: number) => void;
   onEntityHover: (entityId: string | null) => void;
+  onEntityMove: (
+    entity: StaticEntity,
+    position: StaticEntity['position']
+  ) => void;
   onEntityPlace: (worldX: number, worldZ: number) => void;
   onEntitySelect: (entityId: string | null) => void;
+  onEntityTransform: (
+    entity: StaticEntity,
+    transform: { scale: number; yaw: number }
+  ) => void;
   previewHaloTiles: { tileX: number; tileZ: number }[];
   runtimeRef: RefObject<ZarchRuntimeState>;
   selectedHeightPlane: number | null;
@@ -172,6 +288,16 @@ const isCodePressed = (
   code: string,
   fallbackKey?: string
 ) => input.codes[code] || (fallbackKey ? input.keys[fallbackKey] : false);
+
+const hasMovedBeyondEntityDragThreshold = (
+  dragState: Extract<EntityTransformDragState, { kind: 'move' | 'rotate' }>,
+  pointer: { clientX: number; clientY: number }
+) => {
+  const dx = pointer.clientX - dragState.startClientX;
+  const dy = pointer.clientY - dragState.startClientY;
+
+  return dx * dx + dy * dy > TAP_MAX_MOVEMENT_PX * TAP_MAX_MOVEMENT_PX;
+};
 
 const clampOrWrapFocus = ({
   terrain,
@@ -624,7 +750,7 @@ const setObjectClippingPlanes = (
   clipShadows: boolean
 ) => {
   object.traverse(child => {
-    if (!(child instanceof Mesh)) {
+    if (!isMeshObject(child)) {
       return;
     }
 
@@ -634,8 +760,8 @@ const setObjectClippingPlanes = (
 
     materials.forEach(material => {
       const target = material as Material & {
-        clipShadows?: boolean;
         clippingPlanes?: Plane[] | null;
+        clipShadows?: boolean;
       };
 
       target.clippingPlanes = clippingPlanes;
@@ -663,12 +789,15 @@ export const ZarchScene = ({
   inputRef,
   map,
   onEditTileActivate,
+  onEditTileBlankActivate,
   onEditTileHover,
   onEditTileSelectionStart,
   onEditTileSelectionUpdate,
   onEntityHover,
+  onEntityMove,
   onEntityPlace,
   onEntitySelect,
+  onEntityTransform,
   previewHaloTiles,
   runtimeRef,
   selectedHeightPlane,
@@ -679,10 +808,16 @@ export const ZarchScene = ({
     null
   );
   const entityPlacementPreviewRef = useRef<{
+    archetypeId: string;
+    assetVersionId: string;
+    valid: boolean;
     worldX: number;
     worldZ: number;
-    valid: boolean;
   } | null>(null);
+  const entityLandscapeCursorRef = useRef<EntityWorldPoint | null>(null);
+  const entityTransformDragRef = useRef<EntityTransformDragState | null>(null);
+  const entityTransformPreviewRef = useRef<EntityTransformPreview | null>(null);
+  const terrainCameraDragRef = useRef<{ lastClientX: number } | null>(null);
   const configRef = useSceneConfigRef();
   const ambientIntensity = useSceneConfigValue('ambientIntensity');
   const ambientRef = useRef<AmbientLight>(null);
@@ -697,17 +832,17 @@ export const ZarchScene = ({
   const shadowBias = useSceneConfigValue('shadowBias');
   const shadowMapSize = useSceneConfigValue('shadowMapSize');
   const viewRadiusBase = useSceneConfigValue('viewRadiusBase');
-  const forwardRef = useRef(new Vector3());
   const intersectionsRef = useRef<Intersection[]>([]);
   const bulletDummyRef = useRef(new Object3D());
   const particleDummyRef = useRef(new Object3D());
   const particleShadowDummyRef = useRef(new Object3D());
   const particleNdcRef = useRef(new Vector2());
+  const pointerPlaneRef = useRef(new Plane(new Vector3(0, 1, 0), 0));
+  const pointerPlaneHitRef = useRef(new Vector3());
   const particleRaycasterRef = useRef(new Raycaster());
   const particleSystemRef = useRef(createParticleSystemState());
   const respawnCameraBlendSecondsRef = useRef(0);
   const poolsRef = useRef<ScenePools | null>(null);
-  const rightRef = useRef(new Vector3());
   const shipGroupRef = useRef<Group>(null);
   const worldRef = useRef<Group>(null);
   const shipRuntimeEntityQuery = useQuery({
@@ -821,8 +956,6 @@ export const ZarchScene = ({
     const input = inputRef.current;
     const pools = poolsRef.current;
     const dt = Math.min(delta, 0.05);
-    const forward = forwardRef.current;
-    const right = rightRef.current;
 
     if (!camera || !pools) {
       return;
@@ -867,36 +1000,7 @@ export const ZarchScene = ({
     );
 
     if (runtime.mode === 'navigation') {
-      forward.set(
-        -Math.sin(runtime.navigation.yaw),
-        0,
-        -Math.cos(runtime.navigation.yaw)
-      );
-      right.set(
-        Math.cos(runtime.navigation.yaw),
-        0,
-        -Math.sin(runtime.navigation.yaw)
-      );
-
-      let ax = 0;
-      let az = 0;
-
-      if (input.keys.ArrowUp || input.keys.w || input.keys.W) {
-        ax -= forward.x;
-        az -= forward.z;
-      }
-      if (input.keys.ArrowDown || input.keys.s || input.keys.S) {
-        ax += forward.x;
-        az += forward.z;
-      }
-      if (input.keys.ArrowLeft || input.keys.a || input.keys.A) {
-        ax += right.x;
-        az += right.z;
-      }
-      if (input.keys.ArrowRight || input.keys.d || input.keys.D) {
-        ax -= right.x;
-        az -= right.z;
-      }
+      const { ax, az } = getWorldAlignedNavigationAcceleration(input);
 
       runtime.navigation.velX += ax * 400 * dt;
       runtime.navigation.velZ += az * 400 * dt;
@@ -1307,7 +1411,7 @@ export const ZarchScene = ({
         pools.root,
         clipPlanes,
         haloHighlightIndex,
-        0xff_b347
+        0xff_b3_47
       );
 
       if (
@@ -1345,57 +1449,215 @@ export const ZarchScene = ({
     clipPlanes[3].setComponents(0, 0, -1, clipRadius);
 
     if (editEnabled && editorMode === 'entities' && input.hoverPointer) {
-      // Entity mode hover: raycast entities for hover, terrain for placement preview
       const rect = state.gl.domElement.getBoundingClientRect();
       const handle = staticEntitiesHandleRef.current;
+      const entityHit = handle
+        ? handle.raycastToEntity(
+            input.hoverPointer,
+            rect,
+            particleRaycaster,
+            particleNdc,
+            camera,
+            intersections
+          )
+        : null;
+      const tile = raycastToTile(
+        input.hoverPointer,
+        rect,
+        particleRaycaster,
+        particleNdc,
+        camera,
+        pools.tilePool,
+        intersections
+      );
+      const tileWorldPoint =
+        tile && terrain.isTileLoaded(tile.gx, tile.gz)
+          ? getTileWorldPointFromLastRaycast({
+              intersections,
+              map,
+              runtime
+            })
+          : null;
+      const dragState = entityTransformDragRef.current;
 
-      if (handle && entityEditState?.tool === 'select') {
-        const entityHit = handle.raycastToEntity(
-          input.hoverPointer,
-          rect,
-          particleRaycaster,
-          particleNdc,
-          camera,
-          intersections
-        );
-        onEntityHover(entityHit?.entityId ?? null);
-      } else {
-        onEntityHover(null);
-      }
+      onEntityHover(entityHit?.entityId ?? null);
 
-      // Terrain hit for placement preview
-      if (
-        entityEditState?.tool === 'place' &&
-        entityEditState.activeArchetypeId
-      ) {
-        const tile = raycastToTile(
-          input.hoverPointer,
-          rect,
-          particleRaycaster,
-          particleNdc,
-          camera,
-          pools.tilePool,
-          intersections
-        );
-        if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
-          const hit = intersections[0];
-          if (hit) {
-            const worldScale = TILE / map.resolution.metersPerTile;
-            const worldX = (hit.point.x + runtime.camera.x) / worldScale;
-            const worldZ = (hit.point.z + runtime.camera.z) / worldScale;
-            entityPlacementPreviewRef.current = {
-              worldX,
-              worldZ,
-              valid: true
-            };
-          } else {
-            entityPlacementPreviewRef.current = null;
+      if (dragState) {
+        if (input.editBrushActive) {
+          if (
+            (dragState.kind === 'move' || dragState.kind === 'rotate') &&
+            !dragState.active &&
+            hasMovedBeyondEntityDragThreshold(dragState, input.hoverPointer)
+          ) {
+            dragState.active = true;
+            input.queuedEditTap = null;
+          }
+
+          if (dragState.kind === 'move' && dragState.active) {
+            const worldScale = getSceneMetersScale(map);
+            const currentPointer = raycastToHorizontalWorldPoint({
+              camera,
+              ndc: particleNdc,
+              plane: pointerPlaneRef.current,
+              planeY: dragState.planeY,
+              pointer: input.hoverPointer,
+              raycaster: particleRaycaster,
+              rect,
+              runtime,
+              target: pointerPlaneHitRef.current,
+              worldScale
+            });
+
+            if (currentPointer) {
+              dragState.preview = {
+                entityId: dragState.entity.id,
+                kind: 'move',
+                position: getEntityDragPosition({
+                  currentPointer,
+                  startEntityPosition: dragState.startEntityPosition,
+                  startPointer: dragState.startPointer
+                })
+              };
+            }
+          } else if (dragState.kind === 'rotate' && dragState.active) {
+            const worldScale = getSceneMetersScale(map);
+            const currentPointer = raycastToHorizontalWorldPoint({
+              camera,
+              ndc: particleNdc,
+              plane: pointerPlaneRef.current,
+              planeY: dragState.planeY,
+              pointer: input.hoverPointer,
+              raycaster: particleRaycaster,
+              rect,
+              runtime,
+              target: pointerPlaneHitRef.current,
+              worldScale
+            });
+
+            if (currentPointer) {
+              dragState.preview = {
+                entityId: dragState.entity.id,
+                kind: 'rotate',
+                scale: getEntityHandleScale({
+                  center: dragState.entity.position,
+                  currentPointer,
+                  startPointer: dragState.startPointer,
+                  startScale: dragState.startScale
+                }),
+                yaw: getEntityRotateYaw({
+                  center: dragState.entity.position,
+                  currentPointer,
+                  startPointer: dragState.startPointer,
+                  startYaw: dragState.startYaw
+                })
+              };
+            }
+          } else if (dragState.kind === 'camera') {
+            runtime.navigation.yaw -=
+              (input.hoverPointer.clientX - dragState.lastClientX) * 0.005;
+            runtime.camera.yaw = runtime.navigation.yaw;
+            dragState.lastClientX = input.hoverPointer.clientX;
           }
         } else {
-          entityPlacementPreviewRef.current = null;
+          entityTransformDragRef.current = null;
+          entityTransformPreviewRef.current = null;
+
+          if (
+            dragState.kind === 'move' &&
+            dragState.active &&
+            dragState.preview.kind === 'move'
+          ) {
+            input.queuedEditTap = null;
+            onEntityMove(dragState.entity, dragState.preview.position);
+          } else if (
+            dragState.kind === 'rotate' &&
+            dragState.active &&
+            dragState.preview.kind === 'rotate'
+          ) {
+            input.queuedEditTap = null;
+            onEntityTransform(dragState.entity, {
+              scale: dragState.preview.scale,
+              yaw: dragState.preview.yaw
+            });
+          }
         }
-      } else {
+
         entityPlacementPreviewRef.current = null;
+        entityLandscapeCursorRef.current = null;
+        entityTransformPreviewRef.current =
+          entityTransformDragRef.current === dragState &&
+          (dragState.kind === 'move' || dragState.kind === 'rotate')
+            ? dragState.preview
+            : null;
+      } else if (input.editBrushActive) {
+        if (entityHit?.kind === 'rotate-handle') {
+          entityTransformDragRef.current = {
+            active: false,
+            entity: entityHit.entity,
+            kind: 'rotate',
+            planeY: entityHit.sceneY,
+            preview: {
+              entityId: entityHit.entity.id,
+              kind: 'rotate',
+              scale: entityHit.entity.scale,
+              yaw: entityHit.entity.rotation.yaw
+            },
+            startClientX: input.hoverPointer.clientX,
+            startClientY: input.hoverPointer.clientY,
+            startPointer: entityHit.worldPoint,
+            startScale: entityHit.entity.scale,
+            startYaw: entityHit.entity.rotation.yaw
+          };
+          onEntitySelect(entityHit.entityId);
+          entityTransformPreviewRef.current =
+            entityTransformDragRef.current.preview;
+        } else if (entityHit?.kind === 'entity') {
+          entityTransformDragRef.current = {
+            active: false,
+            entity: entityHit.entity,
+            kind: 'move',
+            planeY: entityHit.sceneY,
+            preview: {
+              entityId: entityHit.entity.id,
+              kind: 'move',
+              position: entityHit.entity.position
+            },
+            startClientX: input.hoverPointer.clientX,
+            startClientY: input.hoverPointer.clientY,
+            startEntityPosition: entityHit.entity.position,
+            startPointer: entityHit.worldPoint
+          };
+          onEntitySelect(entityHit.entityId);
+          entityTransformPreviewRef.current =
+            entityTransformDragRef.current.preview;
+        } else if (!tileWorldPoint) {
+          entityTransformDragRef.current = {
+            kind: 'camera',
+            lastClientX: input.hoverPointer.clientX
+          };
+          input.queuedEditTap = null;
+          entityTransformPreviewRef.current = null;
+        }
+
+        entityPlacementPreviewRef.current = null;
+        entityLandscapeCursorRef.current = null;
+      } else {
+        entityTransformPreviewRef.current = null;
+        entityLandscapeCursorRef.current = entityHit ? null : tileWorldPoint;
+        entityPlacementPreviewRef.current =
+          !entityHit &&
+          tileWorldPoint &&
+          entityEditState?.tool === 'place' &&
+          entityEditState.activeArchetypeId &&
+          entityEditState.activeAssetVersionId
+            ? {
+                archetypeId: entityEditState.activeArchetypeId,
+                assetVersionId: entityEditState.activeAssetVersionId,
+                valid: true,
+                worldX: tileWorldPoint.x,
+                worldZ: tileWorldPoint.z
+              }
+            : null;
       }
 
       pools.tileHighlight.visible = false;
@@ -1416,13 +1678,30 @@ export const ZarchScene = ({
         validTile ? { tileX: validTile.gx, tileZ: validTile.gz } : null
       );
 
-      if (validTile && input.editBrushActive) {
-        if (input.editBrushStarted) {
-          onEditTileSelectionUpdate(validTile.gx, validTile.gz);
+      if (input.editBrushActive) {
+        const terrainCameraDrag = terrainCameraDragRef.current;
+
+        if (terrainCameraDrag) {
+          runtime.navigation.yaw -=
+            (input.hoverPointer.clientX - terrainCameraDrag.lastClientX) *
+            0.005;
+          runtime.camera.yaw = runtime.navigation.yaw;
+          terrainCameraDrag.lastClientX = input.hoverPointer.clientX;
+        } else if (validTile) {
+          if (input.editBrushStarted) {
+            onEditTileSelectionUpdate(validTile.gx, validTile.gz);
+          } else {
+            onEditTileSelectionStart(validTile.gx, validTile.gz);
+            input.editBrushStarted = true;
+          }
         } else {
-          onEditTileSelectionStart(validTile.gx, validTile.gz);
+          terrainCameraDragRef.current = {
+            lastClientX: input.hoverPointer.clientX
+          };
           input.editBrushStarted = true;
         }
+      } else {
+        terrainCameraDragRef.current = null;
       }
 
       if (validTile) {
@@ -1458,11 +1737,16 @@ export const ZarchScene = ({
         pools.tileHighlight.visible = false;
       }
     } else {
+      terrainCameraDragRef.current = null;
+
       if (editEnabled) {
         onEditTileHover(null);
         if (editorMode === 'entities') {
           onEntityHover(null);
           entityPlacementPreviewRef.current = null;
+          entityLandscapeCursorRef.current = null;
+          entityTransformDragRef.current = null;
+          entityTransformPreviewRef.current = null;
         }
       }
 
@@ -1475,15 +1759,18 @@ export const ZarchScene = ({
       input.queuedEditTap = null;
       const handle = staticEntitiesHandleRef.current;
 
-      if (entityEditState?.tool === 'select' && handle) {
-        const entityHit = handle.raycastToEntity(
-          tap,
-          rect,
-          particleRaycaster,
-          particleNdc,
-          camera,
-          intersections
-        );
+      const entityHit = handle
+        ? handle.raycastToEntity(
+            tap,
+            rect,
+            particleRaycaster,
+            particleNdc,
+            camera,
+            intersections
+          )
+        : null;
+
+      if (entityHit) {
         onEntitySelect(entityHit?.entityId ?? null);
       } else if (
         entityEditState?.tool === 'place' &&
@@ -1501,7 +1788,7 @@ export const ZarchScene = ({
         if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
           const hit = intersections[0];
           if (hit) {
-            const worldScale = TILE / map.resolution.metersPerTile;
+            const worldScale = getSceneMetersScale(map);
             const worldX = (hit.point.x + runtime.camera.x) / worldScale;
             const worldZ = (hit.point.z + runtime.camera.z) / worldScale;
             onEntityPlace(worldX, worldZ);
@@ -1524,6 +1811,8 @@ export const ZarchScene = ({
 
       if (tile && terrain.isTileLoaded(tile.gx, tile.gz)) {
         onEditTileActivate(tile.gx, tile.gz, tap.shiftKey);
+      } else {
+        onEditTileBlankActivate();
       }
     } else if (input.queuedTap) {
       const rect = state.gl.domElement.getBoundingClientRect();
@@ -1693,23 +1982,12 @@ export const ZarchScene = ({
           handleRef={staticEntitiesHandleRef}
           hoveredEntityId={entityEditState?.hoveredEntityId ?? null}
           map={map}
-          placementPreview={
-            entityEditState?.tool === 'place' &&
-            entityEditState.activeArchetypeId &&
-            entityEditState.activeAssetVersionId &&
-            entityPlacementPreviewRef.current
-              ? {
-                  archetypeId: entityEditState.activeArchetypeId,
-                  assetVersionId: entityEditState.activeAssetVersionId,
-                  valid: entityPlacementPreviewRef.current.valid,
-                  worldX: entityPlacementPreviewRef.current.worldX,
-                  worldZ: entityPlacementPreviewRef.current.worldZ
-                }
-              : null
-          }
+          placementPreviewRef={entityPlacementPreviewRef}
+          positionCursorRef={entityLandscapeCursorRef}
           runtimeRef={runtimeRef}
           selectedEntityId={entityEditState?.selectedEntityId ?? null}
           terrain={terrain}
+          transformPreviewRef={entityTransformPreviewRef}
         />
       </group>
       <ambientLight intensity={ambientIntensity} ref={ambientRef} />

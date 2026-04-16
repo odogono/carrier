@@ -89,6 +89,17 @@ export const getStaticEntityScenePosition = ({
   };
 };
 
+export const shouldUseStaticEntityInstancing = ({
+  entityEditEnabled,
+  instancedRuntimeAvailable,
+  instancingEligible
+}: {
+  entityEditEnabled: boolean;
+  instancedRuntimeAvailable: boolean;
+  instancingEligible: boolean;
+}) =>
+  instancingEligible && instancedRuntimeAvailable && !entityEditEnabled;
+
 export const getStaticEntityGrounding = ({
   assetVersion,
   entity,

@@ -17,7 +17,8 @@ import {
   collectChunkStaticEntities,
   getSceneMetersScale,
   getStaticEntityGrounding,
-  getStaticEntityScenePosition
+  getStaticEntityScenePosition,
+  shouldUseStaticEntityInstancing
 } from './zarch-static-entities';
 
 const map: MapMetadata = {
@@ -146,6 +147,24 @@ describe('zarch static entity helpers', () => {
       x: 12,
       z: 12
     });
+  });
+
+  test('uses individual entity objects in edit mode so visible entities stay pickable', () => {
+    expect(
+      shouldUseStaticEntityInstancing({
+        entityEditEnabled: false,
+        instancedRuntimeAvailable: true,
+        instancingEligible: true
+      })
+    ).toBe(true);
+
+    expect(
+      shouldUseStaticEntityInstancing({
+        entityEditEnabled: true,
+        instancedRuntimeAvailable: true,
+        instancingEligible: true
+      })
+    ).toBe(false);
   });
 
   test('grounds static entities on the center terrain height and applies yOffset', () => {

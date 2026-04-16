@@ -39,3 +39,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 apps/admin/playwright-report/
 apps/admin/test-results/
 apps/admin/blob-report/
+/apps/.data/assets

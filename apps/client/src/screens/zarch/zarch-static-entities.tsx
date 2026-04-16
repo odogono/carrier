@@ -8,6 +8,8 @@ import {
 
 import {
   BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   EdgesGeometry,
   Group,
   InstancedMesh,
@@ -17,7 +19,7 @@ import {
   MeshBasicMaterial,
   Object3D,
   Raycaster,
-  type BufferGeometry,
+  SphereGeometry,
   type Intersection,
   type Material,
   type PerspectiveCamera,
@@ -29,13 +31,15 @@ import { useFrame } from '@react-three/fiber';
 import type {
   AssetVersion,
   MapMetadata,
-  RuntimeMapChunk
+  RuntimeMapChunk,
+  StaticEntity
 } from 'carrier-contracts/types';
 
 import { apiUrl, client } from '@/helpers/api-link';
 import {
   createNormalizedModel,
   fetchAndParseGltf,
+  isMeshObject,
   setModelShadowProps,
   type NormalizedModel
 } from '@/helpers/three-model-utils';
@@ -46,7 +50,8 @@ import {
 import {
   collectChunkStaticEntities,
   getSceneMetersScale,
-  getStaticEntityGrounding
+  getStaticEntityGrounding,
+  shouldUseStaticEntityInstancing
 } from '@/helpers/zarch-static-entities';
 import {
   TILE,
@@ -86,7 +91,14 @@ type InstancedEntry = {
 };
 
 export type EntityRaycastResult = {
+  entity: StaticEntity;
   entityId: string;
+  kind: 'entity' | 'rotate-handle';
+  sceneY: number;
+  worldPoint: {
+    x: number;
+    z: number;
+  };
 };
 
 export type ZarchStaticEntitiesHandle = {
@@ -103,9 +115,27 @@ export type ZarchStaticEntitiesHandle = {
 type PlacementPreview = {
   archetypeId: string;
   assetVersionId: string;
+  valid: boolean;
   worldX: number;
   worldZ: number;
-  valid: boolean;
+} | null;
+
+export type EntityTransformPreview =
+  | {
+      entityId: string;
+      kind: 'move';
+      position: StaticEntity['position'];
+    }
+  | {
+      entityId: string;
+      kind: 'rotate';
+      scale: number;
+      yaw: number;
+    };
+
+type PositionCursor = {
+  x: number;
+  z: number;
 } | null;
 
 type ZarchStaticEntitiesProps = {
@@ -114,13 +144,19 @@ type ZarchStaticEntitiesProps = {
   handleRef: RefObject<ZarchStaticEntitiesHandle | null>;
   hoveredEntityId: string | null;
   map: MapMetadata;
-  placementPreview: PlacementPreview;
+  placementPreviewRef: RefObject<PlacementPreview>;
+  positionCursorRef: RefObject<PositionCursor>;
   runtimeRef: RefObject<ZarchRuntimeState>;
   selectedEntityId: string | null;
   terrain: ZarchTerrain;
+  transformPreviewRef: RefObject<EntityTransformPreview | null>;
 };
 
 const assetRuntimeCache = new Map<string, AssetRuntimeCacheEntry>();
+
+const isMeshBasicMaterial = (
+  material: Material
+): material is MeshBasicMaterial => material.type === 'MeshBasicMaterial';
 
 const getInstancedRuntime = (
   normalized: NormalizedModel
@@ -129,7 +165,7 @@ const getInstancedRuntime = (
 
   normalized.object.updateMatrixWorld(true);
   normalized.object.traverse(child => {
-    if (!(child instanceof Mesh) || Array.isArray(child.material)) {
+    if (!isMeshObject(child) || Array.isArray(child.material)) {
       return;
     }
 
@@ -239,13 +275,16 @@ const applyObjectClippingPlanes = (
 
 export const ZarchStaticEntities = ({
   clippingPlanes,
+  entityEditEnabled,
   handleRef,
   hoveredEntityId,
   map,
-  placementPreview,
+  placementPreviewRef,
+  positionCursorRef,
   runtimeRef,
   selectedEntityId,
-  terrain
+  terrain,
+  transformPreviewRef
 }: ZarchStaticEntitiesProps) => {
   const cloneEntriesRef = useRef(new Map<string, CloneEntry>());
   const instancedEntriesRef = useRef(new Map<string, InstancedEntry>());
@@ -253,8 +292,12 @@ export const ZarchStaticEntities = ({
   const rootRef = useRef<Group>(null);
   const selectionOutlineRef = useRef<LineSegments | null>(null);
   const hoverOutlineRef = useRef<LineSegments | null>(null);
+  const rotateHandleRef = useRef<Mesh | null>(null);
+  const rotateHandleLineRef = useRef<LineSegments | null>(null);
+  const positionCursorLineRef = useRef<LineSegments | null>(null);
   const previewMeshRef = useRef<Group | null>(null);
   const previewAssetVersionIdRef = useRef<string | null>(null);
+  const visibleEntitiesRef = useRef(new Map<string, StaticEntity>());
   const queryClient = useQueryClient();
   const configRef = useSceneConfigRef();
 
@@ -333,21 +376,48 @@ export const ZarchStaticEntities = ({
   // Set up selection/hover outlines
   useEffect(() => {
     const root = rootRef.current;
-    if (!root) return;
+    if (!root) {
+      return;
+    }
 
     const outlineMaterial = new LineBasicMaterial({
       clippingPlanes,
-      color: 0xf6d84a,
+      color: 0xf6_d8_4a,
       depthTest: false
     });
     const hoverMaterial = new LineBasicMaterial({
       clippingPlanes,
-      color: 0xd6bf68,
+      color: 0xd6_bf_68,
       depthTest: false,
       opacity: 0.6,
       transparent: true
     });
     const boxGeo = new EdgesGeometry(new BoxGeometry(1, 1, 1));
+    const handleMaterial = new MeshBasicMaterial({
+      clippingPlanes,
+      color: 0x9e_dc_ff,
+      depthTest: false
+    });
+    const handleLineMaterial = new LineBasicMaterial({
+      clippingPlanes,
+      color: 0x9e_dc_ff,
+      depthTest: false
+    });
+    const cursorMaterial = new LineBasicMaterial({
+      clippingPlanes,
+      color: 0xff_e5_8a,
+      depthTest: false,
+      opacity: 0.85,
+      transparent: true
+    });
+    const handleGeo = new SphereGeometry(2.6, 12, 8);
+    const handleLineGeo = new BufferGeometry();
+    const cursorGeo = new BufferGeometry();
+
+    handleLineGeo.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(6), 3)
+    );
 
     const selectionOutline = new LineSegments(boxGeo, outlineMaterial);
     selectionOutline.visible = false;
@@ -361,12 +431,45 @@ export const ZarchStaticEntities = ({
     root.add(hoverOutline);
     hoverOutlineRef.current = hoverOutline;
 
+    const rotateHandle = new Mesh(handleGeo, handleMaterial);
+    rotateHandle.renderOrder = 16;
+    rotateHandle.visible = false;
+    root.add(rotateHandle);
+    rotateHandleRef.current = rotateHandle;
+
+    const rotateHandleLine = new LineSegments(
+      handleLineGeo,
+      handleLineMaterial
+    );
+    rotateHandleLine.renderOrder = 16;
+    rotateHandleLine.visible = false;
+    root.add(rotateHandleLine);
+    rotateHandleLineRef.current = rotateHandleLine;
+
+    const cursorPositions = new Float32Array(12);
+    cursorGeo.setAttribute('position', new BufferAttribute(cursorPositions, 3));
+    cursorGeo.setIndex([0, 1, 2, 3]);
+    const positionCursorLine = new LineSegments(cursorGeo, cursorMaterial);
+    positionCursorLine.renderOrder = 16;
+    positionCursorLine.visible = false;
+    root.add(positionCursorLine);
+    positionCursorLineRef.current = positionCursorLine;
+
     return () => {
       selectionOutline.removeFromParent();
       hoverOutline.removeFromParent();
+      rotateHandle.removeFromParent();
+      rotateHandleLine.removeFromParent();
+      positionCursorLine.removeFromParent();
       outlineMaterial.dispose();
       hoverMaterial.dispose();
+      handleMaterial.dispose();
+      handleLineMaterial.dispose();
+      cursorMaterial.dispose();
       boxGeo.dispose();
+      handleGeo.dispose();
+      handleLineGeo.dispose();
+      cursorGeo.dispose();
     };
   }, [clippingPlanes]);
 
@@ -382,7 +485,9 @@ export const ZarchStaticEntities = ({
         camera,
         intersections
       ) => {
-        if (rect.width === 0 || rect.height === 0) return null;
+        if (rect.width === 0 || rect.height === 0) {
+          return null;
+        }
 
         ndc.set(
           ((pointer.clientX - rect.left) / rect.width) * 2 - 1,
@@ -391,25 +496,68 @@ export const ZarchStaticEntities = ({
         raycaster.setFromCamera(ndc, camera);
 
         const targets: Object3D[] = [];
+        const rotateHandle = rotateHandleRef.current;
+
+        if (rotateHandle?.visible) {
+          targets.push(rotateHandle);
+        }
+
         for (const entry of cloneEntriesRef.current.values()) {
           if (entry.object.visible) {
             targets.push(entry.object);
           }
         }
 
-        if (targets.length === 0) return null;
+        if (targets.length === 0) {
+          return null;
+        }
 
         intersections.length = 0;
         raycaster.intersectObjects(targets, true, intersections);
 
         const hit = intersections[0];
-        if (!hit) return null;
+        if (!hit) {
+          return null;
+        }
 
+        const runtime = runtimeRef.current;
+        const worldScale = getSceneMetersScale(map);
+        const hitWorldPoint = {
+          x: (hit.point.x + runtime.camera.x) / worldScale,
+          z: (hit.point.z + runtime.camera.z) / worldScale
+        };
         let current: Object3D | null = hit.object;
         while (current) {
+          const rotateHandleEntityId = current.userData.entityRotateHandleId as
+            | string
+            | undefined;
+          if (rotateHandleEntityId) {
+            const entity = visibleEntitiesRef.current.get(rotateHandleEntityId);
+
+            return entity
+              ? {
+                  entity,
+                  entityId: rotateHandleEntityId,
+                  kind: 'rotate-handle',
+                  sceneY: hit.point.y,
+                  worldPoint: hitWorldPoint
+                }
+              : null;
+          }
+
           const entityId = current.userData.entityId as string | undefined;
           if (entityId) {
-            return { entityId };
+            const entity = visibleEntitiesRef.current.get(entityId);
+
+            return entity
+              ? {
+                  entity,
+                  entityId,
+                  kind: 'entity',
+                  sceneY: hit.point.y,
+                  worldPoint: hitWorldPoint
+                }
+              : null;
           }
           current = current.parent;
         }
@@ -417,7 +565,7 @@ export const ZarchStaticEntities = ({
         return null;
       }
     }),
-    []
+    [map, runtimeRef]
   );
 
   useFrame(() => {
@@ -427,6 +575,7 @@ export const ZarchStaticEntities = ({
       return;
     }
 
+    const transformPreview = transformPreviewRef.current;
     const runtime = runtimeRef.current;
     const config = configRef.current;
     const { viewRadius } = getLandscapeViewMetrics({
@@ -508,15 +657,29 @@ export const ZarchStaticEntities = ({
     const instanceGroups = new Map<
       string,
       Array<{
+        scale: number;
         x: number;
         y: number;
         yaw: number;
         z: number;
-        scale: number;
       }>
     >();
+    visibleEntitiesRef.current.clear();
 
     for (const entity of collectChunkStaticEntities(visibleChunks)) {
+      const renderEntity: StaticEntity =
+        transformPreview?.entityId === entity.id
+          ? transformPreview.kind === 'move'
+            ? {
+                ...entity,
+                position: transformPreview.position
+              }
+            : {
+                ...entity,
+                rotation: { yaw: transformPreview.yaw },
+                scale: transformPreview.scale
+              }
+          : entity;
       const archetype = archetypesById.get(entity.archetypeId);
       if (!archetype) {
         continue;
@@ -527,8 +690,8 @@ export const ZarchStaticEntities = ({
         continue;
       }
 
-      const sceneX = entity.position.x * worldScale;
-      const sceneZ = entity.position.z * worldScale;
+      const sceneX = renderEntity.position.x * worldScale;
+      const sceneZ = renderEntity.position.z * worldScale;
 
       if (
         Math.abs(sceneX - runtime.camera.x) > maxDistance ||
@@ -539,7 +702,7 @@ export const ZarchStaticEntities = ({
 
       const grounding = getStaticEntityGrounding({
         assetVersion,
-        entity,
+        entity: renderEntity,
         map,
         terrain
       });
@@ -552,15 +715,21 @@ export const ZarchStaticEntities = ({
         continue;
       }
 
-      const scale = entity.scale * worldScale;
+      const scale = renderEntity.scale * worldScale;
 
-      if (assetVersion.instancingEligible && assetRuntime.runtime.instanced) {
+      if (
+        shouldUseStaticEntityInstancing({
+          entityEditEnabled,
+          instancedRuntimeAvailable: Boolean(assetRuntime.runtime.instanced),
+          instancingEligible: assetVersion.instancingEligible
+        })
+      ) {
         const batch = instanceGroups.get(assetVersion.id) ?? [];
         batch.push({
           scale,
           x: sceneX,
           y: grounding.effectiveY,
-          yaw: (-entity.rotation.yaw * Math.PI) / 180,
+          yaw: (-renderEntity.rotation.yaw * Math.PI) / 180,
           z: sceneZ
         });
         instanceGroups.set(assetVersion.id, batch);
@@ -591,12 +760,13 @@ export const ZarchStaticEntities = ({
       cloneEntry.object.position.set(sceneX, grounding.effectiveY, sceneZ);
       cloneEntry.object.rotation.set(
         0,
-        (-entity.rotation.yaw * Math.PI) / 180,
+        (-renderEntity.rotation.yaw * Math.PI) / 180,
         0
       );
       cloneEntry.object.scale.set(scale, scale, scale);
       cloneEntry.object.visible = true;
       visibleCloneIds.add(entity.id);
+      visibleEntitiesRef.current.set(entity.id, renderEntity);
     }
 
     for (const [entityId, cloneEntry] of cloneEntriesRef.current) {
@@ -604,6 +774,8 @@ export const ZarchStaticEntities = ({
         continue;
       }
 
+      // Three scene objects are mutable render resources owned by this ref.
+      // eslint-disable-next-line react-hooks/immutability
       cloneEntry.object.visible = false;
     }
 
@@ -670,6 +842,8 @@ export const ZarchStaticEntities = ({
         continue;
       }
 
+      // Three scene objects are mutable render resources owned by this ref.
+      // eslint-disable-next-line react-hooks/immutability
       instancedEntry.mesh.count = 0;
       instancedEntry.mesh.visible = false;
     }
@@ -677,19 +851,21 @@ export const ZarchStaticEntities = ({
     // Selection/hover outlines
     const selectionOutline = selectionOutlineRef.current;
     const hoverOutline = hoverOutlineRef.current;
+    const rotateHandle = rotateHandleRef.current;
+    const rotateHandleLine = rotateHandleLineRef.current;
+    const positionCursorLine = positionCursorLineRef.current;
+    const selectedEntry = selectedEntityId
+      ? cloneEntriesRef.current.get(selectedEntityId)
+      : null;
 
     if (selectionOutline) {
-      const selEntry = selectedEntityId
-        ? cloneEntriesRef.current.get(selectedEntityId)
-        : null;
-
-      if (selEntry?.object.visible) {
-        const pos = selEntry.object.position;
-        const scl = selEntry.object.scale;
+      if (selectedEntry?.object.visible) {
+        const pos = selectedEntry.object.position;
+        const scl = selectedEntry.object.scale;
         selectionOutline.position.copy(pos);
         selectionOutline.position.y += scl.y * 0.5;
         selectionOutline.scale.set(scl.x * 1.1, scl.y * 1.1, scl.z * 1.1);
-        selectionOutline.rotation.copy(selEntry.object.rotation);
+        selectionOutline.rotation.copy(selectedEntry.object.rotation);
         selectionOutline.visible = true;
       } else {
         selectionOutline.visible = false;
@@ -715,8 +891,59 @@ export const ZarchStaticEntities = ({
       }
     }
 
+    if (rotateHandle && rotateHandleLine) {
+      if (selectedEntry?.object.visible && selectedEntityId) {
+        const pos = selectedEntry.object.position;
+        const scl = selectedEntry.object.scale;
+        const yaw = selectedEntry.object.rotation.y;
+        const handleDistance = Math.max(scl.x, scl.z) * 3 + 5;
+        const handleY = pos.y + Math.max(scl.y * 0.75, 3);
+        const handleX = pos.x + Math.sin(yaw) * handleDistance;
+        const handleZ = pos.z + Math.cos(yaw) * handleDistance;
+        const linePositions = rotateHandleLine.geometry.attributes
+          .position as BufferAttribute;
+
+        rotateHandle.position.set(handleX, handleY, handleZ);
+        rotateHandle.userData.entityRotateHandleId = selectedEntityId;
+        rotateHandle.visible = true;
+        linePositions.setXYZ(0, pos.x, handleY, pos.z);
+        linePositions.setXYZ(1, handleX, handleY, handleZ);
+        linePositions.needsUpdate = true;
+        rotateHandleLine.geometry.computeBoundingSphere();
+        rotateHandleLine.visible = true;
+      } else {
+        rotateHandle.visible = false;
+        delete rotateHandle.userData.entityRotateHandleId;
+        rotateHandleLine.visible = false;
+      }
+    }
+
+    if (positionCursorLine) {
+      const positionCursor = positionCursorRef.current;
+
+      if (positionCursor) {
+        const cursorSceneX = positionCursor.x * worldScale;
+        const cursorSceneZ = positionCursor.z * worldScale;
+        const cursorY =
+          (terrain.sampleHeightAtWorld(cursorSceneX, cursorSceneZ) ?? 0) + 0.5;
+        const cursorSize = 3.6;
+        const positions = positionCursorLine.geometry.attributes
+          .position as BufferAttribute;
+
+        positions.setXYZ(0, cursorSceneX - cursorSize, cursorY, cursorSceneZ);
+        positions.setXYZ(1, cursorSceneX + cursorSize, cursorY, cursorSceneZ);
+        positions.setXYZ(2, cursorSceneX, cursorY, cursorSceneZ - cursorSize);
+        positions.setXYZ(3, cursorSceneX, cursorY, cursorSceneZ + cursorSize);
+        positions.needsUpdate = true;
+        positionCursorLine.geometry.computeBoundingSphere();
+        positionCursorLine.visible = true;
+      } else {
+        positionCursorLine.visible = false;
+      }
+    }
+
     // Placement preview ghost
-    const preview = placementPreview;
+    const preview = placementPreviewRef.current;
     const previewGroup = previewMeshRef.current;
 
     if (preview && root) {
@@ -734,13 +961,13 @@ export const ZarchStaticEntities = ({
 
           const ghost = assetRuntime.runtime.normalized.object.clone(true);
           ghost.traverse((child: Object3D) => {
-            if (child instanceof Mesh) {
+            if (isMeshObject(child)) {
               child.material = new MeshBasicMaterial({
                 clippingPlanes,
-                color: preview.valid ? 0x66ff66 : 0xff6666,
+                color: preview.valid ? 0x66_ff_66 : 0xff_66_66,
+                depthWrite: false,
                 opacity: 0.4,
-                transparent: true,
-                depthWrite: false
+                transparent: true
               });
             }
           });
@@ -764,7 +991,7 @@ export const ZarchStaticEntities = ({
                 : null;
               return (
                 av ?? {
-                  footprint: { widthMeters: 1, depthMeters: 1 },
+                  footprint: { depthMeters: 1, widthMeters: 1 },
                   maxHeightDeltaMeters: 100
                 }
               );
@@ -790,10 +1017,10 @@ export const ZarchStaticEntities = ({
           const isValid = grounding ? grounding.valid : false;
           ghost.traverse((child: Object3D) => {
             if (
-              child instanceof Mesh &&
-              child.material instanceof MeshBasicMaterial
+              isMeshObject(child) &&
+              isMeshBasicMaterial(child.material as Material)
             ) {
-              child.material.color.set(isValid ? 0x66ff66 : 0xff6666);
+              child.material.color.set(isValid ? 0x66_ff_66 : 0xff_66_66);
             }
           });
 

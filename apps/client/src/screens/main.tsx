@@ -12,13 +12,22 @@ import { Canvas } from '@react-three/fiber';
 
 import {
   isFiniteMap,
+  type ArchetypeCategory,
   type AssetVersion,
   type MapMetadata,
+  type RuntimeMapChunk,
   type StaticEntity,
   type ZarchTileEditConfig
 } from 'carrier-contracts/types';
 import { Provider as JotaiProvider } from 'jotai';
-import { Leva, LevaPanel, button, useControls, useCreateStore } from 'leva';
+import {
+  Leva,
+  LevaPanel,
+  button,
+  folder,
+  useControls,
+  useCreateStore
+} from 'leva';
 import { createLog } from 'odgn-ts-helpers/log';
 
 import { palette } from '@/components/leva-palette-plugin';
@@ -39,12 +48,12 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
 import { useZarchRuntime } from './zarch/use-zarch-runtime';
-import { ZarchEntityCatalog } from './zarch/zarch-entity-catalog';
 import {
   createZarchEntityEditState,
-  reduceZarchEntityEditState
+  reduceZarchEntityEditState,
+  type ZarchEntityEditTool
 } from './zarch/zarch-entity-edit';
-import { ZarchEntityEditHud } from './zarch/zarch-entity-edit-hud';
+import { normalizeEntityYaw } from './zarch/zarch-entity-transform';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
@@ -69,9 +78,13 @@ const log = createLog('Main');
 
 ensurePlaneToArrayCompat();
 
+type EditorMode = 'terrain' | 'entities';
+
 type LevaUiState = {
+  catalog: LevaPanelUiState;
   collapsed: boolean;
   edit: LevaPanelUiState;
+  entity: LevaPanelUiState;
   folderState: DevSceneControlFolderState;
   position: LevaPanelUiState['position'];
 };
@@ -90,11 +103,14 @@ const DEFAULT_LEVA_PANEL_UI_STATE: LevaPanelUiState = {
 };
 
 const DEFAULT_LEVA_UI_STATE: LevaUiState = {
+  catalog: DEFAULT_LEVA_PANEL_UI_STATE,
   collapsed: false,
   edit: DEFAULT_LEVA_PANEL_UI_STATE,
+  entity: DEFAULT_LEVA_PANEL_UI_STATE,
   folderState: {},
   position: {}
 };
+const EMPTY_LEVA_SCHEMA = {};
 
 const FALLBACK_TILE_EDIT_CONFIG: ZarchTileEditConfig = {
   heightStepMeters: 4,
@@ -102,9 +118,45 @@ const FALLBACK_TILE_EDIT_CONFIG: ZarchTileEditConfig = {
   palette: [],
   tileTypes: [{ id: 'normal', label: 'Normal' }]
 };
+const CATALOG_NONE_VALUE = '__none__';
+const CATALOG_CATEGORIES: Array<{
+  label: string;
+  value: ArchetypeCategory | 'all';
+}> = [
+  { label: 'All', value: 'all' },
+  { label: 'Building', value: 'building' },
+  { label: 'Landmark', value: 'landmark' },
+  { label: 'Industrial', value: 'industrial' },
+  { label: 'Prop', value: 'natural-prop' }
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
+
+const toEntityEditErrorMessage = (error: unknown, fallback: string) => {
+  const message = error instanceof Error ? error.message : fallback;
+  return message.includes('Expected revision')
+    ? 'Revision conflict: reload and retry.'
+    : message;
+};
+
+export const getEditPanelVisibility = ({
+  catalogOpen,
+  editEnabled,
+  editorMode
+}: {
+  catalogOpen: boolean;
+  editEnabled: boolean;
+  editorMode: EditorMode;
+}) => {
+  const entity = editEnabled && editorMode === 'entities';
+
+  return {
+    catalog: entity && catalogOpen,
+    edit: true,
+    entity
+  };
+};
 
 const readLevaPanelUiState = (
   value: unknown,
@@ -151,11 +203,21 @@ const readLevaUiState = (): LevaUiState => {
       parsed.edit,
       DEFAULT_LEVA_PANEL_UI_STATE
     );
+    const catalogState = readLevaPanelUiState(
+      parsed.catalog,
+      DEFAULT_LEVA_PANEL_UI_STATE
+    );
+    const entityState = readLevaPanelUiState(
+      parsed.entity,
+      DEFAULT_LEVA_PANEL_UI_STATE
+    );
     const viewState = readLevaPanelUiState(parsed, DEFAULT_LEVA_UI_STATE);
 
     return {
+      catalog: catalogState,
       collapsed: viewState.collapsed,
       edit: editState,
+      entity: entityState,
       folderState: Object.fromEntries(
         LEVA_CONTROL_FOLDERS.map(folderName => [
           folderName,
@@ -206,9 +268,7 @@ const MainInner = () => {
     undefined,
     createZarchEntityEditState
   );
-  const [editorMode, setEditorMode] = useState<'terrain' | 'entities'>(
-    'terrain'
-  );
+  const [editorMode, setEditorMode] = useState<EditorMode>('terrain');
   const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
     setContainerElement(node);
   }, []);
@@ -224,7 +284,6 @@ const MainInner = () => {
     useZarchRuntime({
       containerElement,
       editEnabled: editState.enabled,
-      editTool: editState.tool,
       editorMode,
       entityEditCallbacksRef
     });
@@ -232,7 +291,9 @@ const MainInner = () => {
   const showHud = useSceneConfigValue('showHud');
   const showMinimap = useSceneConfigValue('showMinimap');
   const activeEditConfig = editConfig ?? FALLBACK_TILE_EDIT_CONFIG;
+  const catalogLevaStore = useCreateStore();
   const editLevaStore = useCreateStore();
+  const entityLevaStore = useCreateStore();
   const activeTerrain = useMemo(() => {
     if (!terrain || !editConfig) {
       return terrain;
@@ -359,6 +420,26 @@ const MainInner = () => {
     [updateLevaUiState]
   );
 
+  const handleCatalogLevaCollapsedChange = useCallback(
+    (collapsed: boolean) => {
+      updateLevaUiState(current => ({
+        ...current,
+        catalog: { ...current.catalog, collapsed }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleEntityLevaCollapsedChange = useCallback(
+    (collapsed: boolean) => {
+      updateLevaUiState(current => ({
+        ...current,
+        entity: { ...current.entity, collapsed }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
   const handleLevaDrag = useCallback(
     (position: { x?: number; y?: number }) => {
       updateLevaUiState(current => ({
@@ -366,6 +447,38 @@ const MainInner = () => {
         position: {
           x: position.x,
           y: position.y
+        }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleCatalogLevaDrag = useCallback(
+    (position: { x?: number; y?: number }) => {
+      updateLevaUiState(current => ({
+        ...current,
+        catalog: {
+          ...current.catalog,
+          position: {
+            x: position.x,
+            y: position.y
+          }
+        }
+      }));
+    },
+    [updateLevaUiState]
+  );
+
+  const handleEntityLevaDrag = useCallback(
+    (position: { x?: number; y?: number }) => {
+      updateLevaUiState(current => ({
+        ...current,
+        entity: {
+          ...current.entity,
+          position: {
+            x: position.x,
+            y: position.y
+          }
         }
       }));
     },
@@ -518,7 +631,7 @@ const MainInner = () => {
   );
 
   const handleEditTileActivate = useCallback(
-    (tileX: number, tileZ: number, shiftKey: boolean) => {
+    (tileX: number, tileZ: number, _shiftKey: boolean) => {
       if (!terrain || !editConfig) {
         return;
       }
@@ -530,6 +643,11 @@ const MainInner = () => {
     },
     [containerElement, editConfig, terrain]
   );
+
+  const handleEditTileBlankActivate = useCallback(() => {
+    dispatchEdit({ type: 'clear-height-selection' });
+    containerElement?.focus();
+  }, [containerElement]);
 
   const applySelectionToolOverride = useCallback(
     ({
@@ -562,15 +680,15 @@ const MainInner = () => {
         current: tileEdits[0]!.current,
         selectedColorIndexOverride,
         selectedTypeIdOverride,
+        tileEdits,
+        tileX: anchorTile.tileX,
+        tileZ: anchorTile.tileZ,
         toolOverride:
           selectedColorIndexOverride !== undefined
             ? 'set-color'
             : selectedTypeIdOverride !== undefined
               ? 'set-type'
               : undefined,
-        tileEdits,
-        tileX: anchorTile.tileX,
-        tileZ: anchorTile.tileZ,
         type: 'apply-tool'
       });
       containerElement?.focus();
@@ -579,7 +697,6 @@ const MainInner = () => {
       containerElement,
       editState.edits,
       editState.selectedTile,
-      editState.tool,
       selectedHeightTiles,
       terrain
     ]
@@ -600,7 +717,7 @@ const MainInner = () => {
         });
       }
     },
-    [applySelectionToolOverride, editState.tool, selectedHeightTiles.length]
+    [applySelectionToolOverride, selectedHeightTiles.length]
   );
 
   const applyHeightSelection = useCallback(
@@ -611,8 +728,8 @@ const MainInner = () => {
 
       const result = computeAreaHeightEdits({
         currentPlaneHeight: editState.lastSolvedPlaneHeight,
-        edits: editState.edits,
         editConfig,
+        edits: editState.edits,
         mode,
         selection: selectedHeightTiles,
         terrain
@@ -644,6 +761,7 @@ const MainInner = () => {
       containerElement,
       editConfig,
       editState.edits,
+      editState.lastSolvedPlaneHeight,
       editState.selectedTile,
       selectedHeightTiles,
       terrain
@@ -697,7 +815,6 @@ const MainInner = () => {
     }
   }, [editState, map, queryClient]);
 
-  // --- Entity editing: archetype catalog query ---
   const archetypeCatalogQuery = useQuery({
     enabled: editorMode === 'entities' && editState.enabled,
     queryFn: () => client.maps.listArchetypes({ status: 'active' }),
@@ -705,7 +822,10 @@ const MainInner = () => {
     staleTime: 60_000
   });
 
-  const catalogArchetypes = archetypeCatalogQuery.data ?? [];
+  const catalogArchetypes = useMemo(
+    () => archetypeCatalogQuery.data ?? [],
+    [archetypeCatalogQuery.data]
+  );
 
   const catalogAssetVersionIds = useMemo(
     () => Array.from(new Set(catalogArchetypes.map(a => a.assetVersionId))),
@@ -746,16 +866,82 @@ const MainInner = () => {
     () => new Set((referencedArchetypesQuery.data ?? []).map(a => a.id)),
     [referencedArchetypesQuery.data]
   );
+  const filteredCatalogArchetypes = useMemo(() => {
+    let result = catalogArchetypes;
 
-  // Find selected entity from chunks
+    if (entityEditState.catalogCategory) {
+      result = result.filter(
+        archetype => archetype.category === entityEditState.catalogCategory
+      );
+    }
+
+    if (entityEditState.catalogSearch.trim()) {
+      const search = entityEditState.catalogSearch.trim().toLowerCase();
+      result = result.filter(
+        archetype =>
+          archetype.name.toLowerCase().includes(search) ||
+          archetype.category.toLowerCase().includes(search) ||
+          archetype.tags.some(tag => tag.toLowerCase().includes(search))
+      );
+    }
+
+    return result;
+  }, [
+    catalogArchetypes,
+    entityEditState.catalogCategory,
+    entityEditState.catalogSearch
+  ]);
+  const catalogArchetypeOptions = useMemo(() => {
+    if (filteredCatalogArchetypes.length === 0) {
+      return {
+        'No matching archetypes': CATALOG_NONE_VALUE
+      };
+    }
+
+    return Object.fromEntries(
+      filteredCatalogArchetypes.map(archetype => {
+        const assetVersion = catalogAssetVersionsById.get(
+          archetype.assetVersionId
+        );
+        const footprint = assetVersion
+          ? ` ${assetVersion.footprint.widthMeters.toFixed(0)}x${assetVersion.footprint.depthMeters.toFixed(0)}m`
+          : '';
+        const used = referencedArchetypeIds.has(archetype.id)
+          ? ' (on map)'
+          : '';
+
+        return [
+          `${archetype.name}${used}${footprint} [${archetype.id}]`,
+          archetype.id
+        ];
+      })
+    );
+  }, [
+    catalogAssetVersionsById,
+    filteredCatalogArchetypes,
+    referencedArchetypeIds
+  ]);
+  const catalogCategoryValue = entityEditState.catalogCategory ?? 'all';
+  const catalogCategoryOptions = useMemo(
+    () =>
+      Object.fromEntries(
+        CATALOG_CATEGORIES.map(category => [category.label, category.value])
+      ),
+    []
+  );
+
   const selectedEntity = useMemo((): StaticEntity | null => {
-    if (!entityEditState.selectedEntityId || !map) return null;
+    if (!entityEditState.selectedEntityId || !map) {
+      return null;
+    }
 
-    const chunks: any[] = [];
+    const chunks: RuntimeMapChunk[] = [];
     queryClient
       .getQueriesData({ queryKey: ['map-chunk', map.id] })
       .forEach(([, data]) => {
-        if (data) chunks.push(data);
+        if (data) {
+          chunks.push(data as RuntimeMapChunk);
+        }
       });
 
     const entities = collectChunkStaticEntities(chunks);
@@ -764,18 +950,21 @@ const MainInner = () => {
     );
   }, [entityEditState.selectedEntityId, map, queryClient]);
 
-  // Active archetype's asset version ID for preview
-  const activeAssetVersionId = useMemo(() => {
-    if (!entityEditState.activeArchetypeId) return null;
-    const archetype = catalogArchetypes.find(
-      a => a.id === entityEditState.activeArchetypeId
+  const activeArchetype = useMemo(() => {
+    if (!entityEditState.activeArchetypeId) {
+      return null;
+    }
+    return (
+      catalogArchetypes.find(a => a.id === entityEditState.activeArchetypeId) ??
+      null
     );
-    return archetype?.assetVersionId ?? null;
-  }, [entityEditState.activeArchetypeId, catalogArchetypes]);
+  }, [catalogArchetypes, entityEditState.activeArchetypeId]);
+  const activeAssetVersionId = activeArchetype?.assetVersionId ?? null;
 
-  // --- Entity editing: invalidation helper ---
   const invalidateEntityQueries = useCallback(async () => {
-    if (!map) return;
+    if (!map) {
+      return;
+    }
     await Promise.all([
       queryClient.invalidateQueries({
         predicate: query =>
@@ -794,7 +983,6 @@ const MainInner = () => {
     ]);
   }, [map, queryClient]);
 
-  // --- Entity editing: mutation handlers ---
   const handlePlaceEntity = useCallback(
     async (worldX: number, worldZ: number) => {
       if (
@@ -805,8 +993,8 @@ const MainInner = () => {
         return;
       }
 
-      dispatchEntityEdit({ type: 'set-pending', action: 'Placing' });
-      dispatchEntityEdit({ type: 'set-error', error: null });
+      dispatchEntityEdit({ action: 'Placing', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
 
       try {
         const result = await client.maps.createStaticEntity({
@@ -822,21 +1010,17 @@ const MainInner = () => {
         });
 
         dispatchEntityEdit({
-          type: 'select-entity',
-          entityId: result.entity.id
+          entityId: result.entity.id,
+          type: 'select-entity'
         });
         await invalidateEntityQueries();
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to place entity';
         dispatchEntityEdit({
-          type: 'set-error',
-          error: message.includes('Expected revision')
-            ? 'Revision conflict: reload and retry.'
-            : message
+          error: toEntityEditErrorMessage(error, 'Failed to place entity'),
+          type: 'set-error'
         });
       } finally {
-        dispatchEntityEdit({ type: 'set-pending', action: null });
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
       }
     },
     [
@@ -853,12 +1037,11 @@ const MainInner = () => {
         return;
       }
 
-      dispatchEntityEdit({ type: 'set-pending', action: 'Rotating' });
-      dispatchEntityEdit({ type: 'set-error', error: null });
+      dispatchEntityEdit({ action: 'Rotating', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
 
       const yawDelta = direction === 'cw' ? 45 : -45;
-      const newYaw =
-        (((selectedEntity.rotation.yaw + yawDelta) % 360) + 360) % 360;
+      const newYaw = normalizeEntityYaw(selectedEntity.rotation.yaw + yawDelta);
 
       try {
         await client.maps.updateStaticEntity({
@@ -869,16 +1052,12 @@ const MainInner = () => {
         });
         await invalidateEntityQueries();
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to rotate entity';
         dispatchEntityEdit({
-          type: 'set-error',
-          error: message.includes('Expected revision')
-            ? 'Revision conflict: reload and retry.'
-            : message
+          error: toEntityEditErrorMessage(error, 'Failed to rotate entity'),
+          type: 'set-error'
         });
       } finally {
-        dispatchEntityEdit({ type: 'set-pending', action: null });
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
       }
     },
     [
@@ -887,6 +1066,71 @@ const MainInner = () => {
       map,
       selectedEntity
     ]
+  );
+
+  const handleMoveEntity = useCallback(
+    async (entity: StaticEntity, position: { x: number; z: number }) => {
+      if (!map || entityEditState.pendingAction) {
+        return;
+      }
+
+      dispatchEntityEdit({ action: 'Moving', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
+
+      try {
+        await client.maps.updateStaticEntity({
+          expectedRevision: map.revision,
+          id: entity.id,
+          mapId: map.id,
+          position
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        dispatchEntityEdit({
+          error: toEntityEditErrorMessage(error, 'Failed to move entity'),
+          type: 'set-error'
+        });
+      } finally {
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
+      }
+    },
+    [entityEditState.pendingAction, invalidateEntityQueries, map]
+  );
+
+  const handleSetEntityTransform = useCallback(
+    async (
+      entity: StaticEntity,
+      transform: {
+        scale: number;
+        yaw: number;
+      }
+    ) => {
+      if (!map || entityEditState.pendingAction) {
+        return;
+      }
+
+      dispatchEntityEdit({ action: 'Rotating', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
+
+      try {
+        await client.maps.updateStaticEntity({
+          expectedRevision: map.revision,
+          id: entity.id,
+          mapId: map.id,
+          rotation: { yaw: normalizeEntityYaw(transform.yaw) },
+          scale: transform.scale
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        dispatchEntityEdit({
+          error: toEntityEditErrorMessage(error, 'Failed to transform entity'),
+          type: 'set-error'
+        });
+      } finally {
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
+      }
+    },
+    [entityEditState.pendingAction, invalidateEntityQueries, map]
   );
 
   const handleSetEntityYOffset = useCallback(
@@ -907,14 +1151,11 @@ const MainInner = () => {
         });
         await invalidateEntityQueries();
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Failed to update entity height';
         dispatchEntityEdit({
-          error: message.includes('Expected revision')
-            ? 'Revision conflict: reload and retry.'
-            : message,
+          error: toEntityEditErrorMessage(
+            error,
+            'Failed to update entity height'
+          ),
           type: 'set-error'
         });
       } finally {
@@ -929,6 +1170,35 @@ const MainInner = () => {
     ]
   );
 
+  const handleSetEntityArchetype = useCallback(
+    async (entity: StaticEntity, archetypeId: string) => {
+      if (!map || entityEditState.pendingAction) {
+        return;
+      }
+
+      dispatchEntityEdit({ action: 'Updating archetype', type: 'set-pending' });
+      dispatchEntityEdit({ error: null, type: 'set-error' });
+
+      try {
+        await client.maps.updateStaticEntity({
+          archetypeId,
+          expectedRevision: map.revision,
+          id: entity.id,
+          mapId: map.id
+        });
+        await invalidateEntityQueries();
+      } catch (error) {
+        dispatchEntityEdit({
+          error: toEntityEditErrorMessage(error, 'Failed to change archetype'),
+          type: 'set-error'
+        });
+      } finally {
+        dispatchEntityEdit({ action: null, type: 'set-pending' });
+      }
+    },
+    [entityEditState.pendingAction, invalidateEntityQueries, map]
+  );
+
   const handleDeleteEntity = useCallback(async () => {
     if (
       !map ||
@@ -938,8 +1208,8 @@ const MainInner = () => {
       return;
     }
 
-    dispatchEntityEdit({ type: 'set-pending', action: 'Deleting' });
-    dispatchEntityEdit({ type: 'set-error', error: null });
+    dispatchEntityEdit({ action: 'Deleting', type: 'set-pending' });
+    dispatchEntityEdit({ error: null, type: 'set-error' });
 
     try {
       await client.maps.deleteStaticEntity({
@@ -950,16 +1220,12 @@ const MainInner = () => {
       dispatchEntityEdit({ type: 'clear-selection' });
       await invalidateEntityQueries();
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to delete entity';
       dispatchEntityEdit({
-        type: 'set-error',
-        error: message.includes('Expected revision')
-          ? 'Revision conflict: reload and retry.'
-          : message
+        error: toEntityEditErrorMessage(error, 'Failed to delete entity'),
+        type: 'set-error'
       });
     } finally {
-      dispatchEntityEdit({ type: 'set-pending', action: null });
+      dispatchEntityEdit({ action: null, type: 'set-pending' });
     }
   }, [
     entityEditState.pendingAction,
@@ -968,14 +1234,15 @@ const MainInner = () => {
     map
   ]);
 
-  // Entity edit callbacks for runtime keyboard shortcuts
   const entityEditCallbacks = useMemo(() => {
-    if (editorMode !== 'entities' || !editState.enabled) return null;
+    if (editorMode !== 'entities' || !editState.enabled) {
+      return null;
+    }
     return {
       catalogOpen: entityEditState.catalogOpen,
       onClearSelection: () => dispatchEntityEdit({ type: 'clear-selection' }),
       onCloseCatalog: () =>
-        dispatchEntityEdit({ type: 'set-catalog-open', open: false }),
+        dispatchEntityEdit({ open: false, type: 'set-catalog-open' }),
       onDeleteEntity: () => void handleDeleteEntity(),
       onRotateEntity: (direction: 'cw' | 'ccw') =>
         void handleRotateEntity(direction),
@@ -990,15 +1257,15 @@ const MainInner = () => {
     handleRotateEntity
   ]);
 
-  // Keep the ref in sync for the runtime keyboard handler
   entityEditCallbacksRef.current = entityEditCallbacks;
 
-  // Entity scene state for ZarchScene
   const entityEditSceneState = useMemo(() => {
-    if (editorMode !== 'entities' || !editState.enabled) return null;
+    if (editorMode !== 'entities' || !editState.enabled) {
+      return null;
+    }
     return {
       activeArchetypeId: entityEditState.activeArchetypeId,
-      activeAssetVersionId: activeAssetVersionId,
+      activeAssetVersionId,
       hoveredEntityId: entityEditState.hoveredEntityId,
       selectedEntityId: entityEditState.selectedEntityId,
       tool: entityEditState.tool
@@ -1013,17 +1280,16 @@ const MainInner = () => {
     entityEditState.tool
   ]);
 
-  // HUD handlers for entity mode
-  const handleSetEditorMode = useCallback((mode: 'terrain' | 'entities') => {
+  const handleSetEditorMode = useCallback((mode: EditorMode) => {
     setEditorMode(mode);
   }, []);
 
   const handleEntityHover = useCallback((entityId: string | null) => {
-    dispatchEntityEdit({ type: 'hover-entity', entityId });
+    dispatchEntityEdit({ entityId, type: 'hover-entity' });
   }, []);
 
   const handleEntitySelect = useCallback((entityId: string | null) => {
-    dispatchEntityEdit({ type: 'select-entity', entityId });
+    dispatchEntityEdit({ entityId, type: 'select-entity' });
   }, []);
 
   const handleEntityPlace = useCallback(
@@ -1035,17 +1301,27 @@ const MainInner = () => {
 
   const handleCatalogToggle = useCallback(() => {
     dispatchEntityEdit({
-      type: 'set-catalog-open',
-      open: !entityEditState.catalogOpen
+      open: !entityEditState.catalogOpen,
+      type: 'set-catalog-open'
     });
   }, [entityEditState.catalogOpen]);
 
+  const selectedEntityRef = useRef<StaticEntity | null>(selectedEntity);
+  selectedEntityRef.current = selectedEntity;
+  const handleSetEntityArchetypeRef = useRef(handleSetEntityArchetype);
+  handleSetEntityArchetypeRef.current = handleSetEntityArchetype;
+
   const handleSelectArchetype = useCallback((archetypeId: string) => {
-    dispatchEntityEdit({ type: 'set-active-archetype', archetypeId });
+    dispatchEntityEdit({ archetypeId, type: 'set-active-archetype' });
+
+    const entity = selectedEntityRef.current;
+    if (entity && entity.archetypeId !== archetypeId) {
+      void handleSetEntityArchetypeRef.current(entity, archetypeId);
+    }
   }, []);
 
   const handleSetEntityTool = useCallback((tool: 'place' | 'select') => {
-    dispatchEntityEdit({ type: 'set-tool', tool });
+    dispatchEntityEdit({ tool, type: 'set-tool' });
   }, []);
 
   useEffect(() => {
@@ -1059,8 +1335,8 @@ const MainInner = () => {
     }
 
     const preview = getAreaHeightPreview({
-      edits: editState.edits,
       editConfig,
+      edits: editState.edits,
       selection: selectedHeightTiles,
       terrain
     });
@@ -1078,28 +1354,26 @@ const MainInner = () => {
     terrain
   ]);
 
-  const [editControls, setEditControls] = useControls(
+  useControls(
     () => ({
-      enabled: {
-        label: 'Enabled',
-        onChange: (
-          value: boolean,
-          _path: string,
-          context: { initial: boolean }
-        ) => {
-          if (context.initial) {
-            return;
-          }
-
-          handleSetEditEnabled(value);
-        },
-        transient: false,
-        value: editState.enabled
+      [editState.enabled ? 'Exit Edit' : 'Enter Edit']: button(() =>
+        handleSetEditEnabled(!editState.enabled)
+      )
+    }),
+    { store: editLevaStore },
+    [editState.enabled, handleSetEditEnabled]
+  );
+  const [, setEditControls] = useControls(
+    () => ({
+      editStatus: {
+        disabled: true,
+        label: 'Edit',
+        value: editState.enabled ? 'On' : 'Off'
       },
-      tool: {
-        label: 'Tool',
+      mode: {
+        label: 'Mode',
         onChange: (
-          value: typeof editState.tool,
+          value: EditorMode,
           _path: string,
           context: { initial: boolean }
         ) => {
@@ -1107,154 +1381,198 @@ const MainInner = () => {
             return;
           }
 
-          dispatchEdit({
-            tool: value,
-            type: 'set-tool'
-          });
+          handleSetEditorMode(value);
         },
         options: {
-          Color: 'set-color',
-          Height: 'height',
-          Type: 'set-type'
+          Entities: 'entities',
+          Terrain: 'terrain'
         },
         transient: false,
-        value: editState.tool
-      },
-      selectedTypeId: {
-        label: 'Tile type',
-        onChange: (
-          value: string,
-          _path: string,
-          context: { initial: boolean }
-        ) => {
-          if (context.initial) {
-            return;
-          }
-
-          dispatchEdit({
-            selectedTypeId: value,
-            type: 'set-selected-type-id'
-          });
-
-          if (selectedHeightTiles.length > 0) {
-            applySelectionToolOverride({
-              selectedTypeIdOverride: value
-            });
-          }
-        },
-        options: typeOptions,
-        transient: false,
-        value: editState.selectedTypeId
-      },
-      selectedColorIndex: {
-        ...palette({
-          colors: paletteColors,
-          label: 'Palette',
-          onSelect: handlePaletteSelection,
-          selected: selectedColorValue
-        }),
-        onChange: (
-          value: string,
-          _path: string,
-          context: { initial: boolean }
-        ) => {
-          if (context.initial) {
-            return;
-          }
-
-          const selectedColorIndex = value === 'auto' ? null : Number(value);
-
-          dispatchEdit({
-            selectedColorIndex,
-            type: 'set-selected-color-index'
-          });
-
-          if (selectedHeightTiles.length > 0) {
-            applySelectionToolOverride({
-              selectedColorIndexOverride: selectedColorIndex
-            });
-          }
-        },
-        transient: false
-      },
-      Undo: button(() => dispatchEdit({ type: 'undo' }), {
-        disabled: !editState.canUndo
-      }),
-      Redo: button(() => dispatchEdit({ type: 'redo' }), {
-        disabled: !editState.canRedo
-      }),
-      Flatten: button(() => applyHeightSelection('flatten'), {
-        disabled:
-          editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      Raise: button(() => applyHeightSelection('raise'), {
-        disabled:
-          editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      Lower: button(() => applyHeightSelection('lower'), {
-        disabled:
-          editState.tool !== 'height' || selectedHeightTiles.length === 0
-      }),
-      ClearSelection: button(
-        () => dispatchEdit({ type: 'clear-height-selection' }),
-        {
-          disabled:
-            editState.tool !== 'height' || selectedHeightTiles.length === 0
-        }
-      ),
-      Save: button(() => void handleSaveTileEdits(), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      }),
-      Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
-        disabled: dirtyEditCount === 0 || isSavingEdits
-      }),
-      dirty: {
-        disabled: true,
-        label: 'Dirty tiles',
-        value: dirtyEditCount
-      },
-      heightSelection: {
-        disabled: true,
-        label: 'Selection',
-        value: selectedHeightTiles.length
-      },
-      haloCount: {
-        disabled: true,
-        label: 'Halo tiles',
-        value: previewHaloTiles.length
-      },
-      hoveredTile: {
-        disabled: true,
-        label: 'Tile',
-        value: inspectedTile
-          ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
-          : '--'
-      },
-      inspectedType: {
-        disabled: true,
-        label: 'Current type',
-        value: inspectedTile?.typeId ?? '--'
-      },
-      inspectedHeightSteps: {
-        disabled: true,
-        label: 'Height steps',
-        value: inspectedTile?.heightSteps ?? 0
-      },
-      currentColorLabel: {
-        disabled: true,
-        label: 'Current color',
-        value:
-          inspectedTile?.colorIndex === null || inspectedTile === null
-            ? 'Auto'
-            : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ??
-              'Custom')
-      },
-      saveError: {
-        disabled: true,
-        label: 'Status',
-        value: editState.saveError ?? 'Ready'
+        value: editorMode
       }
     }),
+    { store: editLevaStore },
+    [editState.enabled, editorMode, handleSetEditorMode]
+  );
+  const [, setTerrainControls] = useControls(
+    () =>
+      editorMode === 'terrain'
+        ? {
+            Terrain: folder(
+              {
+                Cancel: button(() => dispatchEdit({ type: 'reset-draft' }), {
+                  disabled: dirtyEditCount === 0 || isSavingEdits
+                }),
+                ClearSelection: button(
+                  () => dispatchEdit({ type: 'clear-height-selection' }),
+                  {
+                    disabled:
+                      editState.tool !== 'height' ||
+                      selectedHeightTiles.length === 0
+                  }
+                ),
+                currentColorLabel: {
+                  disabled: true,
+                  label: 'Current color',
+                  value:
+                    inspectedTile?.colorIndex === null || inspectedTile === null
+                      ? 'Auto'
+                      : (activeEditConfig.palette[inspectedTile.colorIndex]
+                          ?.label ?? 'Custom')
+                },
+                dirty: {
+                  disabled: true,
+                  label: 'Dirty tiles',
+                  value: dirtyEditCount
+                },
+                Flatten: button(() => applyHeightSelection('flatten'), {
+                  disabled:
+                    editState.tool !== 'height' ||
+                    selectedHeightTiles.length === 0
+                }),
+                haloCount: {
+                  disabled: true,
+                  label: 'Halo tiles',
+                  value: previewHaloTiles.length
+                },
+                heightSelection: {
+                  disabled: true,
+                  label: 'Selection',
+                  value: selectedHeightTiles.length
+                },
+                hoveredTile: {
+                  disabled: true,
+                  label: 'Tile',
+                  value: inspectedTile
+                    ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
+                    : '--'
+                },
+                inspectedHeightSteps: {
+                  disabled: true,
+                  label: 'Height steps',
+                  value: inspectedTile?.heightSteps ?? 0
+                },
+                inspectedType: {
+                  disabled: true,
+                  label: 'Current type',
+                  value: inspectedTile?.typeId ?? '--'
+                },
+                Lower: button(() => applyHeightSelection('lower'), {
+                  disabled:
+                    editState.tool !== 'height' ||
+                    selectedHeightTiles.length === 0
+                }),
+                Raise: button(() => applyHeightSelection('raise'), {
+                  disabled:
+                    editState.tool !== 'height' ||
+                    selectedHeightTiles.length === 0
+                }),
+                Redo: button(() => dispatchEdit({ type: 'redo' }), {
+                  disabled: !editState.canRedo
+                }),
+                Save: button(() => void handleSaveTileEdits(), {
+                  disabled: dirtyEditCount === 0 || isSavingEdits
+                }),
+                saveError: {
+                  disabled: true,
+                  label: 'Status',
+                  value: editState.saveError ?? 'Ready'
+                },
+                selectedColorIndex: {
+                  ...palette({
+                    colors: paletteColors,
+                    label: 'Palette',
+                    onSelect: handlePaletteSelection,
+                    selected: selectedColorValue
+                  }),
+                  onChange: (
+                    value: string,
+                    _path: string,
+                    context: { initial: boolean }
+                  ) => {
+                    if (context.initial) {
+                      return;
+                    }
+
+                    const selectedColorIndex =
+                      value === 'auto' ? null : Number(value);
+
+                    dispatchEdit({
+                      selectedColorIndex,
+                      type: 'set-selected-color-index'
+                    });
+
+                    if (selectedHeightTiles.length > 0) {
+                      applySelectionToolOverride({
+                        selectedColorIndexOverride: selectedColorIndex
+                      });
+                    }
+                  },
+                  transient: false
+                },
+                selectedHeightValue: {
+                  disabled: true,
+                  label: 'Selected height',
+                  value: selectedHeightValue
+                },
+                selectedTypeId: {
+                  label: 'Tile type',
+                  onChange: (
+                    value: string,
+                    _path: string,
+                    context: { initial: boolean }
+                  ) => {
+                    if (context.initial) {
+                      return;
+                    }
+
+                    dispatchEdit({
+                      selectedTypeId: value,
+                      type: 'set-selected-type-id'
+                    });
+
+                    if (selectedHeightTiles.length > 0) {
+                      applySelectionToolOverride({
+                        selectedTypeIdOverride: value
+                      });
+                    }
+                  },
+                  options: typeOptions,
+                  transient: false,
+                  value: editState.selectedTypeId
+                },
+                tool: {
+                  label: 'Tool',
+                  onChange: (
+                    value: typeof editState.tool,
+                    _path: string,
+                    context: { initial: boolean }
+                  ) => {
+                    if (context.initial) {
+                      return;
+                    }
+
+                    dispatchEdit({
+                      tool: value,
+                      type: 'set-tool'
+                    });
+                  },
+                  options: {
+                    Color: 'set-color',
+                    Height: 'height',
+                    Type: 'set-type'
+                  },
+                  transient: false,
+                  value: editState.tool
+                },
+                Undo: button(() => dispatchEdit({ type: 'undo' }), {
+                  disabled: !editState.canUndo
+                })
+              },
+              { collapsed: false }
+            )
+          }
+        : EMPTY_LEVA_SCHEMA,
     { store: editLevaStore },
     [
       activeEditConfig.palette,
@@ -1262,65 +1580,354 @@ const MainInner = () => {
       applyHeightSelection,
       applySelectionToolOverride,
       dirtyEditCount,
+      editorMode,
       editState.canRedo,
       editState.canUndo,
-      editState.enabled,
       editState.saveError,
       editState.selectedColorIndex,
       editState.selectedTypeId,
       editState.tool,
-      handleSetEditEnabled,
       handlePaletteSelection,
       isSavingEdits,
       paletteColors,
       selectedColorValue,
+      selectedHeightValue,
       selectedHeightTiles.length,
       typeOptions
     ]
   );
-  const [, setEditReadoutControls] = useControls(
-    () => ({
-      selectedHeightValue: {
-        disabled: true,
-        label: 'Selected height',
-        value: selectedHeightValue
-      }
-    }),
-    { store: editLevaStore },
-    []
-  );
-
-  useEffect(() => {
-    setEditReadoutControls({
-      selectedHeightValue
-    });
-  }, [selectedHeightValue, setEditReadoutControls]);
 
   useEffect(() => {
     setEditControls({
-      dirty: dirtyEditCount,
-      hoveredTile: inspectedTile
-        ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
-        : '--',
+      editStatus: editState.enabled ? 'On' : 'Off',
+      mode: editorMode
+    });
+  }, [editorMode, editState.enabled, setEditControls]);
+
+  useEffect(() => {
+    if (editorMode !== 'terrain') {
+      return;
+    }
+
+    setTerrainControls({
       currentColorLabel:
         inspectedTile?.colorIndex === null || inspectedTile === null
           ? 'Auto'
           : (activeEditConfig.palette[inspectedTile.colorIndex]?.label ??
             'Custom'),
-      inspectedHeightSteps: inspectedTile?.heightSteps ?? 0,
-      inspectedType: inspectedTile?.typeId ?? '--',
+      dirty: dirtyEditCount,
       haloCount: previewHaloTiles.length,
       heightSelection: selectedHeightTiles.length,
-      saveError: editState.saveError ?? 'Ready'
+      hoveredTile: inspectedTile
+        ? `${inspectedTile.tileX}, ${inspectedTile.tileZ}`
+        : '--',
+      inspectedHeightSteps: inspectedTile?.heightSteps ?? 0,
+      inspectedType: inspectedTile?.typeId ?? '--',
+      saveError: editState.saveError ?? 'Ready',
+      selectedHeightValue,
+      tool: editState.tool
     });
   }, [
     activeEditConfig.palette,
     dirtyEditCount,
+    editorMode,
     editState.saveError,
+    editState.tool,
     inspectedTile,
     previewHaloTiles.length,
+    selectedHeightValue,
     selectedHeightTiles.length,
-    setEditControls
+    setTerrainControls
+  ]);
+
+  const selectedEntityName = selectedEntity
+    ? (selectedEntity.label ?? selectedEntity.id)
+    : '--';
+  const selectedEntityPosition = selectedEntity
+    ? `${selectedEntity.position.x.toFixed(1)}, ${selectedEntity.position.z.toFixed(1)}`
+    : '--';
+  const selectedEntityYaw = selectedEntity?.rotation.yaw ?? 0;
+  const selectedEntityScale = selectedEntity?.scale ?? 1;
+  const selectedEntityYOffset = selectedEntity?.yOffset ?? 0;
+  const entityPanelStatus =
+    entityEditState.error ??
+    entityEditState.pendingAction ??
+    (selectedEntity ? 'Ready' : 'No entity selected');
+
+  const handleSetEntityYOffsetRef = useRef(handleSetEntityYOffset);
+  handleSetEntityYOffsetRef.current = handleSetEntityYOffset;
+  const handleSetEntityTransformRef = useRef(handleSetEntityTransform);
+  handleSetEntityTransformRef.current = handleSetEntityTransform;
+  const handleSetEntityToolRef = useRef(handleSetEntityTool);
+  handleSetEntityToolRef.current = handleSetEntityTool;
+  const handleCatalogToggleRef = useRef(handleCatalogToggle);
+  handleCatalogToggleRef.current = handleCatalogToggle;
+  const handleDeleteEntityRef = useRef(handleDeleteEntity);
+  handleDeleteEntityRef.current = handleDeleteEntity;
+
+  const onEntityYOffsetEditEnd = useCallback((value: number) => {
+    const entity = selectedEntityRef.current;
+    if (!entity || !Number.isFinite(value) || value === entity.yOffset) {
+      return;
+    }
+    void handleSetEntityYOffsetRef.current(value);
+  }, []);
+  const onEntityYawEditEnd = useCallback((value: number) => {
+    const entity = selectedEntityRef.current;
+    if (!entity || !Number.isFinite(value)) {
+      return;
+    }
+    const yaw = normalizeEntityYaw(value);
+    if (yaw === entity.rotation.yaw) {
+      return;
+    }
+    void handleSetEntityTransformRef.current(entity, {
+      scale: entity.scale,
+      yaw
+    });
+  }, []);
+  const onEntityScaleEditEnd = useCallback((value: number) => {
+    const entity = selectedEntityRef.current;
+    if (
+      !entity ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value === entity.scale
+    ) {
+      return;
+    }
+    void handleSetEntityTransformRef.current(entity, {
+      scale: value,
+      yaw: entity.rotation.yaw
+    });
+  }, []);
+  const onEntityToolChange = useCallback(
+    (
+      value: ZarchEntityEditTool,
+      _path: string,
+      context: { initial: boolean }
+    ) => {
+      if (context.initial) {
+        return;
+      }
+      handleSetEntityToolRef.current(value);
+    },
+    []
+  );
+  const onEntityCatalogClick = useCallback(
+    () => handleCatalogToggleRef.current(),
+    []
+  );
+  const onEntityDeleteClick = useCallback(
+    () => void handleDeleteEntityRef.current(),
+    []
+  );
+
+  const [, setEntityControls] = useControls(
+    () => ({
+      activeArchetype: {
+        disabled: true,
+        label: 'Archetype',
+        value: '--'
+      },
+      Catalog: button(onEntityCatalogClick),
+      Delete: button(onEntityDeleteClick),
+      selectedEntity: {
+        disabled: true,
+        label: 'Selected',
+        value: '--'
+      },
+      selectedPosition: {
+        disabled: true,
+        label: 'Position',
+        value: '--'
+      },
+      selectedScale: {
+        label: 'Scale',
+        min: 0.1,
+        onEditEnd: onEntityScaleEditEnd,
+        step: 0.1,
+        value: 1
+      },
+      selectedYaw: {
+        label: 'Yaw',
+        onEditEnd: onEntityYawEditEnd,
+        step: 1,
+        value: 0
+      },
+      status: {
+        disabled: true,
+        label: 'Status',
+        value: '--'
+      },
+      tool: {
+        label: 'Tool',
+        onChange: onEntityToolChange,
+        options: {
+          Place: 'place',
+          Select: 'select'
+        },
+        transient: false,
+        value: 'place'
+      },
+      yOffset: {
+        label: 'Height offset',
+        onEditEnd: onEntityYOffsetEditEnd,
+        step: 0.1,
+        value: 0
+      }
+    }),
+    { store: entityLevaStore }
+  );
+
+  useEffect(() => {
+    setEntityControls({
+      activeArchetype: activeArchetype?.name ?? '--',
+      selectedEntity: selectedEntityName,
+      selectedPosition: selectedEntityPosition,
+      selectedScale: selectedEntityScale,
+      selectedYaw: selectedEntityYaw,
+      status: entityPanelStatus,
+      tool: entityEditState.tool,
+      yOffset: selectedEntityYOffset
+    });
+  }, [
+    activeArchetype?.name,
+    entityPanelStatus,
+    entityEditState.tool,
+    selectedEntityName,
+    selectedEntityPosition,
+    selectedEntityScale,
+    selectedEntityYaw,
+    selectedEntityYOffset,
+    setEntityControls
+  ]);
+
+  const [, setCatalogControls] = useControls(
+    () => ({
+      archetype: {
+        label: 'Archetype',
+        onChange: (
+          value: string,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
+          if (context.initial || value === CATALOG_NONE_VALUE) {
+            return;
+          }
+
+          handleSelectArchetype(value);
+        },
+        options: catalogArchetypeOptions,
+        transient: false,
+        value:
+          entityEditState.activeArchetypeId &&
+          filteredCatalogArchetypes.some(
+            archetype => archetype.id === entityEditState.activeArchetypeId
+          )
+            ? entityEditState.activeArchetypeId
+            : CATALOG_NONE_VALUE
+      },
+      category: {
+        label: 'Category',
+        onChange: (
+          value: ArchetypeCategory | 'all',
+          _path: string,
+          context: { initial: boolean }
+        ) => {
+          if (context.initial) {
+            return;
+          }
+
+          dispatchEntityEdit({
+            category: value === 'all' ? null : value,
+            type: 'set-catalog-category'
+          });
+        },
+        options: catalogCategoryOptions,
+        transient: false,
+        value: catalogCategoryValue
+      },
+      Close: button(() =>
+        dispatchEntityEdit({
+          open: false,
+          type: 'set-catalog-open'
+        })
+      ),
+      referenced: {
+        disabled: true,
+        label: 'On map',
+        value:
+          entityEditState.activeArchetypeId &&
+          referencedArchetypeIds.has(entityEditState.activeArchetypeId)
+            ? 'Yes'
+            : 'No'
+      },
+      search: {
+        label: 'Search',
+        onChange: (
+          value: string,
+          _path: string,
+          context: { initial: boolean }
+        ) => {
+          if (context.initial) {
+            return;
+          }
+
+          dispatchEntityEdit({
+            search: value,
+            type: 'set-catalog-search'
+          });
+        },
+        transient: false,
+        value: entityEditState.catalogSearch
+      },
+      selected: {
+        disabled: true,
+        label: 'Selected',
+        value: activeArchetype?.name ?? '--'
+      }
+    }),
+    { store: catalogLevaStore },
+    [
+      activeArchetype?.name,
+      catalogArchetypeOptions,
+      catalogCategoryOptions,
+      catalogCategoryValue,
+      entityEditState.activeArchetypeId,
+      entityEditState.catalogSearch,
+      filteredCatalogArchetypes,
+      handleSelectArchetype,
+      referencedArchetypeIds
+    ]
+  );
+
+  useEffect(() => {
+    setCatalogControls({
+      archetype:
+        entityEditState.activeArchetypeId &&
+        filteredCatalogArchetypes.some(
+          archetype => archetype.id === entityEditState.activeArchetypeId
+        )
+          ? entityEditState.activeArchetypeId
+          : CATALOG_NONE_VALUE,
+      category: catalogCategoryValue,
+      referenced:
+        entityEditState.activeArchetypeId &&
+        referencedArchetypeIds.has(entityEditState.activeArchetypeId)
+          ? 'Yes'
+          : 'No',
+      search: entityEditState.catalogSearch,
+      selected: activeArchetype?.name ?? '--'
+    });
+  }, [
+    activeArchetype?.name,
+    catalogCategoryValue,
+    entityEditState.activeArchetypeId,
+    entityEditState.catalogSearch,
+    filteredCatalogArchetypes,
+    referencedArchetypeIds,
+    setCatalogControls
   ]);
 
   if (isLoading) {
@@ -1346,6 +1953,12 @@ const MainInner = () => {
       </div>
     );
   }
+
+  const editPanelVisibility = getEditPanelVisibility({
+    catalogOpen: entityEditState.catalogOpen,
+    editEnabled: editState.enabled,
+    editorMode
+  });
 
   return (
     <>
@@ -1386,12 +1999,19 @@ const MainInner = () => {
             inputRef={inputRef}
             map={map}
             onEditTileActivate={handleEditTileActivate}
+            onEditTileBlankActivate={handleEditTileBlankActivate}
             onEditTileHover={handleEditTileHover}
             onEditTileSelectionStart={handleEditTileSelectionStart}
             onEditTileSelectionUpdate={handleEditTileSelectionUpdate}
             onEntityHover={handleEntityHover}
+            onEntityMove={(entity, position) =>
+              void handleMoveEntity(entity, position)
+            }
             onEntityPlace={handleEntityPlace}
             onEntitySelect={handleEntitySelect}
+            onEntityTransform={(entity, transform) =>
+              void handleSetEntityTransform(entity, transform)
+            }
             previewHaloTiles={previewHaloTiles}
             runtimeRef={runtimeRef}
             selectedHeightPlane={editState.lastSolvedPlaneHeight}
@@ -1411,55 +2031,8 @@ const MainInner = () => {
         {showMinimap && (
           <ZarchMinimap runtimeRef={runtimeRef} terrain={activeTerrain} />
         )}
-        {editState.enabled && (
-          <ZarchEntityEditHud
-            archetypes={catalogArchetypes}
-            editEnabled={editState.enabled}
-            editorMode={editorMode}
-            entityEditState={entityEditState}
-            onCatalogToggle={handleCatalogToggle}
-            onDeleteEntity={() => void handleDeleteEntity()}
-            onRotateEntity={direction => void handleRotateEntity(direction)}
-            onSetEditorMode={handleSetEditorMode}
-            onSetEnabled={handleSetEditEnabled}
-            onSetEntityYOffset={yOffset => void handleSetEntityYOffset(yOffset)}
-            onSetTool={handleSetEntityTool}
-            selectedEntity={selectedEntity}
-          />
-        )}
-        {editState.enabled &&
-          editorMode === 'entities' &&
-          entityEditState.catalogOpen && (
-            <ZarchEntityCatalog
-              activeArchetypeId={entityEditState.activeArchetypeId}
-              archetypes={catalogArchetypes}
-              assetVersionsById={catalogAssetVersionsById}
-              category={entityEditState.catalogCategory}
-              onClose={() =>
-                dispatchEntityEdit({
-                  type: 'set-catalog-open',
-                  open: false
-                })
-              }
-              onSelectArchetype={handleSelectArchetype}
-              onSetCategory={category =>
-                dispatchEntityEdit({
-                  type: 'set-catalog-category',
-                  category
-                })
-              }
-              onSetSearch={search =>
-                dispatchEntityEdit({
-                  type: 'set-catalog-search',
-                  search
-                })
-              }
-              referencedArchetypeIds={referencedArchetypeIds}
-              search={entityEditState.catalogSearch}
-            />
-          )}
       </div>
-      {editorMode === 'terrain' && (
+      {editPanelVisibility.edit && (
         <LevaPanel
           collapsed={{
             collapsed: levaUiState.edit.collapsed,
@@ -1470,6 +2043,34 @@ const MainInner = () => {
             onDragEnd: handleEditLevaDrag,
             position: levaUiState.edit.position,
             title: 'Edit'
+          }}
+        />
+      )}
+      {editPanelVisibility.entity && (
+        <LevaPanel
+          collapsed={{
+            collapsed: levaUiState.entity.collapsed,
+            onChange: handleEntityLevaCollapsedChange
+          }}
+          store={entityLevaStore}
+          titleBar={{
+            onDragEnd: handleEntityLevaDrag,
+            position: levaUiState.entity.position,
+            title: 'Entity'
+          }}
+        />
+      )}
+      {editPanelVisibility.catalog && (
+        <LevaPanel
+          collapsed={{
+            collapsed: levaUiState.catalog.collapsed,
+            onChange: handleCatalogLevaCollapsedChange
+          }}
+          store={catalogLevaStore}
+          titleBar={{
+            onDragEnd: handleCatalogLevaDrag,
+            position: levaUiState.catalog.position,
+            title: 'Catalog'
           }}
         />
       )}

@@ -1,10 +1,10 @@
 import {
-  type KeyboardEvent,
-  type PointerEvent,
-  type RefObject,
   useEffect,
   useMemo,
-  useRef
+  useRef,
+  type KeyboardEvent,
+  type PointerEvent,
+  type RefObject
 } from 'react';
 
 import { clampZoom } from '@/helpers/zarch-terrain';
@@ -80,18 +80,17 @@ export type ZarchInputState = {
 type EditorMode = 'terrain' | 'entities';
 
 type EntityEditCallbacks = {
-  onCloseCatalog: () => void;
+  catalogOpen: boolean;
   onClearSelection: () => void;
+  onCloseCatalog: () => void;
   onDeleteEntity: () => void;
   onRotateEntity: (direction: 'cw' | 'ccw') => void;
   selectedEntityId: string | null;
-  catalogOpen: boolean;
 };
 
 type UseZarchRuntimeArgs = {
   containerElement: HTMLElement | null;
   editEnabled: boolean;
-  editTool: 'height' | 'set-color' | 'set-type';
   editorMode: EditorMode;
   entityEditCallbacksRef: RefObject<EntityEditCallbacks | null>;
 };
@@ -107,7 +106,6 @@ const PREVENT_SCROLL_KEYS = new Set([
 export const useZarchRuntime = ({
   containerElement,
   editEnabled,
-  editTool,
   editorMode,
   entityEditCallbacksRef
 }: UseZarchRuntimeArgs) => {
@@ -233,8 +231,10 @@ export const useZarchRuntime = ({
 
       if (editEnabled) {
         event.currentTarget.focus();
+        event.currentTarget.setPointerCapture(event.pointerId);
         inputRef.current.editBrushActive = true;
         inputRef.current.editBrushStarted = false;
+        inputRef.current.lastPointerX = event.clientX;
         inputRef.current.pointerCandidate = {
           clientX: event.clientX,
           clientY: event.clientY,
@@ -325,6 +325,10 @@ export const useZarchRuntime = ({
         inputRef.current.pointerCandidate = null;
         inputRef.current.pointerId = null;
 
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+
         return;
       }
 
@@ -369,6 +373,10 @@ export const useZarchRuntime = ({
       onPointerDown: handlePointerDown,
       onPointerLeave: () => {
         if (editEnabled) {
+          if (inputRef.current.editBrushActive) {
+            return;
+          }
+
           inputRef.current.editBrushActive = false;
           inputRef.current.editBrushStarted = false;
           inputRef.current.hoverPointer = null;
@@ -379,7 +387,7 @@ export const useZarchRuntime = ({
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp
     };
-  }, [configRef, editEnabled, editTool, editorMode, entityEditCallbacksRef]);
+  }, [configRef, editEnabled, editorMode, entityEditCallbacksRef]);
 
   return {
     containerProps,

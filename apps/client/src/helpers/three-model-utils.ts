@@ -8,9 +8,12 @@ export type NormalizedModel = {
 
 const gltfLoader = new GLTFLoader();
 
+export const isMeshObject = (object: Object3D): object is Mesh =>
+  (object as Mesh & { isMesh?: boolean }).isMesh === true;
+
 export const setModelShadowProps = (object: Object3D) => {
   object.traverse(child => {
-    if (!(child instanceof Mesh)) {
+    if (!isMeshObject(child)) {
       return;
     }
 
