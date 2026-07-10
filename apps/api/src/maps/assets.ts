@@ -1,8 +1,16 @@
 import { mkdirSync, rmSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep
+} from 'node:path';
 import type { AssetVersion } from 'carrier-contracts';
 
-import { getMapRepository } from './repository';
+import { MapRepositoryError, getMapRepository } from './repository';
 
 const DEFAULT_STORAGE_ROOT = resolve(import.meta.dir, '../../../.data/assets');
 const PROCESSING_DIAGNOSTIC = 'Normalization pipeline completed';
@@ -19,6 +27,21 @@ const getStorageRoot = () =>
   resolve(process.env.API_ASSET_STORAGE_ROOT ?? DEFAULT_STORAGE_ROOT);
 
 const toRelativeStoragePath = (...segments: string[]) => segments.join('/');
+
+const hasWindowsDrivePrefix = (path: string) => /^[a-zA-Z]:/.test(path);
+
+const hasControlCharacter = (path: string) =>
+  /[\u0000-\u001f\u007f]/.test(path);
+
+const isPathLikeFileName = (fileName: string | undefined) =>
+  typeof fileName !== 'string' ||
+  fileName.length === 0 ||
+  fileName === '.' ||
+  fileName === '..' ||
+  fileName.includes('/') ||
+  fileName.includes('\\') ||
+  hasWindowsDrivePrefix(fileName) ||
+  hasControlCharacter(fileName);
 
 const ensureParentDirectory = (path: string) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -88,8 +111,8 @@ class AssetPipeline {
     return `${prefix}${version}`;
   }
 
-  private originalAssetPath(id: string, fileName: string) {
-    return toRelativeStoragePath('originals', id, fileName);
+  private originalAssetPath(id: string) {
+    return toRelativeStoragePath('originals', `${id}.glb`);
   }
 
   private runtimeAssetPath(id: string) {
@@ -97,7 +120,23 @@ class AssetPipeline {
   }
 
   private absoluteStoragePath(relativePath: string) {
-    return resolve(getStorageRoot(), relativePath);
+    const storageRoot = getStorageRoot();
+    const absolutePath = resolve(storageRoot, relativePath);
+    const containment = relative(storageRoot, absolutePath);
+
+    if (
+      containment.length === 0 ||
+      containment === '..' ||
+      containment.startsWith(`..${sep}`) ||
+      isAbsolute(containment)
+    ) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Asset storage path ${relativePath} is not contained within the asset storage root`
+      );
+    }
+
+    return absolutePath;
   }
 
   private schedule(id: string) {
@@ -114,8 +153,19 @@ class AssetPipeline {
   }
 
   async upload(file: File) {
+    // Input hygiene only: the stored path is derived from the internal id
+    // (`originals/${id}.glb`), so filesystem safety is enforced by slugify +
+    // absoluteStoragePath containment, not this guard. It exists to return a
+    // clean 400 rather than silently slugifying a path-like filename.
+    if (isPathLikeFileName(file.name)) {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        'Uploaded asset filename must be a plain filename, not a path'
+      );
+    }
+
     const id = this.nextAssetVersionId(file.name);
-    const originalRelativePath = this.originalAssetPath(id, file.name);
+    const originalRelativePath = this.originalAssetPath(id);
     const originalAbsolutePath = this.absoluteStoragePath(originalRelativePath);
     const bytes = new Uint8Array(await file.arrayBuffer());
 
@@ -161,14 +211,30 @@ class AssetPipeline {
 
   delete(id: string) {
     const repository = getMapRepository();
-    const assetVersion = repository.deleteAssetVersion(id);
+    const assetVersion = repository.getAssetVersion(id);
 
-    rmSync(this.absoluteStoragePath(assetVersion.originalFile.path), {
+    if (!assetVersion) {
+      throw new MapRepositoryError(
+        'NOT_FOUND',
+        `Asset version ${id} was not found`
+      );
+    }
+
+    const originalAbsolutePath = this.absoluteStoragePath(
+      assetVersion.originalFile.path
+    );
+    const runtimeAbsolutePath = assetVersion.runtimeFile
+      ? this.absoluteStoragePath(assetVersion.runtimeFile.path)
+      : null;
+
+    repository.deleteAssetVersion(id);
+
+    rmSync(originalAbsolutePath, {
       force: true
     });
 
-    if (assetVersion.runtimeFile) {
-      rmSync(this.absoluteStoragePath(assetVersion.runtimeFile.path), {
+    if (runtimeAbsolutePath) {
+      rmSync(runtimeAbsolutePath, {
         force: true
       });
     }

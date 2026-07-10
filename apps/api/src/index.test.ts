@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { contract } from 'carrier-contracts/contract';
@@ -9,7 +9,7 @@ import {
   stringifyStaticEntityExportManifest
 } from 'carrier-contracts/types';
 
-import { resetAssetPipeline } from '@/maps/assets';
+import { getAssetPipeline, resetAssetPipeline } from '@/maps/assets';
 import { getMapRepository, resetMapRepository } from '@/maps/repository';
 import { createORPCClient } from '@orpc/client';
 import { type ContractRouterClient } from '@orpc/contract';
@@ -89,6 +89,28 @@ describe('API server map routes', () => {
     throw new Error(
       `Timed out waiting for asset ${id} to reach ${expectedStatuses.join(', ')}`
     );
+  };
+
+  const createValidGlbPayload = () => {
+    const header = new Uint8Array([
+      0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
+    ]);
+
+    return new Uint8Array([
+      ...header,
+      0x4a,
+      0x53,
+      0x4f,
+      0x4e,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x7b,
+      0x7d,
+      0x20,
+      0x20
+    ]);
   };
 
   test('supports create/list/find/getChunk/delete through the public contract', async () => {
@@ -1068,24 +1090,7 @@ describe('API server map routes', () => {
   });
 
   test('processes uploaded GLBs into reviewable runtime assets', async () => {
-    const header = new Uint8Array([
-      0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
-    ]);
-    const payload = new Uint8Array([
-      ...header,
-      0x4a,
-      0x53,
-      0x4f,
-      0x4e,
-      0x04,
-      0x00,
-      0x00,
-      0x00,
-      0x7b,
-      0x7d,
-      0x20,
-      0x20
-    ]);
+    const payload = createValidGlbPayload();
     const formData = new FormData();
     formData.set(
       'file',
@@ -1107,6 +1112,11 @@ describe('API server map routes', () => {
     const finalAsset = await waitForAssetStatus(uploaded.id as string, [
       'review'
     ]);
+    expect(finalAsset.originalFile).toEqual({
+      contentType: 'model/gltf-binary',
+      path: `originals/${uploaded.id as string}.glb`,
+      sizeBytes: payload.byteLength
+    });
     expect(finalAsset.runtimeFile).toEqual({
       contentType: 'model/gltf-binary',
       path: `runtime/${uploaded.id as string}.glb`,
@@ -1126,6 +1136,121 @@ describe('API server map routes', () => {
     expect(new Uint8Array(await runtimeResponse.arrayBuffer())).toEqual(
       payload
     );
+  });
+
+  test('rejects path-like uploaded GLB filenames without writing assets', async () => {
+    const storageRoot = process.env.API_ASSET_STORAGE_ROOT as string;
+    const payload = createValidGlbPayload();
+    await expect(
+      getAssetPipeline().upload(new File([payload], ''))
+    ).rejects.toThrow('Uploaded asset filename must be a plain filename');
+
+    const rejectedFileNames = [
+      '../escape.glb',
+      '/tmp/escape.glb',
+      '..\\escape.glb',
+      'C:\\temp\\escape.glb',
+      '.',
+      '..',
+      'bad\u0000name.glb'
+    ];
+
+    for (const fileName of rejectedFileNames) {
+      const formData = new FormData();
+      formData.set(
+        'file',
+        new File([payload], fileName, {
+          type: 'model/gltf-binary'
+        })
+      );
+
+      const response = await requestRaw(
+        new Request('http://localhost/api/maps/assets', {
+          body: formData,
+          method: 'POST'
+        })
+      );
+      const body = (await response.json()) as Record<string, unknown>;
+
+      expect(response.status).toBe(400);
+      expect(body.message).toBe(
+        'Uploaded asset filename must be a plain filename, not a path'
+      );
+    }
+
+    expect(getMapRepository().listAssetVersionItems()).toEqual([]);
+    expect(existsSync(resolve(storageRoot, 'originals'))).toBe(false);
+    expect(existsSync(resolve(storageRoot, 'runtime'))).toBe(false);
+  });
+
+  test('refuses to serve or delete asset records with uncontained storage paths', async () => {
+    const storageRoot = process.env.API_ASSET_STORAGE_ROOT as string;
+    const outsideRoot = mkdtempSync('/tmp/carrier-outside-');
+    const outsideRuntimePath = resolve(outsideRoot, 'runtime.glb');
+    await Bun.write(outsideRuntimePath, createValidGlbPayload());
+
+    const repository = getMapRepository();
+    const assetVersion = repository.createAssetVersion({
+      collisionBox: {
+        depthMeters: 10,
+        heightMeters: 8,
+        widthMeters: 10
+      },
+      collisionClass: 'prop',
+      diagnostics: [],
+      footprint: {
+        depthMeters: 10,
+        widthMeters: 10
+      },
+      groundingPolicy: 'terrain-average-footprint',
+      id: 'unsafe-path-v1',
+      instancingEligible: false,
+      maxHeightDeltaMeters: 1,
+      originalFile: {
+        contentType: 'model/gltf-binary',
+        path: 'originals/unsafe-path-v1.glb',
+        sizeBytes: 16
+      },
+      runtimeFile: {
+        contentType: 'model/gltf-binary',
+        path: `../${basename(outsideRoot)}/runtime.glb`,
+        sizeBytes: 16
+      },
+      status: 'ready'
+    });
+    await Bun.write(
+      resolve(storageRoot, assetVersion.originalFile.path),
+      createValidGlbPayload()
+    );
+
+    try {
+      const runtimeResponse = await requestRaw(
+        new Request(
+          `http://localhost/api/maps/assets/${assetVersion.id}/runtime`
+        )
+      );
+      const runtimeBody = (await runtimeResponse.json()) as Record<
+        string,
+        unknown
+      >;
+
+      expect(runtimeResponse.status).toBe(409);
+      expect(runtimeBody.message).toContain(
+        'is not contained within the asset storage root'
+      );
+
+      const client = await createTestClient();
+      await expect(
+        client.maps.deleteAssetVersion({
+          id: assetVersion.id
+        })
+      ).rejects.toThrow('is not contained within the asset storage root');
+
+      expect(existsSync(outsideRuntimePath)).toBe(true);
+      expect(repository.getAssetVersion(assetVersion.id)).not.toBeNull();
+    } finally {
+      rmSync(outsideRoot, { force: true, recursive: true });
+    }
   });
 
   test('marks invalid uploads as failed with diagnostics', async () => {
