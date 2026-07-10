@@ -76,7 +76,7 @@ type LoadedAssetRuntime = {
 
 type AssetRuntimeCacheEntry = {
   error?: Error;
-  promise?: Promise<LoadedAssetRuntime>;
+  promise?: Promise<LoadedAssetRuntime | undefined>;
   runtime?: LoadedAssetRuntime;
 };
 
@@ -161,7 +161,7 @@ const isMeshBasicMaterial = (
 const getInstancedRuntime = (
   normalized: NormalizedModel
 ): InstancedAssetRuntime | null => {
-  const meshes: Mesh[] = [];
+  const meshes: Mesh<BufferGeometry, Material>[] = [];
 
   normalized.object.updateMatrixWorld(true);
   normalized.object.traverse(child => {
@@ -169,7 +169,7 @@ const getInstancedRuntime = (
       return;
     }
 
-    meshes.push(child);
+    meshes.push(child as Mesh<BufferGeometry, Material>);
   });
 
   if (meshes.length !== 1) {
@@ -1016,11 +1016,18 @@ export const ZarchStaticEntities = ({
           // Update material color based on validity
           const isValid = grounding ? grounding.valid : false;
           ghost.traverse((child: Object3D) => {
-            if (
-              isMeshObject(child) &&
-              isMeshBasicMaterial(child.material as Material)
-            ) {
-              child.material.color.set(isValid ? 0x66_ff_66 : 0xff_66_66);
+            if (!isMeshObject(child)) {
+              return;
+            }
+
+            const materials = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+
+            for (const material of materials) {
+              if (isMeshBasicMaterial(material)) {
+                material.color.set(isValid ? 0x66_ff_66 : 0xff_66_66);
+              }
             }
           });
 

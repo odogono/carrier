@@ -284,7 +284,7 @@ export const ZarchMinimap = ({ runtimeRef, terrain }: ZarchMinimapProps) => {
       backgroundRenderBatchId = window.setTimeout(renderBackgroundBatch, 0);
     };
 
-    const draw = (now: number) => {
+    const draw = () => {
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(backgroundCanvas, 0, 0);
       const runtime = runtimeRef.current;

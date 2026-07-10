@@ -1590,7 +1590,9 @@ describe('map repository', () => {
       ).toContain('windmill-edge');
 
       const listedExport = repository.listExports(created.id)[0];
-      expect(listedExport?.export?.staticEntities?.manifest).toBeUndefined();
+      expect(
+        'manifest' in (listedExport?.export?.staticEntities ?? {})
+      ).toBeFalse();
       expect(listedExport?.export?.staticEntities?.entityCount).toBe(2);
 
       expect(
@@ -1636,8 +1638,9 @@ describe('map repository', () => {
         manifest: []
       });
       expect(
-        repository.listExports(created.id)[0]?.export?.staticEntities?.manifest
-      ).toBeUndefined();
+        'manifest' in
+          (repository.listExports(created.id)[0]?.export?.staticEntities ?? {})
+      ).toBeFalse();
     } finally {
       repository.close();
     }

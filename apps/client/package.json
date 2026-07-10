@@ -13,6 +13,7 @@
     "lint:fix": "eslint --fix src",
     "outdated": "bunx npm-check-updates --interactive --format group",
     "preview": "bun ./dist/index.html",
+    "typecheck": "bunx tsc --noEmit",
     "unused": "knip",
     "coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "test": "bun test"
@@ -56,6 +57,7 @@
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.183.1",
     "eslint": "^10.2.0",
     "knip": "^6.4.1",
     "prettier": "^3.8.3",

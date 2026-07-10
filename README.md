@@ -1,18 +1,32 @@
 # carrier
 
-To install dependencies:
+## Prerequisites
+
+- [Bun](https://bun.com/) 1.3 or newer
+- [Go](https://go.dev/) 1.26 or newer
+- [Just](https://just.systems/)
+- Docker with Compose support for container workflows
+
+## Setup
+
+Install the Bun workspace dependencies from the repository root:
 
 ```bash
-bun install
+bun install --frozen-lockfile
 ```
 
-To run:
+## Verification
+
+Run the complete clean-checkout verification gate:
 
 ```bash
-bun run index.ts
+just verify
 ```
 
-This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+The recipe builds `carrier-contracts`, typechecks the contracts and all Bun
+applications, runs the Bun source tests, and then runs the Go game-server
+tests. Generated contract tests under `packages/contracts/dist` are excluded
+from test discovery.
 
 ## Docker Compose
 

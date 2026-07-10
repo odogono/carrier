@@ -14,6 +14,7 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY . .
 
+RUN bun run --cwd packages/contracts build
 RUN API_URL=/api bun run --cwd apps/client build
 RUN API_URL=/api BASE_PATH=/admin bun run --cwd apps/admin build
 

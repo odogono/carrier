@@ -443,7 +443,8 @@ describe('computeAreaHeightEdits', () => {
     const heights = collectSelectionHeights(edited, selection);
 
     expect(raised.targetHeight).toBe((flattened.targetHeight ?? 0) + editConfig.heightStepMeters);
-    expect(new Set(heights)).toEqual(new Set([raised.targetHeight]));
+    expect(raised.targetHeight).not.toBeNull();
+    expect(new Set(heights)).toEqual(new Set([raised.targetHeight!]));
   });
 
   test('repeated raise keeps an uneven rectangular selection on a uniform interior plane', () => {

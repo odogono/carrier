@@ -4,6 +4,16 @@ set dotenv-load := true
 help:
     @just --list
 
+# Build shared contracts, typecheck Bun apps, and run all Bun and Go tests
+verify:
+  bun run --cwd packages/contracts build
+  bun run --cwd packages/contracts typecheck
+  bun run --cwd apps/api typecheck
+  bun run --cwd apps/admin typecheck
+  bun run --cwd apps/client typecheck
+  bun test --path-ignore-patterns packages/contracts/dist
+  go test ./apps/game/...
+
 dev-local:
   bun run --cwd apps/api dev &
   bun run --cwd apps/client dev

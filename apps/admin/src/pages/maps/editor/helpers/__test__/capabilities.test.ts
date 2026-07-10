@@ -103,23 +103,26 @@ describe('map editor capabilities', () => {
         elevationMeters: 10,
         id: 'control-1',
         influenceMeters: 50,
+        kind: 'edit' as const,
         strength: 1,
-        type: 'plain',
+        type: 'plain' as const,
         x: 10,
         z: 20
       },
       islandDraft: {
+        defaultFaction: '',
+        defaultOwner: '',
         id: 'island-1',
-        name: 'Island',
-        notes: null
+        name: 'Island'
       },
       polygonControlPointDrafts: [
         {
           elevationMeters: 2,
           id: 'control-2',
           influenceMeters: 25,
+          kind: 'edit' as const,
           strength: 0.5,
-          type: 'plain',
+          type: 'plain' as const,
           x: 5,
           z: 6
         }

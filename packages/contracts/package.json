@@ -30,6 +30,9 @@
     "build": "bunx tsc -p tsconfig.build.json",
     "typecheck": "bunx tsc --noEmit"
   },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
   "dependencies": {
     "@orpc/contract": "^1.13.4",
     "@orpc/server": "^1.13.4",

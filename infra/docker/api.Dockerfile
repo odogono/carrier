@@ -14,6 +14,8 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY . .
 
+RUN bun run --cwd packages/contracts build
+
 EXPOSE 6021
 
 CMD ["bun", "run", "--cwd", "apps/api", "start"]

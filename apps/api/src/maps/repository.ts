@@ -23,6 +23,8 @@ import {
   type DerivedIsland,
   type IslandClusterGeneratorParams,
   type MapChunk,
+  type MapExportStaticEntitiesDetail,
+  type MapExportStaticEntitiesSummary,
   type MapGenerator,
   type MapMetadata,
   type MapMetadataSummary,
@@ -549,16 +551,26 @@ const chunkRowToRecord = (row: ChunkRow) => ({
   heights: decodeFloat32Heights(row.heights)
 });
 
-const getStaticEntityExportDetail = (
-  row: Pick<
-    MapRow,
-    | 'staticEntityExportArchetypeCount'
-    | 'staticEntityExportEntityCount'
-    | 'staticEntityExportManifestHash'
-    | 'staticEntityExportManifestJson'
-  >,
+type StaticEntityExportMetadataRow = Pick<
+  MapRow,
+  | 'staticEntityExportArchetypeCount'
+  | 'staticEntityExportEntityCount'
+  | 'staticEntityExportManifestHash'
+  | 'staticEntityExportManifestJson'
+>;
+
+function getStaticEntityExportMetadata(
+  row: StaticEntityExportMetadataRow,
+  options: { includeManifest: true }
+): MapExportStaticEntitiesDetail | undefined;
+function getStaticEntityExportMetadata(
+  row: StaticEntityExportMetadataRow,
+  options: { includeManifest: false }
+): MapExportStaticEntitiesSummary | undefined;
+function getStaticEntityExportMetadata(
+  row: StaticEntityExportMetadataRow,
   options: { includeManifest: boolean }
-) => {
+): MapExportStaticEntitiesDetail | MapExportStaticEntitiesSummary | undefined {
   if (
     row.staticEntityExportArchetypeCount === null ||
     row.staticEntityExportEntityCount === null ||
@@ -573,8 +585,12 @@ const getStaticEntityExportDetail = (
     fullManifestHash: row.staticEntityExportManifestHash
   };
 
-  if (!options.includeManifest || row.staticEntityExportManifestJson === null) {
+  if (!options.includeManifest) {
     return summary;
+  }
+
+  if (row.staticEntityExportManifestJson === null) {
+    return undefined;
   }
 
   return {
@@ -583,7 +599,7 @@ const getStaticEntityExportDetail = (
       row.staticEntityExportManifestJson
     ) as StaticEntityExportManifest
   };
-};
+}
 
 const normalizeIslandClusterGeneratorParams = (
   params?: Partial<IslandClusterGeneratorParams> | null
@@ -609,10 +625,18 @@ const parseGeneratorParamsJson = (
   );
 };
 
-const mapRowToMetadata = (
+function mapRowToMetadata(
+  row: MapRow,
+  options: { includeExportManifest: true }
+): MapMetadata;
+function mapRowToMetadata(
+  row: MapRow,
+  options: { includeExportManifest: false }
+): MapMetadataSummary;
+function mapRowToMetadata(
   row: MapRow,
   options: { includeExportManifest: boolean }
-): MapMetadata => {
+): MapMetadata | MapMetadataSummary {
   const resolution = {
     chunkSizeTiles: row.chunkSizeTiles,
     metersPerTile: row.metersPerTile
@@ -633,9 +657,13 @@ const mapRowToMetadata = (
             minZ: row.exportBoundsMinZ
           },
           exportedAt: row.exportedAt,
-          staticEntities: getStaticEntityExportDetail(row, {
-            includeManifest: options.includeExportManifest
-          }),
+          staticEntities: options.includeExportManifest
+            ? getStaticEntityExportMetadata(row, {
+                includeManifest: true
+              })
+            : getStaticEntityExportMetadata(row, {
+                includeManifest: false
+              }),
           sourceMapId: row.sourceMapId,
           sourceRevision: row.sourceRevision
         }
@@ -690,7 +718,7 @@ const mapRowToMetadata = (
     seed: row.seed,
     updatedAt: row.updatedAt
   };
-};
+}
 
 const mapRowToSummaryMetadata = (row: MapRow): MapMetadataSummary =>
   mapRowToMetadata(row, {
@@ -1906,7 +1934,7 @@ export class MapRepository {
 
   private loadVectorTerrainState(mapRow: MapRow) {
     const map = mapRowToMetadata(mapRow, {
-      includeExportManifest: false
+      includeExportManifest: true
     });
     const polygons = this.listSourcePolygonRows(mapRow.id, 'active').map(
       sourcePolygonRowToModel
@@ -2857,7 +2885,7 @@ export class MapRepository {
       );
 
     return mapRowToMetadata(row, {
-      includeExportManifest: false
+      includeExportManifest: true
     });
   }
 

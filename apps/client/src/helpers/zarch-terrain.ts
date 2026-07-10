@@ -1,8 +1,6 @@
 import { Color } from 'three';
 
 import {
-  DEFAULT_ZARCH_TILE_TYPE_ID,
-  LANDING_PAD_ZARCH_TILE_TYPE_ID,
   getSurfaceMaterialColorRgb,
   resolveSurfaceMaterial,
   tileHash,

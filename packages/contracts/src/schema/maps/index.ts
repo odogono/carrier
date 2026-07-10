@@ -348,14 +348,14 @@ export type MapMetadataSummary = z.infer<typeof MapMetadataSummarySchema>;
 
 // --- Type Guards ---
 
-export const isFiniteMap = (
-  meta: MapMetadata | null | undefined,
-): meta is MapMetadata & { extent: FiniteExtent } =>
+export const isFiniteMap = <T extends MapMetadata | MapMetadataSummary>(
+  meta: T | null | undefined,
+): meta is T & { extent: FiniteExtent } =>
   meta?.extent?.kind === "finite";
 
-export const isInfiniteMap = (
-  meta: MapMetadata | null | undefined,
-): meta is MapMetadata & { extent: InfiniteExtent } =>
+export const isInfiniteMap = <T extends MapMetadata | MapMetadataSummary>(
+  meta: T | null | undefined,
+): meta is T & { extent: InfiniteExtent } =>
   meta?.extent?.kind === "infinite";
 
 export const getMapChunkSizeTiles = (meta: MapMetadata): number =>

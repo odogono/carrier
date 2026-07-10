@@ -1,6 +1,17 @@
 name: carrier-dev
 
 services:
+  contracts:
+    container_name: carrier-dev-contracts
+    build:
+      context: .
+      dockerfile: infra/docker/api.dev.Dockerfile
+    command: ['bun', 'run', '--cwd', 'packages/contracts', 'build']
+    restart: 'no'
+    volumes:
+      - .:/app
+      - bun_node_modules:/app/node_modules
+
   nginx:
     container_name: carrier-dev-nginx
     image: nginx:1.27-alpine
@@ -21,6 +32,9 @@ services:
     build:
       context: .
       dockerfile: infra/docker/api.dev.Dockerfile
+    depends_on:
+      contracts:
+        condition: service_completed_successfully
     environment:
       API_DB_PATH: /app/data/carrier.sqlite
       API_HOST: 0.0.0.0
@@ -53,6 +67,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      contracts:
+        condition: service_completed_successfully
     ports:
       - '5178:5178'
     volumes:
@@ -69,6 +85,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      contracts:
+        condition: service_completed_successfully
     ports:
       - '5179:5179'
     volumes:

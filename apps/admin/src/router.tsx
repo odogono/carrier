@@ -83,7 +83,9 @@ const routeTree = rootRoute.addChildren([
 export const router = createRouter({ basepath: adminBasepath, routeTree });
 
 declare module '@tanstack/react-router' {
-  type Register = {
+  // TanStack Router exposes Register as an interface for module augmentation.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+  interface Register {
     router: typeof router;
   }
 }
