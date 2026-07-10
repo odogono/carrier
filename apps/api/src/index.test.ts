@@ -1015,10 +1015,31 @@ describe('API server map routes', () => {
       ).map(entry => entry.archetype.id)
     ).toEqual(['export-watchtower']);
 
+    const client = await createTestClient();
+    await expect(
+      client.maps.updateTiles({
+        edits: [],
+        expectedRevision: 999,
+        mapId: exported.id as string
+      })
+    ).rejects.toThrow('immutable snapshot');
+    await expect(
+      client.maps.createStaticEntity({
+        archetypeId: archetype.id,
+        expectedRevision: 999,
+        id: 'late-export-watchtower',
+        label: null,
+        mapId: exported.id as string,
+        position: { x: 100, z: 100 },
+        rotation: { yaw: 0 },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      })
+    ).rejects.toThrow('immutable snapshot');
+
     const chunk = await decodeMapChunkBinary(
-      await (
-        await createTestClient()
-      ).maps.getChunkBinary({
+      await client.maps.getChunkBinary({
         chunkX: 0,
         chunkZ: 0,
         mapId: exported.id as string
@@ -1031,9 +1052,7 @@ describe('API server map routes', () => {
     ]);
 
     const edgeChunk = await decodeMapChunkBinary(
-      await (
-        await createTestClient()
-      ).maps.getChunkBinary({
+      await client.maps.getChunkBinary({
         chunkX: 1,
         chunkZ: 0,
         mapId: exported.id as string

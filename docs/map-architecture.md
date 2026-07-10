@@ -15,16 +15,16 @@ All maps share one `MapMetadata` shape. The runtime model is split across:
 - `resolution`
   - `metersPerTile` and `chunkSizeTiles`
 - `export`
-  - optional source-link metadata for exported slices
+  - optional source-link metadata for Exported Maps
 
 Current map kinds:
 
-| Kind | Extent | Wraps | Mutable | Primary source of terrain |
-| --- | --- | --- | --- | --- |
-| `wrapped-classic` | `finite` | yes | yes | deterministic generator + persisted overrides |
-| `infinite-vector` | `infinite` | no | yes | authored polygons, controls, and derived state |
-| `finite-vector-slice` | `finite` | no | no | snapshot exported from `infinite-vector` |
-| `wrapped-classic-slice` | `finite` | yes | no | wrapped snapshot exported from `infinite-vector` |
+| Kind                    | Extent     | Wraps | Mutable | Primary source of terrain                        |
+| ----------------------- | ---------- | ----- | ------- | ------------------------------------------------ |
+| `wrapped-classic`       | `finite`   | yes   | yes     | deterministic generator + persisted overrides    |
+| `infinite-vector`       | `infinite` | no    | yes     | authored polygons, controls, and derived state   |
+| `finite-vector-slice`   | `finite`   | no    | no      | snapshot exported from `infinite-vector`         |
+| `wrapped-classic-slice` | `finite`   | yes   | no      | wrapped snapshot exported from `infinite-vector` |
 
 Important invariants:
 
@@ -60,7 +60,7 @@ Terrain-affecting mutations bump the map revision and invalidate generated chunk
   - regeneration clears all cached chunks, tile overrides, and static entities
 - `infinite-vector`
   - polygon, control-point, boolean, and tile-edit mutations invalidate by dirty bounds
-- exported slices
+- Exported Maps
   - immutable after creation; chunk data is stored as snapshot state
 
 ## Server Responsibilities
@@ -89,11 +89,11 @@ For the detailed chunk payload model, including height samples, binary decoding,
 - Boolean operations are server-authoritative and retire their input polygons.
 - Overview data is a first-class derived surface used by the editor for bounds and clustering.
 
-### Exported slices
+### Exported Maps
 
 - Exports are created only from `infinite-vector` maps.
 - Export metadata is persisted on the exported map row through the `export` field.
-- Exported maps are immutable finite snapshots with stored chunk data.
+- Exported Maps are immutable finite snapshots with stored chunk data.
 - `finite-vector-slice` exports are finite and non-wrapping.
 - `wrapped-classic-slice` exports are finite and wrapping on both axes.
 - Derived islands are clipped into export-local coordinates and snapshotted into the export.
@@ -108,6 +108,8 @@ Export snapshot semantics:
 - the exported map keeps a direct link to the source map id and source revision
 - exported terrain no longer depends on future source-map edits
 - exported static-entity metadata is versioned as a snapshot, not a live view of the catalog or placements
+- exported static-entity reads use the frozen manifest as the authority for archetype and asset-version metadata
+- legacy exports missing required static-entity manifest metadata fail closed for entity-dependent reads
 
 ## Tile Editing
 
@@ -149,6 +151,7 @@ Static entities are map-scoped placements of approved archetypes.
 - CRUD routes exist for create, list, update, and delete.
 - Static entities are included in chunk payloads for runtime consumption.
 - Export creation snapshots static entities whose full footprints are contained by the requested export bounds and records manifest and hash metadata for compatibility checks.
+- Exported Maps reject static-entity create, update, and delete mutations so placement rows remain a stable snapshot.
 
 Static entity placement depends on catalog metadata outside the map row itself:
 

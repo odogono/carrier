@@ -11,6 +11,7 @@ import {
   normalizeSourcePolygonParams,
   normalizeStaticEntityExportManifest,
   slugify,
+  stringifyStaticEntityExportManifest,
   type ApplyBooleanOutput,
   type Archetype,
   type AssetVersion,
@@ -552,6 +553,11 @@ const chunkRowToRecord = (row: ChunkRow) => ({
   heights: decodeFloat32Heights(row.heights)
 });
 
+const isExportedMapRow = (row: MapRow) =>
+  row.sourceMapId !== null &&
+  row.sourceRevision !== null &&
+  row.exportedAt !== null;
+
 type StaticEntityExportMetadataRow = Pick<
   MapRow,
   | 'staticEntityExportArchetypeCount'
@@ -893,7 +899,10 @@ const zarchRuntimeEntityRowToModel = (
 });
 
 const archetypeToStaticEntitySummary = (
-  archetype: Archetype
+  archetype: Pick<
+    Archetype,
+    'assetVersionId' | 'category' | 'id' | 'name' | 'status'
+  >
 ): StaticEntityArchetypeSummary => ({
   assetVersionId: archetype.assetVersionId,
   category: archetype.category,
@@ -1064,14 +1073,24 @@ export class MapRepository {
     return row;
   }
 
+  private ensureMutableInfiniteVectorMapRow(id: string) {
+    const row = this.getMapRowOrThrow(id);
+    this.assertMapContentMutable(row);
+
+    if (row.kind !== 'infinite-vector') {
+      throw new MapRepositoryError(
+        'BAD_REQUEST',
+        `Map ${id} is not an infinite-vector map`
+      );
+    }
+
+    return row;
+  }
+
   private ensureExportedMapRow(id: string) {
     const row = this.getMapRowOrThrow(id);
 
-    if (
-      row.sourceMapId === null ||
-      row.sourceRevision === null ||
-      row.exportedAt === null
-    ) {
+    if (!isExportedMapRow(row)) {
       throw new MapRepositoryError(
         'BAD_REQUEST',
         `Map ${id} is not an exported slice`
@@ -1079,6 +1098,41 @@ export class MapRepository {
     }
 
     return row;
+  }
+
+  private assertMapContentMutable(row: MapRow) {
+    if (isExportedMapRow(row)) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Exported map ${row.id} is an immutable snapshot`
+      );
+    }
+  }
+
+  private getStaticEntityExportManifest(row: MapRow) {
+    const metadata = getStaticEntityExportMetadata(row, {
+      includeManifest: true
+    });
+
+    if (!metadata) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Exported map ${row.id} is missing static entity export manifest metadata`
+      );
+    }
+
+    const actualHash = createHash('sha256')
+      .update(stringifyStaticEntityExportManifest(metadata.manifest))
+      .digest('hex');
+
+    if (actualHash !== metadata.fullManifestHash) {
+      throw new MapRepositoryError(
+        'CONFLICT',
+        `Exported map ${row.id} has inconsistent static entity export manifest metadata`
+      );
+    }
+
+    return metadata.manifest;
   }
 
   private assertExpectedRevision(row: MapRow, expectedRevision: number) {
@@ -1700,7 +1754,7 @@ export class MapRepository {
     return candidate;
   }
 
-  private listResolvedStaticEntities(mapId: string) {
+  private listLiveResolvedStaticEntities(mapId: string) {
     const entities = this.listStaticEntityRows(mapId).map(
       staticEntityRowToModel
     );
@@ -1729,6 +1783,31 @@ export class MapRepository {
         );
       }
     }
+
+    return {
+      archetypesById,
+      assetVersionsById,
+      entities
+    };
+  }
+
+  private listResolvedStaticEntities(mapId: string) {
+    const row = this.getMapRowOrThrow(mapId);
+
+    if (!isExportedMapRow(row)) {
+      return this.listLiveResolvedStaticEntities(mapId);
+    }
+
+    const entities = this.listStaticEntityRows(mapId).map(
+      staticEntityRowToModel
+    );
+    const manifest = this.getStaticEntityExportManifest(row);
+    const archetypesById = new Map(
+      manifest.map(entry => [entry.archetype.id, entry.archetype])
+    );
+    const assetVersionsById = new Map(
+      manifest.map(entry => [entry.assetVersion.id, entry.assetVersion])
+    );
 
     return {
       archetypesById,
@@ -1777,7 +1856,7 @@ export class MapRepository {
     now: string
   ) {
     const { archetypesById, assetVersionsById, entities } =
-      this.listResolvedStaticEntities(sourceMapId);
+      this.listLiveResolvedStaticEntities(sourceMapId);
     const insertStaticEntity = this.db.prepare(`
       INSERT INTO map_static_entities (
         id, map_id, label, archetype_id, position_x, position_z,
@@ -2299,7 +2378,7 @@ export class MapRepository {
     }
   ) {
     return this.runInTransaction(() => {
-      const mapRow = this.ensureInfiniteVectorMapRow(options.mapId);
+      const mapRow = this.ensureMutableInfiniteVectorMapRow(options.mapId);
       this.assertExpectedRevision(mapRow, options.expectedRevision);
       const now = new Date().toISOString();
       const previousTerrainRevision = mapRow.terrainRevision;
@@ -2333,6 +2412,7 @@ export class MapRepository {
   ) {
     return this.runInTransaction(() => {
       const mapRow = this.getMapRowOrThrow(options.mapId);
+      this.assertMapContentMutable(mapRow);
       this.assertExpectedRevision(mapRow, options.expectedRevision);
       const now = new Date().toISOString();
       const result = mutate(mapRow, now);
@@ -2478,7 +2558,7 @@ export class MapRepository {
 
   private createExportedVectorMap(input: CreateMapExportInput): MapMetadata {
     return this.runInTransaction(() => {
-      const sourceRow = this.ensureInfiniteVectorMapRow(input.mapId);
+      const sourceRow = this.ensureMutableInfiniteVectorMapRow(input.mapId);
       this.assertExpectedRevision(sourceRow, input.expectedRevision);
 
       let widthTiles: number;
@@ -2913,6 +2993,7 @@ export class MapRepository {
   ) {
     return this.runInTransaction(() => {
       const row = this.getMapRowOrThrow(id);
+      this.assertMapContentMutable(row);
       this.assertExpectedRevision(row, expectedRevision);
 
       if (row.kind !== 'wrapped-classic') {
@@ -3546,6 +3627,7 @@ export class MapRepository {
   }): UpdateMapTilesOutput {
     return this.runInTransaction(() => {
       const mapRow = this.getMapRowOrThrow(input.mapId);
+      this.assertMapContentMutable(mapRow);
       this.assertExpectedRevision(mapRow, input.expectedRevision);
 
       if (input.edits.length === 0) {
@@ -3917,6 +3999,8 @@ export class MapRepository {
     params?: SourcePolygonParams;
     vertices?: WorldPoint[];
   }) {
+    this.assertMapContentMutable(this.getMapRowOrThrow(input.mapId));
+
     if (!input.params && !input.vertices) {
       throw new MapRepositoryError(
         'BAD_REQUEST',
@@ -4101,6 +4185,8 @@ export class MapRepository {
     x?: number;
     z?: number;
   }) {
+    this.assertMapContentMutable(this.getMapRowOrThrow(input.mapId));
+
     if (
       input.elevationMeters === undefined &&
       input.influenceMeters === undefined &&
@@ -4221,7 +4307,7 @@ export class MapRepository {
     name?: string | null;
   }) {
     return this.runInTransaction(() => {
-      const mapRow = this.ensureInfiniteVectorMapRow(input.mapId);
+      const mapRow = this.ensureMutableInfiniteVectorMapRow(input.mapId);
       this.assertExpectedRevision(mapRow, input.expectedRevision);
       const existing = this.getDerivedIslandRowOrThrow(input.mapId, input.id);
       const now = new Date().toISOString();
