@@ -41,6 +41,25 @@ const hasTable = (repository: MapRepository, name: string) =>
       .get(name)
   );
 
+const expectRepositoryError = (
+  fn: () => unknown,
+  code: MapRepositoryError['code'],
+  messageIncludes?: string
+) => {
+  try {
+    fn();
+  } catch (error) {
+    expect(error).toBeInstanceOf(MapRepositoryError);
+    expect((error as MapRepositoryError).code).toBe(code);
+    if (messageIncludes) {
+      expect((error as Error).message).toContain(messageIncludes);
+    }
+    return;
+  }
+
+  throw new Error(`Expected repository error ${code}`);
+};
+
 describe('map repository', () => {
   test('keeps wrapped-classic behavior while exposing revision metadata', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
@@ -259,7 +278,7 @@ describe('map repository', () => {
     }
   });
 
-  test('supports tile overrides for infinite maps and exported finite slices', () => {
+  test('rejects tile overrides for exported maps as immutable snapshots', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 
     try {
@@ -303,46 +322,98 @@ describe('map repository', () => {
         name: 'Slice'
       });
 
-      const updatedSlice = repository.updateMapTiles({
-        edits: [
-          {
-            colorIndex: 0,
-            heightSteps: 1,
-            tileX: 0,
-            tileZ: 0,
-            typeId: 'landing-pad'
-          }
-        ],
-        expectedRevision: 0,
-        mapId: exported.id
-      });
+      const beforeChunk = repository.getMapChunk(exported.id, 0, 0);
+      const beforeMap = repository.getMap(exported.id);
 
-      expect(updatedSlice.mapRevision).toBe(1);
-      expect(updatedSlice.dirtyBounds).toEqual({
-        maxX: 10,
-        maxZ: 10,
-        minX: 0,
-        minZ: 0
-      });
+      expectRepositoryError(
+        () =>
+          repository.updateMapTiles({
+            edits: [],
+            expectedRevision: 999,
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.updateMapTiles({
+            edits: [
+              {
+                colorIndex: 0,
+                heightSteps: 1,
+                tileX: 0,
+                tileZ: 0,
+                typeId: 'landing-pad'
+              }
+            ],
+            expectedRevision: 999,
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.updateMapTiles({
+            edits: [
+              {
+                colorIndex: null,
+                heightSteps: 0,
+                tileX: 40,
+                tileZ: 0,
+                typeId: 'normal'
+              }
+            ],
+            expectedRevision: 0,
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
       expect(
-        repository.getMapChunk(exported.id, 0, 0)?.tileHeightSteps?.[0]
-      ).toBe(1);
-
-      expect(() =>
-        repository.updateMapTiles({
-          edits: [
-            {
-              colorIndex: null,
-              heightSteps: 0,
-              tileX: 40,
-              tileZ: 0,
-              typeId: 'normal'
-            }
-          ],
-          expectedRevision: 1,
-          mapId: exported.id
-        })
-      ).toThrow(MapRepositoryError);
+        repository.getMapChunk(exported.id, 0, 0)?.tileHeightSteps
+      ).toEqual(beforeChunk?.tileHeightSteps);
+      expect(repository.getMap(exported.id)?.revision).toBe(
+        beforeMap?.revision
+      );
+      expectRepositoryError(
+        () =>
+          repository.createMapExport({
+            bounds: {
+              maxX: 320,
+              maxZ: 320,
+              minX: 0,
+              minZ: 0
+            },
+            chunkSizeTiles: 32,
+            expectedRevision: 999,
+            kind: 'finite-vector-slice',
+            mapId: exported.id,
+            metersPerTile: 10,
+            name: 'Nested Slice'
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.updateMapTiles({
+            edits: [
+              {
+                colorIndex: null,
+                heightSteps: 0,
+                tileX: 40,
+                tileZ: 0,
+                typeId: 'normal'
+              }
+            ],
+            expectedRevision: 1,
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
     } finally {
       repository.close();
     }
@@ -1734,6 +1805,135 @@ describe('map repository', () => {
       expect(
         repository.getMap(exported.id)?.export?.staticEntities?.manifest
       ).toEqual(manifest);
+      expect(repository.listStaticEntityItems(exported.id)).toMatchObject([
+        {
+          archetype: {
+            id: 'watchtower',
+            name: 'Watchtower',
+            status: 'active'
+          }
+        },
+        {
+          archetype: {
+            id: 'watchtower',
+            name: 'Watchtower',
+            status: 'active'
+          }
+        },
+        {
+          archetype: {
+            id: 'windmill',
+            name: 'Windmill',
+            status: 'active'
+          }
+        }
+      ]);
+      repository.updateArchetype({
+        id: watchtower.id,
+        name: 'Archived Watchtower',
+        status: 'archived',
+        tags: ['changed']
+      });
+      repository.updateArchetype({
+        id: windmill.id,
+        name: 'Archived Windmill',
+        status: 'archived',
+        tags: ['changed']
+      });
+      repository.archiveAssetVersion(windmillAsset.id);
+      repository.db
+        .prepare('UPDATE asset_versions SET footprint_json = ? WHERE id = ?')
+        .run(
+          JSON.stringify({ depthMeters: 400, widthMeters: 400 }),
+          windmillAsset.id
+        );
+
+      expect(repository.listStaticEntityItems(exported.id)).toMatchObject([
+        {
+          archetype: {
+            id: 'watchtower',
+            name: 'Watchtower',
+            status: 'active'
+          }
+        },
+        {
+          archetype: {
+            id: 'watchtower',
+            name: 'Watchtower',
+            status: 'active'
+          }
+        },
+        {
+          archetype: {
+            id: 'windmill',
+            name: 'Windmill',
+            status: 'active'
+          }
+        }
+      ]);
+      expect(
+        repository
+          .getMapChunk(exported.id, 0, 0)
+          ?.staticEntities.map(entity => entity.id)
+      ).toEqual(['watchtower-center', 'watchtower-touch-min-z']);
+      expect(
+        repository.findExport(exported.id)?.export?.staticEntities
+      ).toEqual(exported.export?.staticEntities);
+      expectRepositoryError(
+        () =>
+          repository.createStaticEntity({
+            archetypeId: watchtower.id,
+            expectedRevision: 999,
+            id: 'late-watchtower',
+            label: null,
+            mapId: exported.id,
+            position: { x: 100, z: 100 },
+            rotation: { yaw: 0 },
+            scale: 1,
+            state: 'active',
+            yOffset: 0
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.updateStaticEntity({
+            expectedRevision: 999,
+            id: 'watchtower-center',
+            label: 'Late edit',
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.deleteStaticEntity({
+            expectedRevision: 999,
+            id: 'watchtower-center',
+            mapId: exported.id
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () =>
+          repository.createSourcePolygon({
+            expectedRevision: 999,
+            mapId: exported.id,
+            params: polygonParams,
+            vertices: square(0, 0, 40, 40)
+          }),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expectRepositoryError(
+        () => repository.regenerateMap(exported.id, 999),
+        'CONFLICT',
+        'immutable snapshot'
+      );
+      expect(repository.getMap(exported.id)?.revision).toBe(0);
     } finally {
       repository.close();
     }
@@ -1774,6 +1974,63 @@ describe('map repository', () => {
         'manifest' in
           (repository.listExports(created.id)[0]?.export?.staticEntities ?? {})
       ).toBeFalse();
+    } finally {
+      repository.close();
+    }
+  });
+
+  test('fails closed for exported entity reads when manifest metadata is missing', () => {
+    const repository = new MapRepository({ dbPath: ':memory:' });
+
+    try {
+      const created = repository.createMap({
+        kind: 'infinite-vector',
+        name: 'Legacy export world',
+        seed: 'legacy-export-seed'
+      });
+      const exported = repository.createMapExport({
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        chunkSizeTiles: 16,
+        expectedRevision: 0,
+        kind: 'finite-vector-slice',
+        mapId: created.id,
+        metersPerTile: 10,
+        name: 'Legacy Slice'
+      });
+
+      repository.db
+        .prepare(
+          `
+          UPDATE maps
+          SET
+            static_entity_export_manifest_json = NULL,
+            static_entity_export_manifest_hash = NULL,
+            static_entity_export_entity_count = NULL,
+            static_entity_export_archetype_count = NULL
+          WHERE id = ?
+        `
+        )
+        .run(exported.id);
+
+      expect(
+        repository.getMap(exported.id)?.export?.staticEntities
+      ).toBeUndefined();
+      expectRepositoryError(
+        () => repository.listStaticEntityItems(exported.id),
+        'CONFLICT',
+        'missing static entity export manifest metadata'
+      );
+      expectRepositoryError(
+        () => repository.getMapChunk(exported.id, 0, 0),
+        'CONFLICT',
+        'missing static entity export manifest metadata'
+      );
+      expect(repository.deleteMap(exported.id)).toBeTrue();
     } finally {
       repository.close();
     }

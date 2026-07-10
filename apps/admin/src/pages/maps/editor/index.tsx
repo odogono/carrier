@@ -397,9 +397,21 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
   const setTool = useCallback(
     (nextTool: EditorTool, record = false) => {
+      if (nextTool === 'terrain' && !capabilities.canEditTerrain) {
+        return;
+      }
+
+      if (nextTool === 'place-entity' && !capabilities.canEditStaticEntities) {
+        return;
+      }
+
       updateSnapshot(current => ({ ...current, tool: nextTool }), record);
     },
-    [updateSnapshot]
+    [
+      capabilities.canEditStaticEntities,
+      capabilities.canEditTerrain,
+      updateSnapshot
+    ]
   );
 
   const clearSelections = useCallback(
@@ -711,6 +723,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   const applyTerrainHeightSelection = useCallback(
     (mode: 'flatten' | 'raise' | 'lower') => {
       if (
+        !capabilities.canEditTerrain ||
         !baseTerrain ||
         !tileEditConfig ||
         terrainSelectedHeightTiles.length === 0
@@ -751,6 +764,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     },
     [
       baseTerrain,
+      capabilities.canEditTerrain,
       dispatchTerrain,
       terrainDraftEdits,
       terrainSelectedHeightTiles,
@@ -761,7 +775,11 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   );
 
   const saveTerrainEdits = useCallback(async () => {
-    if (!map || terrainDirtyEdits.length === 0) {
+    if (
+      !capabilities.canEditTerrain ||
+      !map ||
+      terrainDirtyEdits.length === 0
+    ) {
       return;
     }
 
@@ -801,6 +819,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       setTerrainSavePending(false);
     }
   }, [
+    capabilities.canEditTerrain,
     dispatchTerrain,
     invalidateTerrainMutation,
     map,
@@ -1022,6 +1041,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   }, [capabilities.canEditAuthoredGeometry, updateSnapshot]);
 
   const beginPlaceEntity = useCallback(() => {
+    if (!capabilities.canEditStaticEntities) {
+      return;
+    }
+
     updateSnapshot(
       current => ({
         ...current,
@@ -1038,7 +1061,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       }),
       true
     );
-  }, [updateSnapshot]);
+  }, [capabilities.canEditStaticEntities, updateSnapshot]);
 
   const beginDrawPolygon = useCallback(() => {
     if (!capabilities.canEditAuthoredGeometry) {
@@ -1064,6 +1087,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
   }, [capabilities.canEditAuthoredGeometry, updateSnapshot]);
 
   const beginTerrain = useCallback(() => {
+    if (!capabilities.canEditTerrain) {
+      return;
+    }
+
     updateSnapshot(
       current => ({
         ...current,
@@ -1080,7 +1107,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       }),
       true
     );
-  }, [updateSnapshot]);
+  }, [capabilities.canEditTerrain, updateSnapshot]);
 
   const activeEditorRevision = editorRevision ?? map?.revision ?? null;
   const availableTools = getAvailableEditorTools(capabilities);
@@ -1533,7 +1560,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
             .map(polygon => polygon.id);
 
           const marqueeSelectedEntityIds = staticEntityItems
-            .filter(item => pointInBounds(item.entity.position, dragState.bounds))
+            .filter(item =>
+              pointInBounds(item.entity.position, dragState.bounds)
+            )
             .map(item => item.entity.id);
 
           const shouldCreatePolygonDraft =
@@ -1755,6 +1784,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       }
 
       if (tool === 'place-entity') {
+        if (!capabilities.canEditStaticEntities) {
+          return;
+        }
+
         const world = toWorldPoint(event);
         void placeEntity(world);
         return;
@@ -1778,6 +1811,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     },
     [
       clearSelections,
+      capabilities.canEditStaticEntities,
       map,
       placeEntity,
       setPolygonDraft,
@@ -1863,6 +1897,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       event.stopPropagation();
 
       if (
+        !capabilities.canEditStaticEntities ||
         tool !== 'select' ||
         event.shiftKey ||
         !selectedEntityIds.includes(entity.id)
@@ -1884,6 +1919,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
     },
     [
       interactionRef,
+      capabilities.canEditStaticEntities,
       selectedEntityIds,
       selectedStaticEntities,
       setDragState,
@@ -1894,7 +1930,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
 
   const handleStaticEntityRotatePointerDown = useCallback(
     (event: PointerEvent<SVGCircleElement>, entity: StaticEntity) => {
-      if (tool !== 'select') {
+      if (!capabilities.canEditStaticEntities || tool !== 'select') {
         return;
       }
 
@@ -1902,10 +1938,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       interactionRef.current?.setPointerCapture(event.pointerId);
       const world = toWorldPoint(event);
       const startRadius = Math.max(
-        Math.hypot(
-          world.x - entity.position.x,
-          world.z - entity.position.z
-        ),
+        Math.hypot(world.x - entity.position.x, world.z - entity.position.z),
         0.0001
       );
       setDragState({
@@ -1922,7 +1955,13 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       suppressCanvasClickRef.current = false;
       suppressEntityClickRef.current = null;
     },
-    [interactionRef, setDragState, toWorldPoint, tool]
+    [
+      capabilities.canEditStaticEntities,
+      interactionRef,
+      setDragState,
+      toWorldPoint,
+      tool
+    ]
   );
 
   const handlePolygonPointerDown = useCallback(
@@ -2085,7 +2124,11 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           return;
         }
 
-        if (isDuplicate && selectedEntityIds.length > 0) {
+        if (
+          isDuplicate &&
+          capabilities.canEditStaticEntities &&
+          selectedEntityIds.length > 0
+        ) {
           event.preventDefault();
           void duplicateSelectedEntities();
           return;
@@ -2167,7 +2210,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           return;
         }
 
-        if (selectedEntityIds.length > 0) {
+        if (
+          capabilities.canEditStaticEntities &&
+          selectedEntityIds.length > 0
+        ) {
           event.preventDefault();
           setDeleteTarget({
             ids: selectedEntityIds,
@@ -2182,6 +2228,7 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
       clearSelections,
       canRedo,
       canUndo,
+      capabilities.canEditStaticEntities,
       commitDrawPolygon,
       controlPointDraft,
       dispatchTerrain,
@@ -2440,7 +2487,11 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           onApplyBoolean={operation => void applyBooleanOperation(operation)}
           onApplyTerrainHeightSelection={applyTerrainHeightSelection}
           onApplyTerrainTypeSelection={typeId => {
-            if (!baseTerrain || terrainSelectedHeightTiles.length === 0) {
+            if (
+              !capabilities.canEditTerrain ||
+              !baseTerrain ||
+              terrainSelectedHeightTiles.length === 0
+            ) {
               return;
             }
             dispatchTerrain({
@@ -2483,7 +2534,9 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
           onCanvasPointerMove={handleCanvasPointerMove}
           onCanvasPointerUp={handleCanvasPointerUp}
           onClearTerrainSelection={() =>
-            dispatchTerrain({ type: 'clear-height-selection' })
+            capabilities.canEditTerrain
+              ? dispatchTerrain({ type: 'clear-height-selection' })
+              : undefined
           }
           onControlPointClick={handleControlPointClick}
           onControlPointPointerDown={handleControlPointPointerDown}
@@ -2499,6 +2552,10 @@ const MapEditorPageContent = ({ id }: { id: string }) => {
             nextTool === 'terrain' ? beginTerrain() : setTool(nextTool, true)
           }
           onSetTerrainColorIndex={colorIndex => {
+            if (!capabilities.canEditTerrain) {
+              return;
+            }
+
             dispatchTerrain({
               selectedColorIndex: colorIndex,
               type: 'set-selected-color-index'

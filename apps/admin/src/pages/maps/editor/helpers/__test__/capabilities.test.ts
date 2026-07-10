@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { MapMetadata } from 'carrier-contracts/types';
 
+import { createEmptyEditorSnapshot } from '../../state/history';
 import {
   getAvailableEditorTools,
   getAvailableSidebarTabs,
   getMapEditorCapabilities,
   sanitizeEditorSnapshotForCapabilities
 } from '../capabilities';
-import { createEmptyEditorSnapshot } from '../../state/history';
 
 const wrappedClassicMap: MapMetadata = {
   createdAt: new Date().toISOString(),
@@ -56,6 +56,7 @@ describe('map editor capabilities', () => {
       canEditAuthoredGeometry: false,
       canEditStaticEntities: true,
       canEditTerrain: true,
+      canInspectStaticEntities: true,
       hasOverviewAuthoring: false
     });
     expect(getAvailableEditorTools(capabilities)).toEqual([
@@ -77,6 +78,7 @@ describe('map editor capabilities', () => {
       canEditAuthoredGeometry: true,
       canEditStaticEntities: true,
       canEditTerrain: true,
+      canInspectStaticEntities: true,
       hasOverviewAuthoring: true
     });
     expect(getAvailableEditorTools(capabilities)).toEqual([
@@ -157,6 +159,54 @@ describe('map editor capabilities', () => {
     ).toEqual({
       ...createEmptyEditorSnapshot(),
       tool: 'terrain'
+    });
+  });
+
+  test('keeps exported maps inspectable while disabling terrain and entity editing', () => {
+    const exportedMap: MapMetadata = {
+      ...wrappedClassicMap,
+      export: {
+        bounds: {
+          maxX: 320,
+          maxZ: 320,
+          minX: 0,
+          minZ: 0
+        },
+        exportedAt: new Date().toISOString(),
+        sourceMapId: 'source-1',
+        sourceRevision: 2
+      },
+      id: 'export-1',
+      kind: 'finite-vector-slice',
+      name: 'Exported Map'
+    };
+    const capabilities = getMapEditorCapabilities(exportedMap);
+
+    expect(capabilities).toEqual({
+      canEditAuthoredGeometry: false,
+      canEditStaticEntities: false,
+      canEditTerrain: false,
+      canInspectStaticEntities: true,
+      hasOverviewAuthoring: false
+    });
+    expect(getAvailableEditorTools(capabilities)).toEqual(['select', 'pan']);
+    expect(getAvailableSidebarTabs(capabilities)).toEqual([
+      'selection',
+      'entities'
+    ]);
+    expect(
+      sanitizeEditorSnapshotForCapabilities(
+        {
+          ...createEmptyEditorSnapshot(),
+          selectedEntityIds: ['entity-1'],
+          tool: 'place-entity'
+        },
+        capabilities
+      )
+    ).toEqual({
+      ...createEmptyEditorSnapshot(),
+      selectedEntityIds: ['entity-1'],
+      tool: 'select'
     });
   });
 });

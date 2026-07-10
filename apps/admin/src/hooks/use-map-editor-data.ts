@@ -31,6 +31,11 @@ export const mapEditorKeys = {
   tileEditConfig: () => ['zarch', 'tile-edit-config'] as const
 };
 
+type StaticEntityAssetSnapshot = Pick<
+  AssetVersion,
+  'footprint' | 'maxHeightDeltaMeters'
+>;
+
 const parseChunkQueryKey = (queryKey: readonly unknown[]) => {
   if (
     queryKey[0] !== 'map-chunk' ||
@@ -147,7 +152,7 @@ export const useMapEditorData = (mapId: string) => {
   });
 
   const staticEntitiesQuery = useQuery({
-    enabled: capabilities.canEditStaticEntities,
+    enabled: capabilities.canInspectStaticEntities,
     queryFn: () => client.maps.listStaticEntities({ mapId }),
     queryKey: mapEditorKeys.staticEntities(mapId)
   });
@@ -192,16 +197,29 @@ export const useMapEditorData = (mapId: string) => {
       : []
   });
 
-  const assetVersionsById = useMemo(
-    () =>
-      assetVersionQueries.reduce<Map<string, AssetVersion>>((map, query) => {
+  const assetVersionsById = useMemo(() => {
+    const snapshots = new Map<string, StaticEntityAssetSnapshot>();
+
+    for (const entry of map?.export?.staticEntities?.manifest ?? []) {
+      snapshots.set(entry.assetVersion.id, {
+        footprint: entry.assetVersion.footprint,
+        maxHeightDeltaMeters: entry.assetVersion.maxHeightDeltaMeters
+      });
+    }
+
+    return assetVersionQueries.reduce<Map<string, StaticEntityAssetSnapshot>>(
+      (map, query) => {
         if (query.data) {
-          map.set(query.data.id, query.data);
+          map.set(query.data.id, {
+            footprint: query.data.footprint,
+            maxHeightDeltaMeters: query.data.maxHeightDeltaMeters
+          });
         }
         return map;
-      }, new Map()),
-    [assetVersionQueries]
-  );
+      },
+      snapshots
+    );
+  }, [assetVersionQueries, map?.export?.staticEntities?.manifest]);
 
   const invalidateMapQueries = useCallback(async () => {
     await Promise.all([
@@ -376,13 +394,16 @@ export const useMapEditorData = (mapId: string) => {
       ]);
     }
 
+    if (nextCapabilities.canInspectStaticEntities) {
+      await queryClient.fetchQuery({
+        queryFn: () => client.maps.listStaticEntities({ mapId }),
+        queryKey: mapEditorKeys.staticEntities(mapId),
+        staleTime: 0
+      });
+    }
+
     if (nextCapabilities.canEditStaticEntities) {
       await Promise.all([
-        queryClient.fetchQuery({
-          queryFn: () => client.maps.listStaticEntities({ mapId }),
-          queryKey: mapEditorKeys.staticEntities(mapId),
-          staleTime: 0
-        }),
         queryClient.fetchQuery({
           queryFn: () => client.maps.listReferencedArchetypes({ mapId }),
           queryKey: mapEditorKeys.referencedArchetypes(mapId),

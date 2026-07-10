@@ -55,7 +55,7 @@ import type {
 import { OverviewPane } from './overview-pane';
 
 type StaticEntitySidebarItem = StaticEntityListItem & {
-  assetVersion: AssetVersion | null;
+  assetVersion: Pick<AssetVersion, 'footprint' | 'maxHeightDeltaMeters'> | null;
   diagnostics: StaticEntityGroundingDiagnostics;
 };
 
@@ -275,6 +275,8 @@ export const EditorSidebar = ({
     availableTabs[0] ?? 'selection'
   );
   const canEditAuthoredGeometry = capabilities.canEditAuthoredGeometry;
+  const canEditStaticEntities = capabilities.canEditStaticEntities;
+  const canEditTerrain = capabilities.canEditTerrain;
   const hasOverviewAuthoring = capabilities.hasOverviewAuthoring;
   const resolvedActiveTab = availableTabs.includes(activeTab)
     ? activeTab
@@ -295,9 +297,12 @@ export const EditorSidebar = ({
 
     return canEditAuthoredGeometry
       ? 'Build a multi-selection from the canvas or island list to unlock boolean tools and grouped movement.'
-      : 'Select terrain or entities from the canvas to inspect and edit them.';
+      : canEditStaticEntities
+        ? 'Select terrain or entities from the canvas to inspect and edit them.'
+        : 'Select terrain or entities from the canvas to inspect this exported map.';
   }, [
     canEditAuthoredGeometry,
+    canEditStaticEntities,
     selectedEntityCount,
     selectedIslandCount,
     selectedPolygonCount
@@ -382,6 +387,13 @@ export const EditorSidebar = ({
                 description={nextActionHint}
                 title={activeToolLabel}
               />
+
+              {!canEditTerrain && !canEditStaticEntities ? (
+                <div className="rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                  This exported map is an immutable snapshot. Terrain and static
+                  entity editing are disabled.
+                </div>
+              ) : null}
 
               {activeTool === 'terrain' ? (
                 <SectionShell
@@ -483,6 +495,7 @@ export const EditorSidebar = ({
                     />
                   </div>
                   <TextInput
+                    disabled={!canEditStaticEntities}
                     id="entity-label"
                     label="Label"
                     onChange={label =>
@@ -497,6 +510,7 @@ export const EditorSidebar = ({
                   <div className="space-y-2">
                     <Label htmlFor="entity-archetype">Archetype</Label>
                     <Select
+                      disabled={!canEditStaticEntities}
                       id="entity-archetype"
                       onChange={event =>
                         setEntityDraft(
@@ -531,6 +545,7 @@ export const EditorSidebar = ({
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <NumberInput
+                      disabled={!canEditStaticEntities}
                       id="entity-x"
                       label="X"
                       onChange={x =>
@@ -542,6 +557,7 @@ export const EditorSidebar = ({
                       value={currentEntityForInspector.x}
                     />
                     <NumberInput
+                      disabled={!canEditStaticEntities}
                       id="entity-z"
                       label="Z"
                       onChange={z =>
@@ -555,6 +571,7 @@ export const EditorSidebar = ({
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <NumberInput
+                      disabled={!canEditStaticEntities}
                       id="entity-yaw"
                       label="Yaw"
                       onChange={yaw =>
@@ -566,6 +583,7 @@ export const EditorSidebar = ({
                       value={currentEntityForInspector.yaw}
                     />
                     <NumberInput
+                      disabled={!canEditStaticEntities}
                       id="entity-scale"
                       label="Scale"
                       min="0.1"
@@ -581,6 +599,7 @@ export const EditorSidebar = ({
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <NumberInput
+                      disabled={!canEditStaticEntities}
                       id="entity-y-offset"
                       label="Y Offset"
                       onChange={yOffset =>
@@ -595,6 +614,7 @@ export const EditorSidebar = ({
                     <div className="space-y-2">
                       <Label htmlFor="entity-state">State</Label>
                       <Select
+                        disabled={!canEditStaticEntities}
                         id="entity-state"
                         onChange={event =>
                           setEntityDraft(
@@ -1015,14 +1035,18 @@ export const EditorSidebar = ({
                         : nextActionHint}
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Button onClick={onBeginPlaceEntity}>
-                        <Package className="h-4 w-4" />
-                        Place Entity
-                      </Button>
-                      <Button onClick={onBeginTerrain} variant="outline">
-                        <Layers3 className="h-4 w-4" />
-                        Terrain
-                      </Button>
+                      {canEditStaticEntities ? (
+                        <Button onClick={onBeginPlaceEntity}>
+                          <Package className="h-4 w-4" />
+                          Place Entity
+                        </Button>
+                      ) : null}
+                      {canEditTerrain ? (
+                        <Button onClick={onBeginTerrain} variant="outline">
+                          <Layers3 className="h-4 w-4" />
+                          Terrain
+                        </Button>
+                      ) : null}
                       {canEditAuthoredGeometry ? (
                         <Button onClick={onBeginDrawPolygon}>
                           <Plus className="h-4 w-4" />
@@ -1047,7 +1071,9 @@ export const EditorSidebar = ({
               ) : null}
             </div>
 
-            {activeTool !== 'terrain' && currentEntityForInspector ? (
+            {canEditStaticEntities &&
+            activeTool !== 'terrain' &&
+            currentEntityForInspector ? (
               <ActionBar>
                 <Button disabled={!entityDirty} onClick={onSaveEntityDraft}>
                   <Save className="h-4 w-4" />
@@ -1191,7 +1217,8 @@ export const EditorSidebar = ({
               </ActionBar>
             ) : null}
 
-            {activeTool !== 'terrain' &&
+            {canEditStaticEntities &&
+            activeTool !== 'terrain' &&
             !currentEntityForInspector &&
             !currentControlPointForInspector &&
             !currentPolygonForInspector &&
@@ -1231,137 +1258,139 @@ export const EditorSidebar = ({
 
         {resolvedActiveTab === 'entities' ? (
           <div className="h-full overflow-y-auto p-4">
-            <SectionShell
-              description="Choose the active archetype for placement and inspect the map-wide entity list."
-              title="Catalog"
-            >
-              <div className="grid gap-3 sm:grid-cols-3">
-                <InspectorStat
-                  label="Active"
-                  value={activeCatalogArchetypeId ?? 'None'}
-                />
-                <InspectorStat
-                  label="Catalog"
-                  value={`${catalogArchetypes.length}`}
-                />
-                <InspectorStat
-                  label="Placed"
-                  testId="static-entity-placed-count"
-                  value={`${counts.staticEntities}`}
-                />
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="catalog-category">Category</Label>
-                  <Select
-                    id="catalog-category"
-                    onChange={event =>
-                      onSetCatalogCategory(
-                        event.target.value as
-                          | StaticEntityListItem['archetype']['category']
-                          | 'all'
-                      )
-                    }
-                    value={activeCatalogCategory}
-                  >
-                    <option value="all">All</option>
-                    {catalogSections.map(category => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </Select>
+            {canEditStaticEntities ? (
+              <SectionShell
+                description="Choose the active archetype for placement and inspect the map-wide entity list."
+                title="Catalog"
+              >
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <InspectorStat
+                    label="Active"
+                    value={activeCatalogArchetypeId ?? 'None'}
+                  />
+                  <InspectorStat
+                    label="Catalog"
+                    value={`${catalogArchetypes.length}`}
+                  />
+                  <InspectorStat
+                    label="Placed"
+                    testId="static-entity-placed-count"
+                    value={`${counts.staticEntities}`}
+                  />
                 </div>
-                <TextInput
-                  id="catalog-search"
-                  label="Search"
-                  onChange={onSetCatalogSearch}
-                  placeholder="Search archetypes"
-                  value={activeCatalogSearch}
-                />
-              </div>
-              <div className="mt-4 space-y-3">
-                {catalogSections.map(category => {
-                  const items = catalogArchetypes.filter(archetype =>
-                    activeCatalogCategory === 'all'
-                      ? archetype.category === category
-                      : archetype.category === activeCatalogCategory &&
-                        archetype.category === category
-                  );
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="catalog-category">Category</Label>
+                    <Select
+                      id="catalog-category"
+                      onChange={event =>
+                        onSetCatalogCategory(
+                          event.target.value as
+                            | StaticEntityListItem['archetype']['category']
+                            | 'all'
+                        )
+                      }
+                      value={activeCatalogCategory}
+                    >
+                      <option value="all">All</option>
+                      {catalogSections.map(category => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <TextInput
+                    id="catalog-search"
+                    label="Search"
+                    onChange={onSetCatalogSearch}
+                    placeholder="Search archetypes"
+                    value={activeCatalogSearch}
+                  />
+                </div>
+                <div className="mt-4 space-y-3">
+                  {catalogSections.map(category => {
+                    const items = catalogArchetypes.filter(archetype =>
+                      activeCatalogCategory === 'all'
+                        ? archetype.category === category
+                        : archetype.category === activeCatalogCategory &&
+                          archetype.category === category
+                    );
 
-                  if (items.length === 0) {
-                    return null;
-                  }
+                    if (items.length === 0) {
+                      return null;
+                    }
 
-                  return (
-                    <div className="space-y-2" key={category}>
-                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                        {category}
-                      </div>
-                      <div className="space-y-2">
-                        {items
-                          .filter(archetype =>
-                            activeCatalogSearch.trim()
-                              ? [
-                                  archetype.id,
-                                  archetype.name,
-                                  ...archetype.tags
-                                ]
-                                  .map(value => value.toLowerCase())
-                                  .some(value =>
-                                    value.includes(
-                                      activeCatalogSearch.trim().toLowerCase()
+                    return (
+                      <div className="space-y-2" key={category}>
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          {category}
+                        </div>
+                        <div className="space-y-2">
+                          {items
+                            .filter(archetype =>
+                              activeCatalogSearch.trim()
+                                ? [
+                                    archetype.id,
+                                    archetype.name,
+                                    ...archetype.tags
+                                  ]
+                                    .map(value => value.toLowerCase())
+                                    .some(value =>
+                                      value.includes(
+                                        activeCatalogSearch.trim().toLowerCase()
+                                      )
                                     )
-                                  )
-                              : true
-                          )
-                          .map(archetype => (
-                            <button
-                              className={cn(
-                                'flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition-colors',
-                                archetype.id === activeCatalogArchetypeId
-                                  ? 'border-emerald-400/60 bg-emerald-500/10'
-                                  : 'border-border bg-background hover:bg-accent/40'
-                              )}
-                              key={archetype.id}
-                              onClick={() =>
-                                onPickCatalogArchetype(archetype.id)
-                              }
-                              type="button"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium">
-                                  {archetype.name}
+                                : true
+                            )
+                            .map(archetype => (
+                              <button
+                                className={cn(
+                                  'flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition-colors',
+                                  archetype.id === activeCatalogArchetypeId
+                                    ? 'border-emerald-400/60 bg-emerald-500/10'
+                                    : 'border-border bg-background hover:bg-accent/40'
+                                )}
+                                key={archetype.id}
+                                onClick={() =>
+                                  onPickCatalogArchetype(archetype.id)
+                                }
+                                type="button"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium">
+                                    {archetype.name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {archetype.id}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {archetype.id}
-                                </div>
-                              </div>
-                              <Badge variant="outline">
-                                {referencedArchetypeIds.has(archetype.id)
-                                  ? 'In map'
-                                  : 'Global'}
-                              </Badge>
-                            </button>
-                          ))}
+                                <Badge variant="outline">
+                                  {referencedArchetypeIds.has(archetype.id)
+                                    ? 'In map'
+                                    : 'Global'}
+                                </Badge>
+                              </button>
+                            ))}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-4 flex gap-2">
-                <Button onClick={onBeginPlaceEntity}>
-                  <Package className="h-4 w-4" />
-                  Place Selected Archetype
-                </Button>
-                <Button
-                  onClick={() => onSelectTool('select')}
-                  variant="outline"
-                >
-                  Selection Tool
-                </Button>
-              </div>
-            </SectionShell>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <Button onClick={onBeginPlaceEntity}>
+                    <Package className="h-4 w-4" />
+                    Place Selected Archetype
+                  </Button>
+                  <Button
+                    onClick={() => onSelectTool('select')}
+                    variant="outline"
+                  >
+                    Selection Tool
+                  </Button>
+                </div>
+              </SectionShell>
+            ) : null}
 
             <SectionShell
               description="Search, filter, select, and jump to placed entities."
@@ -1676,6 +1705,7 @@ const InspectorStat = ({
 );
 
 const NumberInput = ({
+  disabled,
   id,
   label,
   min,
@@ -1687,6 +1717,7 @@ const NumberInput = ({
     <Label htmlFor={id}>{label}</Label>
     <Input
       id={id}
+      disabled={disabled}
       min={min}
       onChange={event => onChange(parseNumber(event.target.value, value))}
       step={step}
@@ -1697,6 +1728,7 @@ const NumberInput = ({
 );
 
 const TextInput = ({
+  disabled,
   id,
   label,
   onChange,
@@ -1707,6 +1739,7 @@ const TextInput = ({
     <Label htmlFor={id}>{label}</Label>
     <Input
       id={id}
+      disabled={disabled}
       onChange={event => onChange(event.target.value)}
       placeholder={placeholder}
       value={value}
@@ -1715,6 +1748,7 @@ const TextInput = ({
 );
 
 type NumberInputProps = {
+  disabled?: boolean;
   id: string;
   label: string;
   min?: string;
@@ -1724,6 +1758,7 @@ type NumberInputProps = {
 };
 
 type TextInputProps = {
+  disabled?: boolean;
   id: string;
   label: string;
   onChange: (value: string) => void;

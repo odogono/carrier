@@ -7,6 +7,7 @@ export type MapEditorCapabilities = {
   canEditAuthoredGeometry: boolean;
   canEditStaticEntities: boolean;
   canEditTerrain: boolean;
+  canInspectStaticEntities: boolean;
   hasOverviewAuthoring: boolean;
 };
 
@@ -26,16 +27,20 @@ export const getMapEditorCapabilities = (
       canEditAuthoredGeometry: false,
       canEditStaticEntities: false,
       canEditTerrain: false,
+      canInspectStaticEntities: false,
       hasOverviewAuthoring: false
     };
   }
 
   const infinite = isInfiniteMap(map);
+  const exported =
+    map.kind === 'finite-vector-slice' || map.kind === 'wrapped-classic-slice';
 
   return {
     canEditAuthoredGeometry: infinite,
-    canEditStaticEntities: true,
-    canEditTerrain: true,
+    canEditStaticEntities: !exported,
+    canEditTerrain: !exported,
+    canInspectStaticEntities: true,
     hasOverviewAuthoring: infinite
   };
 };
@@ -65,7 +70,7 @@ export const getAvailableSidebarTabs = (
 ): SidebarTab[] => {
   const tabs: SidebarTab[] = ['selection'];
 
-  if (capabilities.canEditStaticEntities) {
+  if (capabilities.canInspectStaticEntities) {
     tabs.push('entities');
   }
 
@@ -92,7 +97,8 @@ export const sanitizeEditorSnapshotForCapabilities = (
         : 'select'
       : snapshot.tool === 'terrain' && !capabilities.canEditTerrain
         ? 'select'
-        : snapshot.tool === 'place-entity' && !capabilities.canEditStaticEntities
+        : snapshot.tool === 'place-entity' &&
+            !capabilities.canEditStaticEntities
           ? 'select'
           : snapshot.tool;
 
