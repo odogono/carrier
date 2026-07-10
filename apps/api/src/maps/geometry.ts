@@ -172,6 +172,12 @@ export const bboxesIntersect = (left: WorldBounds, right: WorldBounds) =>
   left.minZ <= right.maxZ &&
   left.maxZ >= right.minZ;
 
+export const bboxContains = (outer: WorldBounds, inner: WorldBounds) =>
+  outer.minX <= inner.minX &&
+  outer.maxX >= inner.maxX &&
+  outer.minZ <= inner.minZ &&
+  outer.maxZ >= inner.maxZ;
+
 export const pointInPolygon = (
   point: WorldPoint,
   vertices: readonly WorldPoint[]

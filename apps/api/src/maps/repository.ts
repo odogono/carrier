@@ -58,6 +58,7 @@ import {
 import {
   applyBooleanOperationToPolygons,
   averageSourcePolygonParams,
+  bboxContains,
   bboxesIntersect,
   boundsFromPointRadius,
   canonicalizeVertices,
@@ -1809,7 +1810,7 @@ export class MapRepository {
       }
 
       if (
-        !bboxesIntersect(
+        !bboxContains(
           bounds,
           getStaticEntityFootprintBounds(entity, assetVersion)
         )
