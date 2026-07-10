@@ -8,6 +8,7 @@ import type {
   WorldPoint
 } from 'carrier-contracts/types';
 import {
+  computeScaledGroundingResult,
   getGroundingSamplePoints,
   sampleTerrainHeight,
   terrainGridFromRuntimeChunk,
@@ -21,10 +22,11 @@ export type StaticEntitySnapMode = 'free' | 'meter' | 'tile';
 
 export type StaticEntityGroundingDiagnostics =
   | {
-      averageHeight: number;
-      effectiveY: number;
-      maxHeightDelta: number;
+      averageTerrainHeightMeters: number;
+      effectiveHeightMeters: number;
+      maxHeightDeltaMeters: number;
       samples: GroundingSample[];
+      scaledYOffsetMeters: number;
       status: 'valid' | 'warning';
       valid: boolean;
     }
@@ -195,7 +197,7 @@ export const getStaticEntityGroundingDiagnostics = ({
     | null
     | undefined;
   chunks: Map<string, RuntimeMapChunk>;
-  entity: Pick<StaticEntity, 'position' | 'rotation' | 'yOffset'>;
+  entity: Pick<StaticEntity, 'position' | 'rotation' | 'scale' | 'yOffset'>;
   map: MapMetadata;
   terrains?: TerrainGridEntry[];
 }): StaticEntityGroundingDiagnostics => {
@@ -204,42 +206,30 @@ export const getStaticEntityGroundingDiagnostics = ({
   }
 
   const terrains = precomputedTerrains ?? getTerrainGrids(chunks, map);
-  const samplePoints = getGroundingSamplePoints({
+  const grounding = computeScaledGroundingResult({
     anchorX: entity.position.x,
     anchorZ: entity.position.z,
-    depthMeters: assetVersion.footprint.depthMeters,
-    widthMeters: assetVersion.footprint.widthMeters,
-    yawDegrees: entity.rotation.yaw
+    footprintDepthMeters: assetVersion.footprint.depthMeters,
+    footprintWidthMeters: assetVersion.footprint.widthMeters,
+    maxHeightDeltaMeters: assetVersion.maxHeightDeltaMeters,
+    placementScale: entity.scale,
+    sampleHeight: point => resolveTerrainHeight(terrains, point),
+    yawDegrees: entity.rotation.yaw,
+    yOffsetMeters: entity.yOffset
   });
-  const samples: GroundingSample[] = [];
 
-  for (const samplePoint of samplePoints) {
-    const height = resolveTerrainHeight(terrains, samplePoint);
-    if (height === null) {
-      return { status: 'pending' };
-    }
-
-    samples.push({
-      ...samplePoint,
-      height
-    });
+  if (!grounding) {
+    return { status: 'pending' };
   }
 
-  const heights = samples.map(sample => sample.height);
-  const minHeight = Math.min(...heights);
-  const maxHeight = Math.max(...heights);
-  const averageHeight =
-    heights.reduce((sum, value) => sum + value, 0) / heights.length;
-  const maxHeightDelta = maxHeight - minHeight;
-  const valid = maxHeightDelta <= assetVersion.maxHeightDeltaMeters;
-
   return {
-    averageHeight,
-    effectiveY: averageHeight + entity.yOffset,
-    maxHeightDelta,
-    samples,
-    status: valid ? 'valid' : 'warning',
-    valid
+    averageTerrainHeightMeters: grounding.averageTerrainHeightMeters,
+    effectiveHeightMeters: grounding.effectiveHeightMeters,
+    maxHeightDeltaMeters: grounding.maxHeightDeltaMeters,
+    samples: grounding.samples,
+    scaledYOffsetMeters: grounding.scaledYOffsetMeters,
+    status: grounding.valid ? 'valid' : 'warning',
+    valid: grounding.valid
   };
 };
 

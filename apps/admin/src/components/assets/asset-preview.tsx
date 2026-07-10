@@ -1,11 +1,6 @@
-import { Suspense, useEffect, useMemo, useState } from 'react';
-
-import { OrbitControls, useGLTF } from '@react-three/drei';
-import { Canvas } from '@react-three/fiber';
-import { useQuery } from '@tanstack/react-query';
 import {
-  type AssetVersion,
   decodeMapChunkBinary,
+  type AssetVersion,
   type MapMetadata
 } from 'carrier-contracts/types';
 import {
@@ -17,13 +12,13 @@ import {
   getGroundingSamplePoints,
   terrainGridFromRuntimeChunk
 } from 'carrier-preview';
-import {
-  BufferAttribute,
-  BufferGeometry,
-  MeshStandardMaterial
-} from 'three';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { BufferAttribute, BufferGeometry, MeshStandardMaterial } from 'three';
 
 import { client } from '@/lib/api-client';
+import { OrbitControls, useGLTF } from '@react-three/drei';
+import { Canvas } from '@react-three/fiber';
+import { useQuery } from '@tanstack/react-query';
 
 import { Badge } from '../ui/badge';
 import {
@@ -108,12 +103,18 @@ function FootprintOverlay({
       widthMeters,
       yawDegrees
     });
-    const frontLeft = samplePointsBase.find(point => point.label === 'front-left');
+    const frontLeft = samplePointsBase.find(
+      point => point.label === 'front-left'
+    );
     const frontRight = samplePointsBase.find(
       point => point.label === 'front-right'
     );
-    const backLeft = samplePointsBase.find(point => point.label === 'back-left');
-    const backRight = samplePointsBase.find(point => point.label === 'back-right');
+    const backLeft = samplePointsBase.find(
+      point => point.label === 'back-left'
+    );
+    const backRight = samplePointsBase.find(
+      point => point.label === 'back-right'
+    );
 
     if (!frontLeft || !frontRight || !backLeft || !backRight) {
       return null;
@@ -166,7 +167,10 @@ function FootprintOverlay({
         <lineBasicMaterial color="#f97316" linewidth={2} />
       </lineSegments>
       {samplePoints.map(sample => (
-        <group key={sample.label} position={[sample.x, sample.height, sample.z]}>
+        <group
+          key={sample.label}
+          position={[sample.x, sample.height, sample.z]}
+        >
           <mesh position={[0, 0.4, 0]}>
             <sphereGeometry args={[0.45, 16, 16]} />
             <meshStandardMaterial
@@ -179,7 +183,14 @@ function FootprintOverlay({
             <bufferGeometry>
               <bufferAttribute
                 args={[
-                  new Float32Array([0, 0, 0, 0, groundedHeight - sample.height, 0]),
+                  new Float32Array([
+                    0,
+                    0,
+                    0,
+                    0,
+                    groundedHeight - sample.height,
+                    0
+                  ]),
                   3
                 ]}
                 attach="attributes-position"
@@ -232,10 +243,17 @@ function PreviewScene({
       />
       <group rotation={[0, (yawDegrees * Math.PI) / 180, 0]}>
         <Suspense fallback={null}>
-          <ModelPreview groundedHeight={groundedHeight} runtimeHref={runtimeHref} />
+          <ModelPreview
+            groundedHeight={groundedHeight}
+            runtimeHref={runtimeHref}
+          />
         </Suspense>
       </group>
-      <mesh geometry={terrainGeometry} material={terrainMaterial} receiveShadow />
+      <mesh
+        geometry={terrainGeometry}
+        material={terrainMaterial}
+        receiveShadow
+      />
       <FootprintOverlay
         depthMeters={footprintDepthMeters}
         groundedHeight={groundedHeight}
@@ -247,8 +265,15 @@ function PreviewScene({
         widthMeters={footprintWidthMeters}
         yawDegrees={yawDegrees}
       />
-      <gridHelper args={[120, 24, '#334155', '#1e293b']} position={[0, -0.01, 0]} />
-      <OrbitControls makeDefault maxPolarAngle={Math.PI * 0.48} minDistance={12} />
+      <gridHelper
+        args={[120, 24, '#334155', '#1e293b']}
+        position={[0, -0.01, 0]}
+      />
+      <OrbitControls
+        makeDefault
+        maxPolarAngle={Math.PI * 0.48}
+        minDistance={12}
+      />
     </>
   );
 }
@@ -276,7 +301,9 @@ export function AssetPreviewPanel({
   }, [availableMaps, selectedMapId]);
 
   const selectedMap =
-    availableMaps.find(map => map.id === selectedMapId) ?? availableMaps[0] ?? null;
+    availableMaps.find(map => map.id === selectedMapId) ??
+    availableMaps[0] ??
+    null;
   const parsedChunkX = Number(chunkX);
   const parsedChunkZ = Number(chunkZ);
   const parsedYawDegrees = Number(yawDegrees);
@@ -295,7 +322,13 @@ export function AssetPreviewPanel({
           mapId: selectedMap!.id
         })
       ),
-    queryKey: ['asset-preview', asset.id, selectedMap?.id, parsedChunkX, parsedChunkZ]
+    queryKey: [
+      'asset-preview',
+      asset.id,
+      selectedMap?.id,
+      parsedChunkX,
+      parsedChunkZ
+    ]
   });
 
   const terrain = useMemo(() => {
@@ -453,13 +486,21 @@ export function AssetPreviewPanel({
         <div className="overflow-hidden rounded-lg border bg-slate-950">
           {ready ? (
             <div className="h-[440px] w-full">
-              <Canvas camera={{ far: 400, fov: 45, near: 0.1, position: [28, 22, 28] }} shadows>
+              <Canvas
+                camera={{
+                  far: 400,
+                  fov: 45,
+                  near: 0.1,
+                  position: [28, 22, 28]
+                }}
+                shadows
+              >
                 <PreviewScene
                   anchorX={anchor.x}
                   anchorZ={anchor.z}
                   footprintDepthMeters={footprintDepthMeters}
                   footprintWidthMeters={footprintWidthMeters}
-                  groundedHeight={grounding.averageHeight}
+                  groundedHeight={grounding.averageTerrainHeightMeters}
                   runtimeHref={runtimeHref}
                   samplePoints={grounding.samples}
                   terrainGeometry={terrainGeometry}
@@ -486,7 +527,9 @@ export function AssetPreviewPanel({
               Grounded height
             </div>
             <div className="mt-1 text-lg font-semibold">
-              {grounding ? grounding.averageHeight.toFixed(2) : '—'}
+              {grounding
+                ? grounding.averageTerrainHeightMeters.toFixed(2)
+                : '—'}
             </div>
           </div>
           <div className="rounded-md border p-3">
@@ -494,7 +537,7 @@ export function AssetPreviewPanel({
               Max height delta
             </div>
             <div className="mt-1 text-lg font-semibold">
-              {grounding ? grounding.maxHeightDelta.toFixed(2) : '—'}
+              {grounding ? grounding.maxHeightDeltaMeters.toFixed(2) : '—'}
             </div>
           </div>
           <div className="rounded-md border p-3">
@@ -530,7 +573,9 @@ export function AssetPreviewPanel({
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">
                     {sample.label}
                   </div>
-                  <div className="mt-1 font-medium">{sample.height.toFixed(2)}</div>
+                  <div className="mt-1 font-medium">
+                    {sample.height.toFixed(2)}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     {sample.x.toFixed(1)}, {sample.z.toFixed(1)}
                   </div>

@@ -21,6 +21,10 @@ import {
   shouldUseStaticEntityInstancing
 } from './zarch-static-entities';
 
+const groundingFixture = await Bun.file(
+  new URL('../../../../fixtures/static-entity-grounding.json', import.meta.url)
+).json();
+
 const map: MapMetadata = {
   createdAt: '2026-03-24T00:00:00.000Z',
   extent: {
@@ -167,7 +171,7 @@ describe('zarch static entity helpers', () => {
     ).toBe(false);
   });
 
-  test('grounds static entities on the center terrain height and applies yOffset', () => {
+  test('grounds static entities on averaged footprint height and scaled yOffset', () => {
     const terrain = {
       sampleHeightAtWorld: (x: number, z: number) =>
         x === 12 && z === 12 ? 10 : 2
@@ -181,9 +185,50 @@ describe('zarch static entity helpers', () => {
         terrain
       })
     ).toEqual({
-      effectiveY: 12,
+      averageTerrainHeightMeters: 3.6,
+      effectiveHeightMeters: 5.6,
+      maxHeightDeltaMeters: 8,
+      scaledYOffsetMeters: 2,
+      sceneY: 8.4,
       valid: false
     });
+  });
+
+  test('projects canonical effective height into client scene Y', () => {
+    const fixtureMap = {
+      ...map,
+      resolution: {
+        ...map.resolution,
+        metersPerTile: groundingFixture.map.metersPerTile
+      }
+    };
+    const sceneScale = getSceneMetersScale(fixtureMap);
+    const terrain = {
+      sampleHeightAtWorld: (sceneX: number, sceneZ: number) => {
+        const x = sceneX / sceneScale;
+        const z = sceneZ / sceneScale;
+        return (
+          groundingFixture.terrainPlane.baseHeightMeters +
+          groundingFixture.terrainPlane.xSlope * x +
+          groundingFixture.terrainPlane.zSlope * z
+        );
+      }
+    };
+
+    const grounding = getStaticEntityGrounding({
+      assetVersion: groundingFixture.assetVersion,
+      entity: groundingFixture.placement,
+      map: fixtureMap,
+      terrain
+    });
+
+    expect(sceneScale).toBeCloseTo(groundingFixture.expected.sceneScale, 8);
+    expect(grounding?.effectiveHeightMeters).toBeCloseTo(
+      groundingFixture.expected.effectiveHeightMeters,
+      8
+    );
+    expect(grounding?.sceneY).toBeCloseTo(groundingFixture.expected.sceneY, 8);
+    expect(grounding?.valid).toBe(groundingFixture.expected.valid);
   });
 
   test('grounds static entities against edited terrain height steps', () => {
@@ -223,7 +268,7 @@ describe('zarch static entity helpers', () => {
         },
         map,
         terrain
-      })?.effectiveY
+      })?.sceneY
     ).toBe(4.5);
   });
 });

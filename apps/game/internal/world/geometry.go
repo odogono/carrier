@@ -9,9 +9,10 @@ type groundingSample struct {
 }
 
 type groundingResult struct {
-	AverageHeight  float64
-	MaxHeightDelta float64
-	Valid          bool
+	AverageTerrainHeightMeters float64
+	EffectiveHeightMeters      float64
+	MaxHeightDeltaMeters       float64
+	Valid                      bool
 }
 
 func rotateWorldOffset(x, z, yawDegrees float64) Vector2 {
@@ -50,7 +51,7 @@ func getGroundingSamplePoints(anchorX, anchorZ, depthMeters, widthMeters, yawDeg
 	return samples
 }
 
-func computeGrounding(terrain *TerrainSet, anchorX, anchorZ, depthMeters, widthMeters, yawDegrees, maxHeightDeltaMeters, yOffset float64) (groundingResult, bool) {
+func computeGrounding(terrain *TerrainSet, anchorX, anchorZ, depthMeters, widthMeters, yawDegrees, maxHeightDeltaMeters, scaledYOffsetMeters float64) (groundingResult, bool) {
 	samplePoints := getGroundingSamplePoints(anchorX, anchorZ, depthMeters, widthMeters, yawDegrees)
 	heights := make([]float64, 0, len(samplePoints))
 
@@ -79,9 +80,10 @@ func computeGrounding(terrain *TerrainSet, anchorX, anchorZ, depthMeters, widthM
 	maxHeightDelta := maxHeight - minHeight
 
 	return groundingResult{
-		AverageHeight:  averageHeight + yOffset,
-		MaxHeightDelta: maxHeightDelta,
-		Valid:          maxHeightDelta <= maxHeightDeltaMeters,
+		AverageTerrainHeightMeters: averageHeight,
+		EffectiveHeightMeters:      averageHeight + scaledYOffsetMeters,
+		MaxHeightDeltaMeters:       maxHeightDelta,
+		Valid:                      maxHeightDelta <= maxHeightDeltaMeters,
 	}, true
 }
 

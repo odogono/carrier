@@ -728,7 +728,7 @@ export const ZarchStaticEntities = ({
         batch.push({
           scale,
           x: sceneX,
-          y: grounding.effectiveY,
+          y: grounding.sceneY,
           yaw: (-renderEntity.rotation.yaw * Math.PI) / 180,
           z: sceneZ
         });
@@ -757,7 +757,7 @@ export const ZarchStaticEntities = ({
         cloneEntriesRef.current.set(entity.id, cloneEntry);
       }
 
-      cloneEntry.object.position.set(sceneX, grounding.effectiveY, sceneZ);
+      cloneEntry.object.position.set(sceneX, grounding.sceneY, sceneZ);
       cloneEntry.object.rotation.set(
         0,
         (-renderEntity.rotation.yaw * Math.PI) / 180,
@@ -1006,11 +1006,7 @@ export const ZarchStaticEntities = ({
             terrain
           });
 
-          ghost.position.set(
-            sceneX,
-            grounding ? grounding.effectiveY : 0,
-            sceneZ
-          );
+          ghost.position.set(sceneX, grounding ? grounding.sceneY : 0, sceneZ);
           ghost.scale.set(worldScale, worldScale, worldScale);
 
           // Update material color based on validity

@@ -1,4 +1,4 @@
-import type { RuntimeMapChunk } from 'carrier-contracts/types';
+import type { RuntimeMapChunk } from "carrier-contracts/types";
 
 export type PreviewTerrainGrid = {
   heights: Float32Array;
@@ -10,11 +10,7 @@ export type PreviewTerrainGrid = {
 };
 
 export type GroundingSampleLabel =
-  | 'center'
-  | 'front-left'
-  | 'front-right'
-  | 'back-left'
-  | 'back-right';
+  "center" | "front-left" | "front-right" | "back-left" | "back-right";
 
 export type GroundingSample = {
   height: number;
@@ -24,9 +20,11 @@ export type GroundingSample = {
 };
 
 export type GroundingResult = {
-  averageHeight: number;
-  maxHeightDelta: number;
+  averageTerrainHeightMeters: number;
+  effectiveHeightMeters: number;
+  maxHeightDeltaMeters: number;
   samples: GroundingSample[];
+  scaledYOffsetMeters: number;
   valid: boolean;
 };
 
@@ -36,7 +34,7 @@ const rotateOffset = (x: number, z: number, yawRadians: number) => {
 
   return {
     x: x * cosine - z * sine,
-    z: x * sine + z * cosine
+    z: x * sine + z * cosine,
   };
 };
 
@@ -45,14 +43,14 @@ export const getGroundingSamplePoints = ({
   anchorZ,
   depthMeters,
   widthMeters,
-  yawDegrees
+  yawDegrees,
 }: {
   anchorX: number;
   anchorZ: number;
   depthMeters: number;
   widthMeters: number;
   yawDegrees: number;
-}): Array<Omit<GroundingSample, 'height'>> => {
+}): Array<Omit<GroundingSample, "height">> => {
   const halfWidth = widthMeters * 0.5;
   const halfDepth = depthMeters * 0.5;
   const yawRadians = (yawDegrees * Math.PI) / 180;
@@ -61,20 +59,20 @@ export const getGroundingSamplePoints = ({
     x: number;
     z: number;
   }> = [
-    { label: 'center', x: 0, z: 0 },
-    { label: 'front-left', x: -halfWidth, z: -halfDepth },
-    { label: 'front-right', x: halfWidth, z: -halfDepth },
-    { label: 'back-left', x: -halfWidth, z: halfDepth },
-    { label: 'back-right', x: halfWidth, z: halfDepth }
+    { label: "center", x: 0, z: 0 },
+    { label: "front-left", x: -halfWidth, z: -halfDepth },
+    { label: "front-right", x: halfWidth, z: -halfDepth },
+    { label: "back-left", x: -halfWidth, z: halfDepth },
+    { label: "back-right", x: halfWidth, z: halfDepth },
   ];
 
-  return offsets.map(offset => {
+  return offsets.map((offset) => {
     const rotated = rotateOffset(offset.x, offset.z, yawRadians);
 
     return {
       label: offset.label,
       x: anchorX + rotated.x,
-      z: anchorZ + rotated.z
+      z: anchorZ + rotated.z,
     };
   });
 };
@@ -82,7 +80,7 @@ export const getGroundingSamplePoints = ({
 export const sampleTerrainHeight = (
   terrain: PreviewTerrainGrid,
   x: number,
-  z: number
+  z: number,
 ) => {
   const localX = (x - terrain.originX) / terrain.sampleSpacing;
   const localZ = (z - terrain.originZ) / terrain.sampleSpacing;
@@ -122,6 +120,62 @@ export const sampleTerrainHeight = (
   return top * (1 - tz) + bottom * tz;
 };
 
+export const computeScaledGroundingResult = ({
+  anchorX,
+  anchorZ,
+  footprintDepthMeters,
+  footprintWidthMeters,
+  maxHeightDeltaMeters,
+  placementScale,
+  sampleHeight,
+  yOffsetMeters,
+  yawDegrees,
+}: {
+  anchorX: number;
+  anchorZ: number;
+  footprintDepthMeters: number;
+  footprintWidthMeters: number;
+  maxHeightDeltaMeters: number;
+  placementScale: number;
+  sampleHeight: (point: Omit<GroundingSample, "height">) => number | null;
+  yOffsetMeters: number;
+  yawDegrees: number;
+}): GroundingResult | null => {
+  const samples = getGroundingSamplePoints({
+    anchorX,
+    anchorZ,
+    depthMeters: footprintDepthMeters * placementScale,
+    widthMeters: footprintWidthMeters * placementScale,
+    yawDegrees,
+  }).map((sample) => {
+    const height = sampleHeight(sample);
+    return height === null ? null : { ...sample, height };
+  });
+
+  if (samples.some((sample) => sample === null)) {
+    return null;
+  }
+
+  const resolvedSamples = samples as GroundingSample[];
+  const heights = resolvedSamples.map((sample) => sample.height);
+  const minHeight = Math.min(...heights);
+  const maxHeight = Math.max(...heights);
+  const averageHeight =
+    heights.reduce((sum, value) => sum + value, 0) / heights.length;
+  const maxHeightDelta = maxHeight - minHeight;
+  const scaledYOffsetMeters = yOffsetMeters * placementScale;
+  const effectiveHeightMeters = averageHeight + scaledYOffsetMeters;
+
+  return {
+    averageTerrainHeightMeters: averageHeight,
+    effectiveHeightMeters,
+    maxHeightDeltaMeters: maxHeightDelta,
+    samples: resolvedSamples,
+    scaledYOffsetMeters,
+    valid: maxHeightDelta <= maxHeightDeltaMeters,
+  };
+};
+
 export const computeGroundingResult = ({
   anchorX,
   anchorZ,
@@ -129,7 +183,7 @@ export const computeGroundingResult = ({
   maxHeightDeltaMeters,
   terrain,
   widthMeters,
-  yawDegrees
+  yawDegrees,
 }: {
   anchorX: number;
   anchorZ: number;
@@ -138,42 +192,26 @@ export const computeGroundingResult = ({
   terrain: PreviewTerrainGrid;
   widthMeters: number;
   yawDegrees: number;
-}): GroundingResult | null => {
-  const samples = getGroundingSamplePoints({
+}): GroundingResult | null =>
+  computeScaledGroundingResult({
     anchorX,
     anchorZ,
-    depthMeters,
-    widthMeters,
-    yawDegrees
-  }).map(sample => {
-    const height = sampleTerrainHeight(terrain, sample.x, sample.z);
-    return height === null ? null : { ...sample, height };
+    footprintDepthMeters: depthMeters,
+    footprintWidthMeters: widthMeters,
+    maxHeightDeltaMeters,
+    placementScale: 1,
+    sampleHeight: (point) => sampleTerrainHeight(terrain, point.x, point.z),
+    yOffsetMeters: 0,
+    yawDegrees,
   });
 
-  if (samples.some(sample => sample === null)) {
-    return null;
-  }
-
-  const resolvedSamples = samples as GroundingSample[];
-  const heights = resolvedSamples.map(sample => sample.height);
-  const minHeight = Math.min(...heights);
-  const maxHeight = Math.max(...heights);
-  const averageHeight =
-    heights.reduce((sum, value) => sum + value, 0) / heights.length;
-  const maxHeightDelta = maxHeight - minHeight;
-
-  return {
-    averageHeight,
-    maxHeightDelta,
-    samples: resolvedSamples,
-    valid: maxHeightDelta <= maxHeightDeltaMeters
-  };
-};
-
 export const getChunkCenterAnchor = (
-  chunk: Pick<RuntimeMapChunk, 'originTileX' | 'originTileZ' | 'tileWidth' | 'tileHeight'>,
-  metersPerTile: number
+  chunk: Pick<
+    RuntimeMapChunk,
+    "originTileX" | "originTileZ" | "tileWidth" | "tileHeight"
+  >,
+  metersPerTile: number,
 ) => ({
   x: (chunk.originTileX + chunk.tileWidth * 0.5) * metersPerTile,
-  z: (chunk.originTileZ + chunk.tileHeight * 0.5) * metersPerTile
+  z: (chunk.originTileZ + chunk.tileHeight * 0.5) * metersPerTile,
 });

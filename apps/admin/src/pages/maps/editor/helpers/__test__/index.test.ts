@@ -28,6 +28,13 @@ import {
   snapWorldPoint
 } from '../index';
 
+const groundingFixture = await Bun.file(
+  new URL(
+    '../../../../../../../../fixtures/static-entity-grounding.json',
+    import.meta.url
+  )
+).json();
+
 const infiniteMap: MapMetadata = {
   createdAt: new Date().toISOString(),
   extent: { kind: 'infinite' },
@@ -380,13 +387,14 @@ describe('editor utilities', () => {
       entity: {
         position: { x: 10, z: 10 },
         rotation: { yaw: 0 },
+        scale: 1,
         yOffset: 2
       },
       map: infiniteMap
     });
     expect(warning.status).toBe('warning');
     if (warning.status === 'warning') {
-      expect(warning.effectiveY).toBeGreaterThan(2);
+      expect(warning.effectiveHeightMeters).toBeGreaterThan(2);
     }
 
     expect(
@@ -402,10 +410,80 @@ describe('editor utilities', () => {
         entity: {
           position: { x: 10, z: 10 },
           rotation: { yaw: 0 },
+          scale: 1,
           yOffset: 0
         },
         map: infiniteMap
       })
     ).toEqual({ status: 'pending' });
+  });
+
+  test('computes canonical scaled footprint-average grounding diagnostics', () => {
+    const spacing = 10;
+    const samplesWide = 6;
+    const samplesHigh = 6;
+    const heights = new Float32Array(samplesWide * samplesHigh);
+
+    for (let zIndex = 0; zIndex < samplesHigh; zIndex += 1) {
+      for (let xIndex = 0; xIndex < samplesWide; xIndex += 1) {
+        const x = xIndex * spacing;
+        const z = zIndex * spacing;
+        heights[zIndex * samplesWide + xIndex] =
+          groundingFixture.terrainPlane.baseHeightMeters +
+          groundingFixture.terrainPlane.xSlope * x +
+          groundingFixture.terrainPlane.zSlope * z;
+      }
+    }
+
+    const diagnostics = getStaticEntityGroundingDiagnostics({
+      assetVersion: groundingFixture.assetVersion,
+      chunks: new Map(),
+      entity: groundingFixture.placement,
+      map: {
+        ...infiniteMap,
+        resolution: {
+          ...infiniteMap.resolution,
+          metersPerTile: groundingFixture.map.metersPerTile
+        }
+      },
+      terrains: [
+        {
+          bounds: {
+            maxX: 50,
+            maxZ: 50,
+            minX: 0,
+            minZ: 0
+          },
+          terrain: {
+            heights,
+            originX: 0,
+            originZ: 0,
+            samplesHigh,
+            sampleSpacing: spacing,
+            samplesWide
+          }
+        }
+      ]
+    });
+
+    expect(diagnostics.status).toBe('valid');
+    if (diagnostics.status === 'valid') {
+      expect(diagnostics.averageTerrainHeightMeters).toBeCloseTo(
+        groundingFixture.expected.averageTerrainHeightMeters,
+        6
+      );
+      expect(diagnostics.effectiveHeightMeters).toBeCloseTo(
+        groundingFixture.expected.effectiveHeightMeters,
+        6
+      );
+      expect(diagnostics.scaledYOffsetMeters).toBeCloseTo(
+        groundingFixture.expected.scaledYOffsetMeters,
+        6
+      );
+      expect(diagnostics.maxHeightDeltaMeters).toBeCloseTo(
+        groundingFixture.expected.maxHeightDeltaMeters,
+        6
+      );
+    }
   });
 });

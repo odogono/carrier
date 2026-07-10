@@ -110,6 +110,7 @@
         "@tanstack/react-router": "^1.168.22",
         "@tanstack/react-router-devtools": "^1.166.13",
         "carrier-contracts": "workspace:*",
+        "carrier-preview": "workspace:*",
         "carrier-terrain-edit": "workspace:*",
         "clsx": "^2.1.1",
         "jotai": "^2.19.1",
