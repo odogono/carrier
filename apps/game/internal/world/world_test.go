@@ -1,9 +1,46 @@
 package world
 
 import (
+	"encoding/json"
 	"math"
+	"os"
 	"testing"
 )
+
+type groundingFixtureRecord struct {
+	Placement struct {
+		Position struct {
+			X float64 `json:"x"`
+			Z float64 `json:"z"`
+		} `json:"position"`
+		Rotation struct {
+			Yaw float64 `json:"yaw"`
+		} `json:"rotation"`
+		Scale   float64 `json:"scale"`
+		YOffset float64 `json:"yOffset"`
+	} `json:"placement"`
+	AssetVersion struct {
+		Footprint struct {
+			WidthMeters float64 `json:"widthMeters"`
+			DepthMeters float64 `json:"depthMeters"`
+		} `json:"footprint"`
+		MaxHeightDeltaMeters float64 `json:"maxHeightDeltaMeters"`
+	} `json:"assetVersion"`
+	InvalidMaxHeightDeltaMeters float64 `json:"invalidMaxHeightDeltaMeters"`
+	TerrainPlane                struct {
+		BaseHeightMeters float64 `json:"baseHeightMeters"`
+		XSlope           float64 `json:"xSlope"`
+		ZSlope           float64 `json:"zSlope"`
+	} `json:"terrainPlane"`
+	Expected struct {
+		AverageTerrainHeightMeters float64 `json:"averageTerrainHeightMeters"`
+		EffectiveHeightMeters      float64 `json:"effectiveHeightMeters"`
+		MaxHeightDeltaMeters       float64 `json:"maxHeightDeltaMeters"`
+		ScaledYOffsetMeters        float64 `json:"scaledYOffsetMeters"`
+		Valid                      bool    `json:"valid"`
+		InvalidToleranceValid      bool    `json:"invalidToleranceValid"`
+	} `json:"expected"`
+}
 
 func TestResolveStaticEntityGeometryParity(t *testing.T) {
 	terrain := &TerrainSet{
@@ -109,7 +146,7 @@ func TestResolveStaticEntityScalesCollisionBoxAndGrounding(t *testing.T) {
 	assertAlmostEqual(t, resolved.CollisionWidthMeters, 15)
 	assertAlmostEqual(t, resolved.CollisionDepthMeters, 18)
 	assertAlmostEqual(t, resolved.CollisionHeightMeters, 21)
-	assertAlmostEqual(t, resolved.EffectiveY, 2)
+	assertAlmostEqual(t, resolved.EffectiveHeightMeters, 2)
 	assertAlmostEqual(t, resolved.CollisionOBB.Center.Y, 12.5)
 	assertAlmostEqual(t, resolved.CollisionOBB.HalfWidthMeters, 7.5)
 	assertAlmostEqual(t, resolved.CollisionOBB.HalfDepthMeters, 9)
@@ -137,10 +174,64 @@ func TestComputeGroundingAcrossChunkBoundary(t *testing.T) {
 		t.Fatalf("computeGrounding returned missing terrain")
 	}
 
-	assertAlmostEqual(t, result.AverageHeight, 3.8)
-	assertAlmostEqual(t, result.MaxHeightDelta, 2)
+	assertAlmostEqual(t, result.AverageTerrainHeightMeters, 2.8)
+	assertAlmostEqual(t, result.EffectiveHeightMeters, 3.8)
+	assertAlmostEqual(t, result.MaxHeightDeltaMeters, 2)
 	if !result.Valid {
 		t.Fatalf("expected grounding to be valid")
+	}
+}
+
+func TestResolveStaticEntityUsesCanonicalScaledGroundingFixture(t *testing.T) {
+	fixture := loadGroundingFixture(t)
+	terrain := planeFixtureTerrain(fixture)
+	manifest := testManifestEntry(
+		"fixture",
+		"fixture-v1",
+		fixture.AssetVersion.Footprint.WidthMeters,
+		fixture.AssetVersion.Footprint.DepthMeters,
+		10,
+		8,
+		6,
+		fixture.AssetVersion.MaxHeightDeltaMeters,
+	)
+	placement := testPlacement(
+		"fixture-1",
+		"fixture",
+		fixture.Placement.Position.X,
+		fixture.Placement.Position.Z,
+		fixture.Placement.Rotation.Yaw,
+		fixture.Placement.Scale,
+		"active",
+	)
+	placement.YOffset = fixture.Placement.YOffset
+
+	resolved, err := resolveStaticEntity("export-1", placement, manifest, terrain)
+	if err != nil {
+		t.Fatalf("resolveStaticEntity returned error: %v", err)
+	}
+
+	assertAlmostEqual(t, resolved.EffectiveHeightMeters, fixture.Expected.EffectiveHeightMeters)
+	assertAlmostEqual(t, resolved.CollisionOBB.Center.Y, fixture.Expected.EffectiveHeightMeters+resolved.CollisionHeightMeters*0.5)
+	if resolved.GroundingValid != fixture.Expected.Valid {
+		t.Fatalf("got valid %v, want %v", resolved.GroundingValid, fixture.Expected.Valid)
+	}
+
+	grounding, ok := computeGrounding(
+		terrain,
+		fixture.Placement.Position.X,
+		fixture.Placement.Position.Z,
+		fixture.AssetVersion.Footprint.DepthMeters*fixture.Placement.Scale,
+		fixture.AssetVersion.Footprint.WidthMeters*fixture.Placement.Scale,
+		fixture.Placement.Rotation.Yaw,
+		fixture.InvalidMaxHeightDeltaMeters,
+		fixture.Expected.ScaledYOffsetMeters,
+	)
+	if !ok {
+		t.Fatalf("computeGrounding returned missing terrain")
+	}
+	if grounding.Valid != fixture.Expected.InvalidToleranceValid {
+		t.Fatalf("got invalid-tolerance valid %v, want %v", grounding.Valid, fixture.Expected.InvalidToleranceValid)
 	}
 }
 
@@ -247,6 +338,40 @@ func testTerrainChunk(originTileX, originTileZ, tileWidth, tileHeight int, heigh
 			MinZ: float64(originTileZ) * 10,
 			MaxX: float64(originTileX+tileWidth) * 10,
 			MaxZ: float64(originTileZ+tileHeight) * 10,
+		},
+	}
+}
+
+func loadGroundingFixture(t *testing.T) groundingFixtureRecord {
+	t.Helper()
+	payload, err := os.ReadFile("../../../../fixtures/static-entity-grounding.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var fixture groundingFixtureRecord
+	if err := json.Unmarshal(payload, &fixture); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	return fixture
+}
+
+func planeFixtureTerrain(fixture groundingFixtureRecord) *TerrainSet {
+	const samplesWide = 6
+	const samplesHigh = 6
+	heights := make([]float64, samplesWide*samplesHigh)
+	for zIndex := 0; zIndex < samplesHigh; zIndex++ {
+		for xIndex := 0; xIndex < samplesWide; xIndex++ {
+			x := float64(xIndex * 10)
+			z := float64(zIndex * 10)
+			heights[zIndex*samplesWide+xIndex] =
+				fixture.TerrainPlane.BaseHeightMeters +
+					fixture.TerrainPlane.XSlope*x +
+					fixture.TerrainPlane.ZSlope*z
+		}
+	}
+	return &TerrainSet{
+		Chunks: []*TerrainChunk{
+			testTerrainChunk(0, 0, samplesWide-1, samplesHigh-1, heights),
 		},
 	}
 }

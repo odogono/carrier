@@ -32,3 +32,28 @@ archives, or deletions must not change exported entity summaries, chunk
 membership, runtime asset metadata, manifest hashes, or snapshot content. Legacy
 Exported Maps missing required static-entity manifest metadata fail closed for
 entity-dependent reads instead of falling back to the live catalog.
+
+## Static Entity Grounding
+
+Static Entity Grounding is the canonical rule for deriving a placement's vertical
+position from terrain. All runtimes sample the placement anchor plus the four
+yaw-rotated footprint corners, average the five terrain heights, and reject the
+placement when any sample is unavailable.
+
+A Footprint is the asset-version rectangle used for terrain contact. Placement
+Scale multiplies the footprint width and depth before the five sample points are
+derived.
+
+`yOffset` is an entity-local vertical offset. Placement Scale multiplies it
+before it is added to the average terrain height.
+
+Effective Height is the canonical map-space height in metres:
+`averageTerrainHeightMeters + scaledYOffsetMeters`. Admin diagnostics, gameplay
+client grounding, and the Go world use the same Effective Height and validity
+rule.
+
+Scene Scale is the gameplay client's horizontal map-to-Three.js projection:
+`TILE / metersPerTile`. The client keeps Effective Height in map-space metres
+and separately derives `sceneY` for rendering by adding the scaled offset's
+scene-space displacement to the averaged terrain Y. Scene Scale does not change
+the map-space maximum-height-delta tolerance.

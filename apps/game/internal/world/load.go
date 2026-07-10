@@ -519,6 +519,7 @@ func resolveStaticEntity(mapID string, placement staticEntityPlacementRecord, ma
 	collisionWidth := manifest.AssetVersion.CollisionBox.WidthMeters * placement.Scale
 	collisionDepth := manifest.AssetVersion.CollisionBox.DepthMeters * placement.Scale
 	collisionHeight := manifest.AssetVersion.CollisionBox.HeightMeters * placement.Scale
+	scaledYOffset := placement.YOffset * placement.Scale
 
 	grounding, ok := computeGrounding(
 		terrain,
@@ -528,7 +529,7 @@ func resolveStaticEntity(mapID string, placement staticEntityPlacementRecord, ma
 		footprintWidth,
 		placement.Rotation.Yaw,
 		manifest.AssetVersion.MaxHeightDeltaMeters,
-		placement.YOffset,
+		scaledYOffset,
 	)
 	if !ok {
 		return nil, fmt.Errorf("static entity %s could not be grounded from exported terrain", placement.ID)
@@ -562,14 +563,14 @@ func resolveStaticEntity(mapID string, placement staticEntityPlacementRecord, ma
 		CollisionDepthMeters:  collisionDepth,
 		CollisionHeightMeters: collisionHeight,
 		MaxHeightDeltaMeters:  manifest.AssetVersion.MaxHeightDeltaMeters,
-		EffectiveY:            grounding.AverageHeight,
+		EffectiveHeightMeters: grounding.EffectiveHeightMeters,
 		GroundingValid:        grounding.Valid,
 		FootprintCorners:      corners,
 		FootprintAABB:         bounds,
 		CollisionOBB: OrientedBox3D{
 			Center: Vector3{
 				X: placement.Position.X,
-				Y: grounding.AverageHeight + collisionHeight*0.5,
+				Y: grounding.EffectiveHeightMeters + collisionHeight*0.5,
 				Z: placement.Position.Z,
 			},
 			HalfWidthMeters:  collisionWidth * 0.5,

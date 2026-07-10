@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-
 import {
   computeGroundingResult,
   getChunkCenterAnchor,
@@ -37,8 +36,8 @@ const flatTerrain = (height = 0): PreviewTerrainGrid => ({
   ]),
   originX: -10,
   originZ: -10,
-  sampleSpacing: 5,
   samplesHigh: 5,
+  sampleSpacing: 5,
   samplesWide: 5
 });
 
@@ -65,21 +64,11 @@ test('computes rotated grounding sample points around the anchor', () => {
 
 test('computes average height and validity from grounding samples', () => {
   const terrain: PreviewTerrainGrid = {
-    heights: new Float32Array([
-      0,
-      0,
-      0,
-      0,
-      2,
-      0,
-      0,
-      0,
-      4
-    ]),
+    heights: new Float32Array([0, 0, 0, 0, 2, 0, 0, 0, 4]),
     originX: -5,
     originZ: -5,
-    sampleSpacing: 5,
     samplesHigh: 3,
+    sampleSpacing: 5,
     samplesWide: 3
   };
 
@@ -95,8 +84,8 @@ test('computes average height and validity from grounding samples', () => {
 
   expect(result).not.toBeNull();
   expect(result?.samples).toHaveLength(5);
-  expect(result?.averageHeight).toBeGreaterThan(0);
-  expect(result?.maxHeightDelta).toBeGreaterThan(2.5);
+  expect(result?.averageTerrainHeightMeters).toBeGreaterThan(0);
+  expect(result?.maxHeightDeltaMeters).toBeGreaterThan(2.5);
   expect(result?.valid).toBe(false);
 });
 
@@ -112,8 +101,8 @@ test('returns valid grounding on flat terrain', () => {
   });
 
   expect(result).not.toBeNull();
-  expect(result?.averageHeight).toBeCloseTo(3, 5);
-  expect(result?.maxHeightDelta).toBeCloseTo(0, 5);
+  expect(result?.averageTerrainHeightMeters).toBeCloseTo(3, 5);
+  expect(result?.maxHeightDeltaMeters).toBeCloseTo(0, 5);
   expect(result?.valid).toBe(true);
 });
 

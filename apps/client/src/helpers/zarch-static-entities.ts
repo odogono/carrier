@@ -4,55 +4,17 @@ import type {
   RuntimeMapChunk,
   StaticEntity
 } from 'carrier-contracts/types';
+import { computeScaledGroundingResult } from 'carrier-preview';
 
 import { TILE, type ZarchTerrain } from '@/helpers/zarch-terrain';
 
 export type StaticEntityGroundingResult = {
-  effectiveY: number;
+  averageTerrainHeightMeters: number;
+  effectiveHeightMeters: number;
+  maxHeightDeltaMeters: number;
+  scaledYOffsetMeters: number;
+  sceneY: number;
   valid: boolean;
-};
-
-const rotateOffset = (x: number, z: number, yawRadians: number) => {
-  const cosine = Math.cos(yawRadians);
-  const sine = Math.sin(yawRadians);
-
-  return {
-    x: x * cosine - z * sine,
-    z: x * sine + z * cosine
-  };
-};
-
-const getGroundingSamplePoints = ({
-  anchorX,
-  anchorZ,
-  depthMeters,
-  widthMeters,
-  yawDegrees
-}: {
-  anchorX: number;
-  anchorZ: number;
-  depthMeters: number;
-  widthMeters: number;
-  yawDegrees: number;
-}) => {
-  const halfWidth = widthMeters * 0.5;
-  const halfDepth = depthMeters * 0.5;
-  const yawRadians = (yawDegrees * Math.PI) / 180;
-
-  return [
-    { x: 0, z: 0 },
-    { x: -halfWidth, z: -halfDepth },
-    { x: halfWidth, z: -halfDepth },
-    { x: -halfWidth, z: halfDepth },
-    { x: halfWidth, z: halfDepth }
-  ].map(offset => {
-    const rotated = rotateOffset(offset.x, offset.z, yawRadians);
-
-    return {
-      x: anchorX + rotated.x,
-      z: anchorZ + rotated.z
-    };
-  });
 };
 
 export const collectChunkStaticEntities = (chunks: RuntimeMapChunk[]) => {
@@ -97,8 +59,7 @@ export const shouldUseStaticEntityInstancing = ({
   entityEditEnabled: boolean;
   instancedRuntimeAvailable: boolean;
   instancingEligible: boolean;
-}) =>
-  instancingEligible && instancedRuntimeAvailable && !entityEditEnabled;
+}) => instancingEligible && instancedRuntimeAvailable && !entityEditEnabled;
 
 export const getStaticEntityGrounding = ({
   assetVersion,
@@ -112,38 +73,33 @@ export const getStaticEntityGrounding = ({
   terrain: Pick<ZarchTerrain, 'sampleHeightAtWorld'>;
 }): StaticEntityGroundingResult | null => {
   const sceneScale = getSceneMetersScale(map);
-  const samplePoints = getGroundingSamplePoints({
+  const grounding = computeScaledGroundingResult({
     anchorX: entity.position.x,
     anchorZ: entity.position.z,
-    depthMeters: assetVersion.footprint.depthMeters * entity.scale,
-    widthMeters: assetVersion.footprint.widthMeters * entity.scale,
-    yawDegrees: entity.rotation.yaw
+    footprintDepthMeters: assetVersion.footprint.depthMeters,
+    footprintWidthMeters: assetVersion.footprint.widthMeters,
+    maxHeightDeltaMeters: assetVersion.maxHeightDeltaMeters,
+    placementScale: entity.scale,
+    sampleHeight: point =>
+      terrain.sampleHeightAtWorld(point.x * sceneScale, point.z * sceneScale),
+    yawDegrees: entity.rotation.yaw,
+    yOffsetMeters: entity.yOffset
   });
-  const heights: number[] = [];
 
-  for (const point of samplePoints) {
-    const height = terrain.sampleHeightAtWorld(
-      point.x * sceneScale,
-      point.z * sceneScale
-    );
-
-    if (height === null) {
-      return null;
-    }
-
-    heights.push(height);
-  }
-
-  const minHeight = Math.min(...heights);
-  const maxHeight = Math.max(...heights);
-  const centerHeight = heights[0];
-
-  if (centerHeight === undefined) {
+  if (!grounding) {
     return null;
   }
 
+  const sceneY =
+    grounding.averageTerrainHeightMeters +
+    grounding.scaledYOffsetMeters * sceneScale;
+
   return {
-    effectiveY: centerHeight + entity.yOffset,
-    valid: maxHeight - minHeight <= assetVersion.maxHeightDeltaMeters
+    averageTerrainHeightMeters: grounding.averageTerrainHeightMeters,
+    effectiveHeightMeters: grounding.effectiveHeightMeters,
+    maxHeightDeltaMeters: grounding.maxHeightDeltaMeters,
+    scaledYOffsetMeters: grounding.scaledYOffsetMeters,
+    sceneY,
+    valid: grounding.valid
   };
 };

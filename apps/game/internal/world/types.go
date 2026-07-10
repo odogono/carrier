@@ -92,7 +92,7 @@ type ResolvedStaticEntity struct {
 	CollisionDepthMeters  float64
 	CollisionHeightMeters float64
 	MaxHeightDeltaMeters  float64
-	EffectiveY            float64
+	EffectiveHeightMeters float64
 	GroundingValid        bool
 	FootprintCorners      [4]Vector2
 	FootprintAABB         AxisAlignedBox2D

@@ -1,0 +1,73 @@
+{
+  "description": "Canonical static-entity grounding fixture shared by admin, client, and Go tests.",
+  "placement": {
+    "position": {
+      "x": 20,
+      "z": 30
+    },
+    "rotation": {
+      "yaw": 30
+    },
+    "scale": 1.5,
+    "yOffset": 2
+  },
+  "assetVersion": {
+    "footprint": {
+      "widthMeters": 6,
+      "depthMeters": 4
+    },
+    "maxHeightDeltaMeters": 2.5
+  },
+  "invalidMaxHeightDeltaMeters": 2,
+  "terrainPlane": {
+    "baseHeightMeters": 10,
+    "xSlope": 0.2,
+    "zSlope": -0.1
+  },
+  "map": {
+    "metersPerTile": 8,
+    "tileSceneSize": 24
+  },
+  "samples": [
+    {
+      "label": "center",
+      "x": 20,
+      "z": 30,
+      "heightMeters": 11
+    },
+    {
+      "label": "front-left",
+      "x": 17.602885682970026,
+      "z": 25.151923788646684,
+      "heightMeters": 11.005384757729336
+    },
+    {
+      "label": "front-right",
+      "x": 25.397114317029974,
+      "z": 29.651923788646684,
+      "heightMeters": 12.114230484541327
+    },
+    {
+      "label": "back-left",
+      "x": 14.602885682970026,
+      "z": 30.348076211353316,
+      "heightMeters": 9.885769515458673
+    },
+    {
+      "label": "back-right",
+      "x": 22.397114317029974,
+      "z": 34.848076211353316,
+      "heightMeters": 10.994615242270664
+    }
+  ],
+  "expected": {
+    "averageTerrainHeightMeters": 11,
+    "scaledYOffsetMeters": 3,
+    "maxHeightDeltaMeters": 2.2284609690826542,
+    "effectiveHeightMeters": 14,
+    "valid": true,
+    "invalidToleranceValid": false,
+    "sceneScale": 3,
+    "sceneY": 20
+  }
+}

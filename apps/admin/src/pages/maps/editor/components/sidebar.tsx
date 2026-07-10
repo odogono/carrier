@@ -643,7 +643,7 @@ export const EditorSidebar = ({
                         value={
                           selectedEntity.diagnostics.status === 'pending'
                             ? 'Pending terrain'
-                            : `${selectedEntity.diagnostics.maxHeightDelta.toFixed(2)}m delta`
+                            : `${selectedEntity.diagnostics.maxHeightDeltaMeters.toFixed(2)}m delta`
                         }
                       />
                       <InspectorStat
