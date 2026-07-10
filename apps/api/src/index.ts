@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import type { AssetVersion } from 'carrier-contracts';
 import { Elysia } from 'elysia';
 import { createLog } from 'odgn-ts-helpers/log';
 import { safeParseInt } from 'odgn-ts-helpers/number';
 import { z } from 'zod';
-import type { AssetVersion } from 'carrier-contracts';
 
 import { getAssetPipeline } from '@/maps/assets';
-import { getMapRepository, MapRepositoryError } from '@/maps/repository';
+import { MapRepositoryError, getMapRepository } from '@/maps/repository';
 import { cors } from '@elysiajs/cors';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
@@ -22,7 +22,31 @@ const log = createLog('server');
 
 const HTTP_STATUS_TEXT: Record<number, string> = {
   400: 'Bad Request',
+  409: 'Conflict',
   404: 'Not Found'
+};
+
+const httpStatusForRepositoryError = (error: MapRepositoryError) => {
+  switch (error.code) {
+    case 'BAD_REQUEST':
+      return 400;
+    case 'CONFLICT':
+      return 409;
+    case 'NOT_FOUND':
+      return 404;
+  }
+};
+
+const respondToRepositoryError = (error: unknown, requestId: string) => {
+  if (error instanceof MapRepositoryError) {
+    return toJsonErrorResponse(
+      httpStatusForRepositoryError(error),
+      error.message,
+      requestId
+    );
+  }
+
+  throw error;
 };
 
 const toJsonErrorResponse = (
@@ -43,6 +67,27 @@ const toJsonErrorResponse = (
       status
     }
   );
+
+const runtimeResponseOrError = async (
+  assetVersionId: string,
+  requestId: string,
+  notFoundMessage: string
+) => {
+  let response: Response | null;
+
+  try {
+    response = await getAssetPipeline().runtimeResponse(assetVersionId);
+  } catch (error) {
+    return respondToRepositoryError(error, requestId);
+  }
+
+  if (!response) {
+    return toJsonErrorResponse(404, notFoundMessage, requestId);
+  }
+
+  response.headers.set('X-Request-ID', requestId);
+  return response;
+};
 
 export const createServer = async () => {
   const openApiHandler = new OpenAPIHandler(orpcRouter, {
@@ -187,21 +232,14 @@ export const createServer = async () => {
         }
       });
     })
-    .get('/api/maps/assets/:id/runtime', async ({ params, requestId }) => {
-      const response = await getAssetPipeline().runtimeResponse(params.id);
-
-      if (!response) {
-        return toJsonErrorResponse(
-          404,
-          `Runtime artifact for asset version ${params.id} was not found`,
-          requestId
-        );
-      }
-
-      response.headers.set('X-Request-ID', requestId);
-      return response;
-    })
-    .get('/api/zarch/runtime-entities/:id/model', async ({ params, requestId }) => {
+    .get('/api/maps/assets/:id/runtime', ({ params, requestId }) =>
+      runtimeResponseOrError(
+        params.id,
+        requestId,
+        `Runtime artifact for asset version ${params.id} was not found`
+      )
+    )
+    .get('/api/zarch/runtime-entities/:id/model', ({ params, requestId }) => {
       const runtimeEntity = getMapRepository().getZarchRuntimeEntity(params.id);
 
       if (!runtimeEntity) {
@@ -212,20 +250,11 @@ export const createServer = async () => {
         );
       }
 
-      const response = await getAssetPipeline().runtimeResponse(
-        runtimeEntity.assetVersionId
+      return runtimeResponseOrError(
+        runtimeEntity.assetVersionId,
+        requestId,
+        `Runtime artifact for zarch runtime entity ${params.id} was not found`
       );
-
-      if (!response) {
-        return toJsonErrorResponse(
-          404,
-          `Runtime artifact for zarch runtime entity ${params.id} was not found`,
-          requestId
-        );
-      }
-
-      response.headers.set('X-Request-ID', requestId);
-      return response;
     })
     .post('/api/maps/assets', async ({ request, requestId }) => {
       try {
@@ -249,11 +278,7 @@ export const createServer = async () => {
           status: 201
         });
       } catch (error) {
-        if (error instanceof MapRepositoryError) {
-          return toJsonErrorResponse(400, error.message, requestId);
-        }
-
-        throw error;
+        return respondToRepositoryError(error, requestId);
       }
     })
 
