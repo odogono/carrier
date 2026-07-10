@@ -936,7 +936,7 @@ describe('API server map routes', () => {
     );
     const exportStaticEntities = (exported.export as Record<string, unknown>)
       .staticEntities as Record<string, unknown>;
-    expect(exportStaticEntities.entityCount).toBe(2);
+    expect(exportStaticEntities.entityCount).toBe(1);
     expect(exportStaticEntities.archetypeCount).toBe(1);
     expect(
       (
@@ -977,7 +977,7 @@ describe('API server map routes', () => {
         (listedExports[0]?.export as Record<string, unknown>)
           .staticEntities as Record<string, unknown>
       )?.entityCount
-    ).toBe(2);
+    ).toBe(1);
 
     const fetchedExportResponse = await request(
       'GET',
@@ -1039,9 +1039,7 @@ describe('API server map routes', () => {
         mapId: exported.id as string
       })
     );
-    expect(edgeChunk.staticEntities.map(entity => entity.id)).toContain(
-      'watchtower-edge'
-    );
+    expect(edgeChunk.staticEntities.map(entity => entity.id)).toEqual([]);
 
     const outOfBoundsChunkResponse = await request(
       'GET',

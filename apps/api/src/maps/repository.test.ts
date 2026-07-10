@@ -1390,7 +1390,7 @@ describe('map repository', () => {
     }
   });
 
-  test('snapshots overlapping static entities and manifest hashes into exports', () => {
+  test('snapshots fully contained static entities and manifest hashes into exports', () => {
     const repository = new MapRepository({ dbPath: ':memory:' });
 
     try {
@@ -1455,6 +1455,34 @@ describe('map repository', () => {
         },
         status: 'ready'
       });
+      const beaconAsset = repository.createAssetVersion({
+        collisionBox: {
+          depthMeters: 16,
+          heightMeters: 24,
+          widthMeters: 16
+        },
+        collisionClass: 'prop',
+        diagnostics: [],
+        footprint: {
+          depthMeters: 16,
+          widthMeters: 16
+        },
+        groundingPolicy: 'terrain-average-footprint',
+        id: 'beacon-v1',
+        instancingEligible: false,
+        maxHeightDeltaMeters: 1,
+        originalFile: {
+          contentType: 'model/gltf-binary',
+          path: 'uploads/beacon.glb',
+          sizeBytes: 180
+        },
+        runtimeFile: {
+          contentType: 'model/gltf-binary',
+          path: 'runtime/beacon-v1.glb',
+          sizeBytes: 120
+        },
+        status: 'ready'
+      });
       const watchtower = repository.createArchetype({
         assetVersionId: watchtowerAsset.id,
         category: 'landmark',
@@ -1471,15 +1499,23 @@ describe('map repository', () => {
         status: 'active',
         tags: ['farm']
       });
+      const beacon = repository.createArchetype({
+        assetVersionId: beaconAsset.id,
+        category: 'industrial',
+        id: 'beacon',
+        name: 'Beacon',
+        status: 'active',
+        tags: ['signal']
+      });
 
       repository.createStaticEntity({
         archetypeId: windmill.id,
         expectedRevision: 0,
-        id: 'windmill-edge',
-        label: 'Edge windmill',
+        id: 'windmill-touch-max-x',
+        label: 'Max-X windmill',
         mapId: created.id,
         position: {
-          x: 405,
+          x: 390,
           z: 90
         },
         rotation: {
@@ -1509,6 +1545,91 @@ describe('map repository', () => {
       repository.createStaticEntity({
         archetypeId: watchtower.id,
         expectedRevision: 2,
+        id: 'watchtower-touch-min-z',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 140,
+          z: 52
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'disabled',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: windmill.id,
+        expectedRevision: 3,
+        id: 'windmill-cross-min-x',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 85,
+          z: 140
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: windmill.id,
+        expectedRevision: 4,
+        id: 'windmill-cross-max-x',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 405,
+          z: 140
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: windmill.id,
+        expectedRevision: 5,
+        id: 'windmill-cross-min-z',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 170,
+          z: 45
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: beacon.id,
+        expectedRevision: 6,
+        id: 'beacon-cross-max-z',
+        label: null,
+        mapId: created.id,
+        position: {
+          x: 170,
+          z: 353
+        },
+        rotation: {
+          yaw: 0
+        },
+        scale: 1,
+        state: 'active',
+        yOffset: 0
+      });
+      repository.createStaticEntity({
+        archetypeId: watchtower.id,
+        expectedRevision: 7,
         id: 'watchtower-outside',
         label: null,
         mapId: created.id,
@@ -1532,14 +1653,14 @@ describe('map repository', () => {
           minZ: 40
         },
         chunkSizeTiles: 16,
-        expectedRevision: 3,
+        expectedRevision: 8,
         kind: 'finite-vector-slice',
         mapId: created.id,
         metersPerTile: 10,
         name: 'Static Slice'
       });
 
-      expect(exported.export?.staticEntities?.entityCount).toBe(2);
+      expect(exported.export?.staticEntities?.entityCount).toBe(3);
       expect(exported.export?.staticEntities?.archetypeCount).toBe(2);
       expect(
         exported.export?.staticEntities?.manifest.map(
@@ -1560,7 +1681,11 @@ describe('map repository', () => {
         exportedEntities
           .map(entity => entity.id)
           .sort((left, right) => left.localeCompare(right))
-      ).toEqual(['watchtower-center', 'windmill-edge']);
+      ).toEqual([
+        'watchtower-center',
+        'watchtower-touch-min-z',
+        'windmill-touch-max-x'
+      ]);
       expect(
         exportedEntities.find(entity => entity.id === 'watchtower-center')
       ).toMatchObject({
@@ -1570,11 +1695,19 @@ describe('map repository', () => {
         }
       });
       expect(
-        exportedEntities.find(entity => entity.id === 'windmill-edge')
+        exportedEntities.find(entity => entity.id === 'windmill-touch-max-x')
       ).toMatchObject({
         position: {
-          x: 325,
+          x: 310,
           z: 50
+        }
+      });
+      expect(
+        exportedEntities.find(entity => entity.id === 'watchtower-touch-min-z')
+      ).toMatchObject({
+        position: {
+          x: 60,
+          z: 12
         }
       });
 
@@ -1582,18 +1715,18 @@ describe('map repository', () => {
         repository
           .getMapChunk(exported.id, 0, 0)
           ?.staticEntities.map(entity => entity.id)
-      ).toEqual(['watchtower-center']);
+      ).toEqual(['watchtower-center', 'watchtower-touch-min-z']);
       expect(
         repository
           .getMapChunk(exported.id, 1, 0)
           ?.staticEntities.map(entity => entity.id)
-      ).toContain('windmill-edge');
+      ).toContain('windmill-touch-max-x');
 
       const listedExport = repository.listExports(created.id)[0];
       expect(
         'manifest' in (listedExport?.export?.staticEntities ?? {})
       ).toBeFalse();
-      expect(listedExport?.export?.staticEntities?.entityCount).toBe(2);
+      expect(listedExport?.export?.staticEntities?.entityCount).toBe(3);
 
       expect(
         repository.findExport(exported.id)?.export?.staticEntities?.manifest

@@ -148,7 +148,7 @@ Static entities are map-scoped placements of approved archetypes.
   - enabled or disabled state
 - CRUD routes exist for create, list, update, and delete.
 - Static entities are included in chunk payloads for runtime consumption.
-- Export creation snapshots overlapping static entities and records manifest and hash metadata for compatibility checks.
+- Export creation snapshots static entities whose full footprints are contained by the requested export bounds and records manifest and hash metadata for compatibility checks.
 
 Static entity placement depends on catalog metadata outside the map row itself:
 

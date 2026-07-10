@@ -119,4 +119,4 @@ Chunks include `staticEntities` as placement metadata for runtime consumption. T
 
 Static entity inclusion is overlap-aware. A placement can appear in a chunk response when its footprint overlaps the chunk, not only when its anchor point is inside the chunk. Consumers should deduplicate placements by entity id when combining multiple visible chunks.
 
-Exported maps snapshot overlapping static entities at export time. Exported chunk payloads therefore represent the export snapshot rather than a live view of later source-map or catalog placement changes.
+Exported maps snapshot only static entities whose full footprint is contained by the requested export bounds. Placements that cross an export edge are omitted, while the requested terrain bounds stay unchanged. Exported chunk payloads therefore represent the export snapshot rather than a live view of later source-map or catalog placement changes.
