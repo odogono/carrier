@@ -109,3 +109,17 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues are the tracker for this repository; external pull requests are not a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repository uses the default canonical triage-label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
