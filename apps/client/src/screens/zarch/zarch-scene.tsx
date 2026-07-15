@@ -93,6 +93,7 @@ import {
   destroyPlayerTankSimulation,
   findNearestTankSpawn,
   getPlayerTankBody,
+  getPlayerTankTrackedBodyCounts,
   getTankHullYaw,
   stepPlayerTankSimulation,
   updatePlayerTankAim,
@@ -1051,7 +1052,15 @@ export const ZarchScene = ({
         return;
       }
       if (tankSimulationRef.current) {
-        destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
+        runtimeRef.current.tankRuntimeDiagnostics = {
+          ...runtimeRef.current.tankRuntimeDiagnostics,
+          ...destroyPlayerTankSimulation(
+            tankPhysics,
+            tankSimulationRef.current
+          ),
+          colliderCenterTileX: null,
+          colliderCenterTileZ: null
+        };
         tankSimulationRef.current = null;
       }
       tankColliderBridgeRef.current?.clear();
@@ -1085,7 +1094,12 @@ export const ZarchScene = ({
       if (!tankPhysics) {
         throw new Error('Tank simulation lost its physics world');
       }
-      destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
+      runtime.tankRuntimeDiagnostics = {
+        ...runtime.tankRuntimeDiagnostics,
+        ...destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current),
+        colliderCenterTileX: null,
+        colliderCenterTileZ: null
+      };
       tankSimulationRef.current = null;
       tankTerrainPatchRef.current = null;
       tankColliderBridgeRef.current?.clear();
@@ -1219,6 +1233,8 @@ export const ZarchScene = ({
         const centerTileZ = Math.floor(
           body.position[2] / map.resolution.metersPerTile
         );
+        runtime.tankRuntimeDiagnostics.colliderCenterTileX = centerTileX;
+        runtime.tankRuntimeDiagnostics.colliderCenterTileZ = centerTileZ;
         const radiusTiles = 12;
         const obstacleColliders =
           staticEntitiesHandleRef.current?.getObstacleColliders() ?? [];
@@ -1334,6 +1350,10 @@ export const ZarchScene = ({
           runtime.tank.lastShellImpactSurface = impactDispatch.lastSurface;
         }
         runtime.tank.activeShellCount = simulation.shells.length;
+        Object.assign(
+          runtime.tankRuntimeDiagnostics,
+          getPlayerTankTrackedBodyCounts(tankPhysics, simulation)
+        );
         setLatestTankDiagnostics(simulation.diagnostics);
         const updatedBody = getPlayerTankBody(tankPhysics, simulation);
         if (updatedBody) {
@@ -1365,6 +1385,7 @@ export const ZarchScene = ({
           });
           runtime.camera.x = cameraFocus.x;
           runtime.camera.z = cameraFocus.z;
+          runtime.tankRuntimeDiagnostics.cameraYaw = runtime.camera.yaw;
           runtime.navigation.x = runtime.tank.x * sceneScale;
           runtime.navigation.z = runtime.tank.z * sceneScale;
           runtime.navigation.yaw = runtime.camera.yaw;

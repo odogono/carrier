@@ -26,6 +26,7 @@ type ViewCenterState = {
   shipAltitude: number | null;
   tankAvailability: ZarchRuntimeState['tankAvailability'];
   tankError: string | null;
+  tankRuntimeDiagnostics: ZarchRuntimeState['tankRuntimeDiagnostics'];
   tankSpeed: number | null;
   tileX: number;
   tileZ: number;
@@ -49,6 +50,15 @@ export const ZarchHud = ({
     shipAltitude: null,
     tankAvailability: 'loading',
     tankError: null,
+    tankRuntimeDiagnostics: {
+      cameraYaw: 0,
+      colliderCenterTileX: null,
+      colliderCenterTileZ: null,
+      lastExitX: null,
+      lastExitZ: null,
+      shellBodyCount: 0,
+      tankBodyCount: 0
+    },
     tankSpeed: null,
     tileX: 0,
     tileZ: 0,
@@ -87,6 +97,15 @@ export const ZarchHud = ({
             : null,
         tankAvailability: runtime?.tankAvailability ?? 'loading',
         tankError: runtime?.tankError ?? null,
+        tankRuntimeDiagnostics: runtime?.tankRuntimeDiagnostics ?? {
+          cameraYaw: 0,
+          colliderCenterTileX: null,
+          colliderCenterTileZ: null,
+          lastExitX: null,
+          lastExitZ: null,
+          shellBodyCount: 0,
+          tankBodyCount: 0
+        },
         tankSpeed:
           runtime?.mode === 'tank' && runtime.tank
             ? runtime.tank.speedMetersPerSecond
@@ -160,6 +179,19 @@ export const ZarchHud = ({
         {viewCenter.tankError ? (
           <span className="text-[#ff6060]">{viewCenter.tankError}</span>
         ) : null}
+        <span
+          aria-hidden="true"
+          className="hidden"
+          data-testid="zarch-hud-tank-runtime-diagnostics"
+        >
+          Camera yaw: {viewCenter.tankRuntimeDiagnostics.cameraYaw}; Collider
+          tile: {viewCenter.tankRuntimeDiagnostics.colliderCenterTileX ?? '--'},
+          {viewCenter.tankRuntimeDiagnostics.colliderCenterTileZ ?? '--'}; Tank
+          bodies: {viewCenter.tankRuntimeDiagnostics.tankBodyCount}; Shell
+          bodies: {viewCenter.tankRuntimeDiagnostics.shellBodyCount}; Exit:{' '}
+          {viewCenter.tankRuntimeDiagnostics.lastExitX ?? '--'},
+          {viewCenter.tankRuntimeDiagnostics.lastExitZ ?? '--'}
+        </span>
         <span className="ml-auto">Best: {DEFAULT_BEST}</span>
         {(['navigation', 'lander', 'tank'] as const).map(mode => (
           <button
