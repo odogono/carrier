@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useAtomValue } from 'jotai';
-import { useControls } from 'leva';
+import { monitor, useControls } from 'leva';
 
 import {
   DEFAULT_SCENE_CONFIG,
@@ -11,6 +11,7 @@ import {
   sceneConfigStore,
   type ZarchSceneConfig
 } from '@/helpers/zarch-scene-config';
+import { getLatestTankDiagnostics } from '@/screens/zarch/zarch-tank-diagnostics';
 
 export const LEVA_CONTROL_FOLDERS = [
   'Camera',
@@ -19,6 +20,7 @@ export const LEVA_CONTROL_FOLDERS = [
   'Rendering',
   'Scene',
   'Particles',
+  'Tank',
   'Debug'
 ] as const;
 
@@ -372,6 +374,164 @@ export const DevSceneControls = ({
     }
   );
 
+  const tankValues = useControls(
+    'Tank',
+    {
+      airborne: monitor(() => getLatestTankDiagnostics()?.airborne ?? false, {
+        interval: 100
+      }),
+      airborneUprightStrength: {
+        label: 'Air upright',
+        max: 1,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.airborneUprightStrength
+      },
+      cameraDamping: {
+        label: 'Camera damping',
+        max: 20,
+        min: 0.5,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.cameraDamping
+      },
+      cameraLeadSeconds: {
+        label: 'Camera lead s',
+        max: 1,
+        min: 0,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.cameraLeadSeconds
+      },
+      cameraMaxLeadMeters: {
+        label: 'Camera lead m',
+        max: 20,
+        min: 0,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.cameraMaxLeadMeters
+      },
+      compression: monitor(
+        () =>
+          getLatestTankDiagnostics()
+            ?.contacts.map(contact =>
+              contact.supported ? contact.compression.toFixed(2) : '--'
+            )
+            .join(' / ') ?? '-- / -- / -- / --',
+        { interval: 100 }
+      ),
+      driveAcceleration: {
+        label: 'Drive accel',
+        max: 20,
+        min: 1,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.driveAcceleration
+      },
+      forwardSpeed: {
+        label: 'Forward m/s',
+        max: 30,
+        min: 1,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.forwardSpeed
+      },
+      lateralGrip: {
+        label: 'Lateral grip',
+        max: 3,
+        min: 0,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.lateralGrip
+      },
+      recovery: monitor(
+        () => {
+          const diagnostics = getLatestTankDiagnostics();
+          if (diagnostics?.recovered) {
+            return 'restored';
+          }
+          return diagnostics && diagnostics.unavailableSeconds > 0
+            ? `waiting ${diagnostics.unavailableSeconds.toFixed(2)}s`
+            : 'ready';
+        },
+        { interval: 100 }
+      ),
+      reverseSpeed: {
+        label: 'Reverse m/s',
+        max: 20,
+        min: 1,
+        step: 0.5,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.reverseSpeed
+      },
+      slopeDegrees: monitor(
+        () => getLatestTankDiagnostics()?.slopeDegrees.toFixed(1) ?? '0.0',
+        { interval: 100 }
+      ),
+      speedMetersPerSecond: monitor(
+        () =>
+          getLatestTankDiagnostics()?.speedMetersPerSecond.toFixed(1) ?? '0.0',
+        { interval: 100 }
+      ),
+      supportCount: monitor(
+        () => getLatestTankDiagnostics()?.supportCount ?? 0,
+        { interval: 100 }
+      ),
+      suspensionDampingRatio: {
+        label: 'Susp damping',
+        max: 2,
+        min: 0.1,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.suspensionDampingRatio
+      },
+      suspensionFrequencyHertz: {
+        label: 'Susp Hz',
+        max: 6,
+        min: 0.5,
+        step: 0.1,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.suspensionFrequencyHertz
+      },
+      suspensionRideDistance: {
+        label: 'Ride distance',
+        max: 3,
+        min: 0.5,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.suspensionRideDistance
+      },
+      suspensionTravel: {
+        label: 'Susp travel',
+        max: 1,
+        min: 0.05,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.suspensionTravel
+      },
+      uprightDamping: {
+        label: 'Upright damping',
+        max: 50,
+        min: 0,
+        step: 0.05,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.uprightDamping
+      },
+      uprightLimitRadians: {
+        label: 'Upright limit rad',
+        max: Math.PI / 2,
+        min: 0.1,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.uprightLimitRadians
+      },
+      uprightStrength: {
+        label: 'Upright strength',
+        max: 400,
+        min: 0,
+        step: 1,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.uprightStrength
+      },
+      uprightTargetLimitRadians: {
+        label: 'Target tilt rad',
+        max: Math.PI / 2,
+        min: 0,
+        step: 0.01,
+        value: DEFAULT_SCENE_CONFIG.tankDynamics.uprightTargetLimitRadians
+      }
+    },
+    {
+      collapsed: folderState.Tank ?? false
+    }
+  );
+
   const debugValues = useControls(
     'Debug',
     {
@@ -397,6 +557,10 @@ export const DevSceneControls = ({
       ...particleValues,
       ...renderingValues,
       ...sceneValues,
+      tankDynamics: {
+        ...DEFAULT_SCENE_CONFIG.tankDynamics,
+        ...tankValues
+      },
       ...debugValues
     } as ZarchSceneConfig);
   }, [
@@ -406,6 +570,7 @@ export const DevSceneControls = ({
     particleValues,
     renderingValues,
     sceneValues,
+    tankValues,
     debugValues
   ]);
 

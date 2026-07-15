@@ -93,6 +93,7 @@ import {
   destroyPlayerTankSimulation,
   findNearestTankSpawn,
   getPlayerTankBody,
+  getTankHullYaw,
   stepPlayerTankSimulation,
   type PlayerTankSimulation
 } from './zarch-player-tank';
@@ -103,6 +104,8 @@ import {
   type EntityTransformPreview,
   type ZarchStaticEntitiesHandle
 } from './zarch-static-entities';
+import { stepTankCameraFocus } from './zarch-tank-camera';
+import { setLatestTankDiagnostics } from './zarch-tank-diagnostics';
 
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
@@ -862,6 +865,7 @@ export const ZarchScene = ({
   const poolsRef = useRef<ScenePools | null>(null);
   const shipGroupRef = useRef<Group>(null);
   const tankGroupRef = useRef<Group>(null);
+  const tankModelOffsetRef = useRef<Group>(null);
   const tankTurretRef = useRef<Object3D | null>(null);
   const tankSimulationRef = useRef<PlayerTankSimulation | null>(null);
   const tankTerrainPatchRef = useRef<string | null>(null);
@@ -1048,6 +1052,7 @@ export const ZarchScene = ({
       tankColliderBridgeRef.current?.clear();
       tankColliderBridgeRef.current = null;
       tankPhysicsRef.current = null;
+      setLatestTankDiagnostics(null);
     };
   }, [map.id]);
 
@@ -1079,6 +1084,7 @@ export const ZarchScene = ({
       tankSimulationRef.current = null;
       tankTerrainPatchRef.current = null;
       tankColliderBridgeRef.current?.clear();
+      setLatestTankDiagnostics(null);
     }
 
     // Imperative camera/light updates from config
@@ -1260,51 +1266,58 @@ export const ZarchScene = ({
         }
         stepPlayerTankSimulation({
           aimWorld,
+          config: config.tankDynamics,
           deltaSeconds: dt,
           fire: input.fireHeld,
           forward:
             (isCodePressed(input, 'KeyW', 'w') || input.keys.W ? 1 : 0) -
             (isCodePressed(input, 'KeyS', 's') || input.keys.S ? 1 : 0),
+          isSupportDataAvailable: (x, z) =>
+            terrain.isTileLoaded(
+              Math.floor(x / map.resolution.metersPerTile),
+              Math.floor(z / map.resolution.metersPerTile)
+            ),
           physics: tankPhysics,
           simulation,
           steer:
             (isCodePressed(input, 'KeyA', 'a') || input.keys.A ? 1 : 0) -
-            (isCodePressed(input, 'KeyD', 'd') || input.keys.D ? 1 : 0),
-          tractionFactor: (() => {
-            const normal = terrain.sampleNormalAtWorld(
-              body.position[0] * sceneScale,
-              body.position[2] * sceneScale
-            );
-            if (!normal) {
-              return 0;
-            }
-            const slope = Math.acos(Math.max(-1, Math.min(1, normal.y)));
-            const low = (25 * Math.PI) / 180;
-            const high = (35 * Math.PI) / 180;
-            return slope <= low
-              ? 1
-              : slope >= high
-                ? 0
-                : 1 - (slope - low) / (high - low);
-          })()
+            (isCodePressed(input, 'KeyD', 'd') || input.keys.D ? 1 : 0)
         });
         runtime.tank.activeShellCount = simulation.shells.length;
+        setLatestTankDiagnostics(simulation.diagnostics);
         const updatedBody = getPlayerTankBody(tankPhysics, simulation);
         if (updatedBody) {
           const velocity = updatedBody.motionProperties.linearVelocity;
           runtime.tank.x = updatedBody.position[0];
           runtime.tank.y = updatedBody.position[1];
           runtime.tank.z = updatedBody.position[2];
-          runtime.tank.yaw =
-            2 *
-            Math.atan2(updatedBody.quaternion[1], updatedBody.quaternion[3]);
+          runtime.tank.quaternion = [
+            updatedBody.quaternion[0],
+            updatedBody.quaternion[1],
+            updatedBody.quaternion[2],
+            updatedBody.quaternion[3]
+          ];
+          runtime.tank.yaw = getTankHullYaw(runtime.tank.quaternion);
           runtime.tank.turretYaw = simulation.turretYaw;
           runtime.tank.speedMetersPerSecond = Math.hypot(
             velocity[0],
             velocity[2]
           );
-          runtime.camera.x = runtime.tank.x * sceneScale;
-          runtime.camera.z = runtime.tank.z * sceneScale;
+          const cameraFocus = stepTankCameraFocus({
+            current: runtime.camera,
+            damping: config.tankDynamics.cameraDamping,
+            deltaSeconds: dt,
+            leadSeconds: config.tankDynamics.cameraLeadSeconds,
+            maxLeadMeters: config.tankDynamics.cameraMaxLeadMeters,
+            position: runtime.tank,
+            sceneScale,
+            velocity: { x: velocity[0], z: velocity[2] }
+          });
+          runtime.camera.x = cameraFocus.x;
+          runtime.camera.z = cameraFocus.z;
+          runtime.navigation.x = runtime.tank.x * sceneScale;
+          runtime.navigation.z = runtime.tank.z * sceneScale;
+          runtime.navigation.yaw = runtime.camera.yaw;
           runtime.score += Math.trunc(runtime.tank.speedMetersPerSecond * dt);
         }
       }
@@ -1531,7 +1544,11 @@ export const ZarchScene = ({
           tank.y,
           tank.z * sceneScale - runtime.camera.z
         );
-        tankGroupRef.current.rotation.set(0, tank.yaw, 0);
+        tankGroupRef.current.quaternion.set(...tank.quaternion);
+        if (tankModelOffsetRef.current) {
+          tankModelOffsetRef.current.position.y =
+            -config.tankDynamics.suspensionRideDistance;
+        }
         if (tankTurretRef.current) {
           tankTurretRef.current.rotation.y = tank.turretYaw;
         }
@@ -2308,12 +2325,14 @@ export const ZarchScene = ({
           ) : null}
         </group>
         <group ref={tankGroupRef} visible={false}>
-          {tankModelQuery.data ? (
-            <primitive
-              object={tankModelQuery.data.object}
-              scale={tankModelScale}
-            />
-          ) : null}
+          <group ref={tankModelOffsetRef}>
+            {tankModelQuery.data ? (
+              <primitive
+                object={tankModelQuery.data.object}
+                scale={tankModelScale}
+              />
+            ) : null}
+          </group>
         </group>
         <ZarchStaticEntities
           clippingPlanes={clipPlanes}

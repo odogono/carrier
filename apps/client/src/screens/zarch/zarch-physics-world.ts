@@ -1,9 +1,14 @@
 import {
+  CastRayStatus,
   MotionType,
   box,
+  castRay,
+  createClosestCastRayCollector,
+  createDefaultCastRaySettings,
   createWorld,
   createWorldSettings,
   cylinder,
+  filter,
   layers,
   registerShapes,
   rigidBody,
@@ -116,6 +121,15 @@ const objectLayerForOwner = (
 };
 
 export type ZarchPhysicsWorld = {
+  castTankSupportRay: (
+    origin: [number, number, number],
+    direction: [number, number, number],
+    length: number
+  ) => {
+    distance: number;
+    normal: [number, number, number];
+    point: [number, number, number];
+  } | null;
   layers: ZarchPhysicsLayers;
   removeOwner: (owner: ZarchPhysicsOwner) => boolean;
   replaceStaticBoxBody: (
@@ -170,6 +184,19 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
   const physicsLayers = createLayers(settings.layers);
   const world = createWorld(settings);
   const bodiesByOwner = new Map<string, BodyId>();
+  const tankSupportFilter = filter.create(world.settings.layers);
+  filter.disableAllLayers(tankSupportFilter, world.settings.layers);
+  for (const layer of [
+    physicsLayers.obstacle,
+    physicsLayers.shoreline,
+    physicsLayers.streamBoundary,
+    physicsLayers.terrain,
+    physicsLayers.vegetation
+  ]) {
+    filter.enableObjectLayer(tankSupportFilter, world.settings.layers, layer);
+  }
+  const tankSupportCollector = createClosestCastRayCollector();
+  const tankSupportSettings = createDefaultCastRaySettings();
 
   const removeOwner = (owner: ZarchPhysicsOwner) => {
     const key = ownerKey(owner);
@@ -220,6 +247,43 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
     });
 
   return {
+    castTankSupportRay: (origin, direction, length) => {
+      tankSupportCollector.reset();
+      castRay(
+        world,
+        tankSupportCollector,
+        tankSupportSettings,
+        origin,
+        direction,
+        length,
+        tankSupportFilter
+      );
+      const hit = tankSupportCollector.hit;
+      if (hit.status !== CastRayStatus.COLLIDING) {
+        return null;
+      }
+      const distance = hit.fraction * length;
+      const point: [number, number, number] = [
+        origin[0] + direction[0] * distance,
+        origin[1] + direction[1] * distance,
+        origin[2] + direction[2] * distance
+      ];
+      const hitBody = rigidBody.get(world, hit.bodyIdB);
+      if (!hitBody) {
+        return null;
+      }
+      const normal = rigidBody.getSurfaceNormal(
+        [0, 0, 0],
+        hitBody,
+        point,
+        hit.subShapeId
+      );
+      return {
+        distance,
+        normal: [normal[0], normal[1], normal[2]],
+        point
+      };
+    },
     layers: physicsLayers,
     removeOwner,
     replaceStaticBoxBody: (owner, settings) =>

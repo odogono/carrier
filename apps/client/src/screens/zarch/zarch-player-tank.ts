@@ -21,6 +21,119 @@ export const TANK_SHELL_CAPACITY = 16;
 export const TANK_FIRE_COOLDOWN_SECONDS = 0.5;
 export const TANK_CANNON_ELEVATION_RADIANS = (6 * Math.PI) / 180;
 
+const TANK_MASS_KILOGRAMS = 2400;
+const TANK_GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
+
+type TankQuaternion = [number, number, number, number];
+type TankVector = [number, number, number];
+
+export type TankDynamicsConfig = {
+  airborneUprightStrength: number;
+  cameraDamping: number;
+  cameraLeadSeconds: number;
+  cameraMaxLeadMeters: number;
+  driveAcceleration: number;
+  forwardSpeed: number;
+  lateralGrip: number;
+  reverseSpeed: number;
+  suspensionDampingRatio: number;
+  suspensionFrequencyHertz: number;
+  suspensionRideDistance: number;
+  suspensionTravel: number;
+  uprightDamping: number;
+  uprightLimitRadians: number;
+  uprightStrength: number;
+  uprightTargetLimitRadians: number;
+};
+
+export const DEFAULT_TANK_DYNAMICS_CONFIG: TankDynamicsConfig = {
+  airborneUprightStrength: 0.28,
+  cameraDamping: 5,
+  cameraLeadSeconds: 0.4,
+  cameraMaxLeadMeters: 6,
+  driveAcceleration: 8,
+  forwardSpeed: 14,
+  lateralGrip: 1.15,
+  reverseSpeed: 7,
+  suspensionDampingRatio: 0.9,
+  suspensionFrequencyHertz: 1.8,
+  suspensionRideDistance: 1.45,
+  suspensionTravel: 0.35,
+  uprightDamping: 20,
+  uprightLimitRadians: (25 * Math.PI) / 180,
+  uprightStrength: 200,
+  uprightTargetLimitRadians: (12 * Math.PI) / 180
+};
+
+const SUSPENSION_POINTS = [
+  [-1.75, 0, -2.6],
+  [1.75, 0, -2.6],
+  [-1.75, 0, 2.6],
+  [1.75, 0, 2.6]
+] as const;
+
+const clamp = (value: number, minimum: number, maximum: number) =>
+  Math.max(minimum, Math.min(maximum, value));
+
+const normalize = (value: Readonly<TankVector>): TankVector => {
+  const length = Math.hypot(value[0], value[1], value[2]);
+  return length > 0
+    ? [value[0] / length, value[1] / length, value[2] / length]
+    : [0, 1, 0];
+};
+
+const rotateVector = (
+  vector: Readonly<TankVector>,
+  quaternion: Readonly<TankQuaternion>
+): TankVector => {
+  const [x, y, z] = vector;
+  const [qx, qy, qz, qw] = quaternion;
+  const ix = qw * x + qy * z - qz * y;
+  const iy = qw * y + qz * x - qx * z;
+  const iz = qw * z + qx * y - qy * x;
+  const iw = -qx * x - qy * y - qz * z;
+  return [
+    ix * qw + iw * -qx + iy * -qz - iz * -qy,
+    iy * qw + iw * -qy + iz * -qx - ix * -qz,
+    iz * qw + iw * -qz + ix * -qy - iy * -qx
+  ];
+};
+
+export const getTankHullYaw = (quaternion: Readonly<TankQuaternion>) => {
+  const forward = rotateVector([0, 0, -1], quaternion);
+  return Math.atan2(-forward[0], -forward[2]);
+};
+
+const velocityAtPoint = (body: RigidBody, point: Readonly<TankVector>) => {
+  const offset = [
+    point[0] - body.position[0],
+    point[1] - body.position[1],
+    point[2] - body.position[2]
+  ] as const;
+  const angular = body.motionProperties.angularVelocity;
+  return [
+    body.motionProperties.linearVelocity[0] +
+      angular[1] * offset[2] -
+      angular[2] * offset[1],
+    body.motionProperties.linearVelocity[1] +
+      angular[2] * offset[0] -
+      angular[0] * offset[2],
+    body.motionProperties.linearVelocity[2] +
+      angular[0] * offset[1] -
+      angular[1] * offset[0]
+  ] as const;
+};
+
+export const getTankSlopeTraction = (slopeRadians: number) => {
+  const fullTraction = (25 * Math.PI) / 180;
+  const noTraction = (35 * Math.PI) / 180;
+  return clamp(
+    1 - (slopeRadians - fullTraction) / (noTraction - fullTraction),
+    0,
+    1
+  );
+};
+
 const wrapAngle = (angle: number) =>
   Math.atan2(Math.sin(angle), Math.cos(angle));
 
@@ -103,13 +216,39 @@ export type TankShellState = {
   lifetimeSeconds: number;
 };
 
+export type TankSuspensionContact = {
+  compression: number;
+  normal: TankVector | null;
+  point: TankVector | null;
+  supported: boolean;
+};
+
+export type TankDynamicsDiagnostics = {
+  airborne: boolean;
+  contacts: TankSuspensionContact[];
+  recovered: boolean;
+  slopeDegrees: number;
+  speedMetersPerSecond: number;
+  supportCount: number;
+  unavailableSeconds: number;
+};
+
+type TankSupportedPose = {
+  position: TankVector;
+  quaternion: TankQuaternion;
+};
+
 export type PlayerTankSimulation = {
   accumulatorSeconds: number;
   bodyId: BodyId;
+  diagnostics: TankDynamicsDiagnostics;
   fireCooldownSeconds: number;
+  lastSupportedPose: TankSupportedPose;
   nextShellId: number;
+  recoveryDiagnosticSeconds: number;
   shells: TankShellState[];
   turretYaw: number;
+  unavailableSeconds: number;
 };
 
 export const createPlayerTankSimulation = ({
@@ -126,34 +265,56 @@ export const createPlayerTankSimulation = ({
   z: number;
 }): PlayerTankSimulation => {
   const body = rigidBody.create(physics.world, {
-    allowedDegreesOfFreedom: dof(true, true, true, false, true, false),
+    allowedDegreesOfFreedom: dof(true, true, true, true, true, true),
     allowSleeping: false,
-    angularDamping: 8,
-    friction: 0.3,
+    angularDamping: 0.35,
+    friction: 0.15,
     linearDamping: 0.15,
-    mass: 2400,
+    mass: TANK_MASS_KILOGRAMS,
     maxAngularVelocity: Math.PI,
     maxLinearVelocity: 18,
     motionType: MotionType.DYNAMIC,
     objectLayer: physics.layers.tank,
     position: [x, y, z],
     quaternion: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)],
-    shape: box.create({ halfExtents: [2.1, 1.4, 3.4] }),
+    shape: box.create({ halfExtents: [2.1, 0.55, 3.4] }),
     userData: { id: 'player', kind: 'tank' }
   });
   return {
     accumulatorSeconds: 0,
     bodyId: body.id,
+    diagnostics: {
+      airborne: true,
+      contacts: SUSPENSION_POINTS.map(() => ({
+        compression: 0,
+        normal: null,
+        point: null,
+        supported: false
+      })),
+      recovered: false,
+      slopeDegrees: 0,
+      speedMetersPerSecond: 0,
+      supportCount: 0,
+      unavailableSeconds: 0
+    },
     fireCooldownSeconds: 0,
+    lastSupportedPose: {
+      position: [x, y, z],
+      quaternion: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)]
+    },
     nextShellId: 1,
+    recoveryDiagnosticSeconds: 0,
     shells: [],
-    turretYaw: 0
+    turretYaw: 0,
+    unavailableSeconds: 0
   };
 };
 
 const removeBody = (physics: ZarchPhysicsWorld, bodyId: BodyId) => {
   const body = rigidBody.get(physics.world, bodyId);
-  if (body) {rigidBody.remove(physics.world, body);}
+  if (body) {
+    rigidBody.remove(physics.world, body);
+  }
 };
 
 export const destroyPlayerTankSimulation = (
@@ -161,32 +322,38 @@ export const destroyPlayerTankSimulation = (
   simulation: PlayerTankSimulation
 ) => {
   removeBody(physics, simulation.bodyId);
-  for (const shell of simulation.shells) {removeBody(physics, shell.bodyId);}
+  for (const shell of simulation.shells) {
+    removeBody(physics, shell.bodyId);
+  }
   simulation.shells = [];
 };
 
 export const stepPlayerTankSimulation = ({
   aimWorld,
+  config = DEFAULT_TANK_DYNAMICS_CONFIG,
   deltaSeconds,
   fire,
   forward,
+  isSupportDataAvailable = () => true,
   physics,
   simulation,
-  steer,
-  tractionFactor = 1
+  steer
 }: {
   aimWorld: { x: number; z: number } | null;
+  config?: TankDynamicsConfig;
   deltaSeconds: number;
   fire: boolean;
   forward: number;
+  isSupportDataAvailable?: (x: number, z: number) => boolean;
   physics: ZarchPhysicsWorld;
   simulation: PlayerTankSimulation;
   steer: number;
-  tractionFactor?: number;
 }) => {
   const tank = rigidBody.get(physics.world, simulation.bodyId);
-  if (!tank) {return;}
-  const yaw = 2 * Math.atan2(tank.quaternion[1], tank.quaternion[3]);
+  if (!tank) {
+    return;
+  }
+  const yaw = getTankHullYaw(tank.quaternion as TankQuaternion);
   if (aimWorld) {
     const aimYaw = Math.atan2(
       -(aimWorld.x - tank.position[0]),
@@ -202,6 +369,10 @@ export const stepPlayerTankSimulation = ({
     0,
     simulation.fireCooldownSeconds - deltaSeconds
   );
+  simulation.recoveryDiagnosticSeconds = Math.max(
+    0,
+    simulation.recoveryDiagnosticSeconds - deltaSeconds
+  );
   simulation.accumulatorSeconds += Math.min(deltaSeconds, 0.1);
   const hitShellIds = new Set<number>();
   const listener: Listener = {
@@ -216,33 +387,254 @@ export const stepPlayerTankSimulation = ({
   };
   let steps = 0;
   while (simulation.accumulatorSeconds >= 1 / 60 && steps < 5) {
-    const speed = tank.motionProperties.linearVelocity;
-    const forwardX = -Math.sin(yaw);
-    const forwardZ = -Math.cos(yaw);
-    const forwardSpeed = speed[0] * forwardX + speed[2] * forwardZ;
-    const targetSpeed =
-      (forward >= 0 ? forward * 14 : forward * 7) * tractionFactor;
-    const acceleration =
-      Math.abs(targetSpeed) < Math.abs(forwardSpeed) ? 10 : 8;
-    const desiredDelta = Math.max(
-      -acceleration / 60,
-      Math.min(acceleration / 60, targetSpeed - forwardSpeed)
+    const quaternion = tank.quaternion as TankQuaternion;
+    const forwardDirection = normalize(rotateVector([0, 0, -1], quaternion));
+    const rightDirection = normalize(rotateVector([1, 0, 0], quaternion));
+    const downDirection = normalize(rotateVector([0, -1, 0], quaternion));
+    const maxRayLength =
+      config.suspensionRideDistance + config.suspensionTravel;
+    const springFrequency = config.suspensionFrequencyHertz * Math.PI * 2;
+    const supportedMass = TANK_MASS_KILOGRAMS / SUSPENSION_POINTS.length;
+    const springStiffness = supportedMass * springFrequency ** 2;
+    const springDamping =
+      2 *
+      config.suspensionDampingRatio *
+      Math.sqrt(springStiffness * supportedMass);
+    const contacts: TankSuspensionContact[] = [];
+    const normals: TankVector[] = [];
+    const available = SUSPENSION_POINTS.every(localPoint => {
+      const offset = rotateVector(localPoint, quaternion);
+      return isSupportDataAvailable(
+        tank.position[0] + offset[0],
+        tank.position[2] + offset[2]
+      );
+    });
+
+    for (const localPoint of SUSPENSION_POINTS) {
+      const offset = rotateVector(localPoint, quaternion);
+      const origin: TankVector = [
+        tank.position[0] + offset[0],
+        tank.position[1] + offset[1],
+        tank.position[2] + offset[2]
+      ];
+      const hit = physics.castTankSupportRay(
+        origin,
+        downDirection,
+        maxRayLength
+      );
+      if (!hit) {
+        contacts.push({
+          compression: 0,
+          normal: null,
+          point: null,
+          supported: false
+        });
+        continue;
+      }
+      const pointVelocity = velocityAtPoint(tank, hit.point);
+      const suspensionVelocity = -(
+        pointVelocity[0] * hit.normal[0] +
+        pointVelocity[1] * hit.normal[1] +
+        pointVelocity[2] * hit.normal[2]
+      );
+      const compression = clamp(
+        config.suspensionRideDistance - hit.distance,
+        -config.suspensionTravel,
+        config.suspensionTravel
+      );
+      const preload =
+        (supportedMass * TANK_GRAVITY_METERS_PER_SECOND_SQUARED) /
+        Math.max(hit.normal[1], 0.25);
+      const springForce = Math.max(
+        0,
+        preload +
+          springStiffness * compression +
+          springDamping * suspensionVelocity
+      );
+      rigidBody.addForceAtPosition(
+        physics.world,
+        tank,
+        [
+          hit.normal[0] * springForce,
+          hit.normal[1] * springForce,
+          hit.normal[2] * springForce
+        ],
+        hit.point,
+        true
+      );
+      contacts.push({
+        compression,
+        normal: hit.normal,
+        point: hit.point,
+        supported: true
+      });
+      normals.push(hit.normal);
+    }
+
+    const supportCount = contacts.filter(contact => contact.supported).length;
+    const averageNormal = normalize(
+      normals.reduce<TankVector>(
+        (sum, normal) => [
+          sum[0] + normal[0],
+          sum[1] + normal[1],
+          sum[2] + normal[2]
+        ],
+        [0, 0, 0]
+      )
     );
-    rigidBody.setLinearVelocity(physics.world, tank, [
-      forwardX * (forwardSpeed + desiredDelta),
-      speed[1],
-      forwardZ * (forwardSpeed + desiredDelta)
-    ]);
-    rigidBody.setAngularVelocity(physics.world, tank, [
-      0,
-      (steer * Math.PI) / 2,
-      0
-    ]);
+    const slope = Math.acos(clamp(averageNormal[1], -1, 1));
+    const traction = getTankSlopeTraction(slope);
+    const planarSpeed = Math.hypot(
+      tank.motionProperties.linearVelocity[0],
+      tank.motionProperties.linearVelocity[2]
+    );
+    const steerAuthority =
+      0.65 - 0.3 * clamp(planarSpeed / config.forwardSpeed, 0, 1);
+
+    if (supportCount > 0) {
+      for (let index = 0; index < contacts.length; index += 1) {
+        const contact = contacts[index]!;
+        if (!contact.supported || !contact.point) {
+          continue;
+        }
+        const side = SUSPENSION_POINTS[index]![0] < 0 ? -1 : 1;
+        const trackInput = clamp(
+          forward + side * steer * steerAuthority,
+          -1,
+          1
+        );
+        const pivoting = Math.abs(forward) < 0.01 && Math.abs(steer) > 0.01;
+        const pointVelocity = velocityAtPoint(tank, contact.point);
+        const forwardSpeed =
+          pointVelocity[0] * forwardDirection[0] +
+          pointVelocity[1] * forwardDirection[1] +
+          pointVelocity[2] * forwardDirection[2];
+        const targetSpeed =
+          trackInput *
+          (pivoting
+            ? Math.min(config.reverseSpeed, 4)
+            : trackInput >= 0
+              ? config.forwardSpeed
+              : config.reverseSpeed);
+        const maximumAcceleration = config.driveAcceleration;
+        const speedGain = 2;
+        const acceleration = clamp(
+          (targetSpeed - forwardSpeed) * speedGain,
+          -maximumAcceleration,
+          maximumAcceleration
+        );
+        const driveForce = supportedMass * acceleration * traction;
+        const lateralSpeed =
+          pointVelocity[0] * rightDirection[0] +
+          pointVelocity[1] * rightDirection[1] +
+          pointVelocity[2] * rightDirection[2];
+        const lateralForce =
+          clamp(
+            (-lateralSpeed * supportedMass * config.lateralGrip) / (1 / 60),
+            -supportedMass * TANK_GRAVITY_METERS_PER_SECOND_SQUARED * 2,
+            supportedMass * TANK_GRAVITY_METERS_PER_SECOND_SQUARED * 2
+          ) * traction;
+        rigidBody.addForceAtPosition(
+          physics.world,
+          tank,
+          [
+            forwardDirection[0] * driveForce + rightDirection[0] * lateralForce,
+            forwardDirection[1] * driveForce + rightDirection[1] * lateralForce,
+            forwardDirection[2] * driveForce + rightDirection[2] * lateralForce
+          ],
+          contact.point,
+          true
+        );
+      }
+    }
+
+    const currentUp = normalize(rotateVector([0, 1, 0], quaternion));
+    const targetSlope =
+      supportCount > 0 ? Math.min(slope, config.uprightTargetLimitRadians) : 0;
+    const horizontalNormal = normalize([averageNormal[0], 0, averageNormal[2]]);
+    const targetUp: TankVector =
+      targetSlope > 0
+        ? [
+            horizontalNormal[0] * Math.sin(targetSlope),
+            Math.cos(targetSlope),
+            horizontalNormal[2] * Math.sin(targetSlope)
+          ]
+        : [0, 1, 0];
+    const correctionAxis = [
+      currentUp[1] * targetUp[2] - currentUp[2] * targetUp[1],
+      currentUp[2] * targetUp[0] - currentUp[0] * targetUp[2],
+      currentUp[0] * targetUp[1] - currentUp[1] * targetUp[0]
+    ] as const;
+    const uprightScale = supportCount > 0 ? 1 : config.airborneUprightStrength;
+    const angular = tank.motionProperties.angularVelocity;
+    rigidBody.addTorque(
+      physics.world,
+      tank,
+      [
+        (correctionAxis[0] * config.uprightStrength -
+          angular[0] * config.uprightDamping) *
+          TANK_MASS_KILOGRAMS *
+          uprightScale,
+        0,
+        (correctionAxis[2] * config.uprightStrength -
+          angular[2] * config.uprightDamping) *
+          TANK_MASS_KILOGRAMS *
+          uprightScale
+      ],
+      true
+    );
+
     updateWorld(physics.world, listener, 1 / 60);
+    const updatedUp = normalize(
+      rotateVector([0, 1, 0], tank.quaternion as TankQuaternion)
+    );
+    const tilt = Math.acos(clamp(updatedUp[1], -1, 1));
+    if (!available) {
+      simulation.unavailableSeconds += 1 / 60;
+    } else {
+      simulation.unavailableSeconds = 0;
+    }
+    if (
+      tilt > config.uprightLimitRadians ||
+      simulation.unavailableSeconds >= 0.5
+    ) {
+      rigidBody.setTransform(
+        physics.world,
+        tank,
+        simulation.lastSupportedPose.position,
+        simulation.lastSupportedPose.quaternion,
+        true
+      );
+      rigidBody.setLinearVelocity(physics.world, tank, [0, 0, 0]);
+      rigidBody.setAngularVelocity(physics.world, tank, [0, 0, 0]);
+      simulation.unavailableSeconds = 0;
+      simulation.recoveryDiagnosticSeconds = 0.25;
+    } else if (available && supportCount >= 3 && tilt < (20 * Math.PI) / 180) {
+      simulation.lastSupportedPose = {
+        position: [tank.position[0], tank.position[1], tank.position[2]],
+        quaternion: [
+          tank.quaternion[0],
+          tank.quaternion[1],
+          tank.quaternion[2],
+          tank.quaternion[3]
+        ]
+      };
+    }
+    simulation.diagnostics = {
+      airborne: supportCount === 0,
+      contacts,
+      recovered: simulation.recoveryDiagnosticSeconds > 0,
+      slopeDegrees: (slope * 180) / Math.PI,
+      speedMetersPerSecond: planarSpeed,
+      supportCount,
+      unavailableSeconds: simulation.unavailableSeconds
+    };
     simulation.accumulatorSeconds -= 1 / 60;
     steps += 1;
   }
-  if (steps === 5) {simulation.accumulatorSeconds = 0;}
+  if (steps === 5) {
+    simulation.accumulatorSeconds = 0;
+  }
 
   if (
     fire &&

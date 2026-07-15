@@ -57,6 +57,7 @@ export type ZarchShipState = ZarchLanderState;
 
 export type ZarchTankState = {
   activeShellCount: number;
+  quaternion: [number, number, number, number];
   speedMetersPerSecond: number;
   turretYaw: number;
   x: number;
@@ -447,11 +448,14 @@ export const useZarchRuntime = ({
     },
     enterNavigationMode: () => {
       const runtime = runtimeRef.current;
+      const leavingTank = runtime.mode === 'tank';
 
       runtime.mode = 'navigation';
-      runtime.navigation.x = runtime.camera.x;
-      runtime.navigation.z = runtime.camera.z;
-      runtime.navigation.yaw = runtime.camera.yaw;
+      if (!leavingTank) {
+        runtime.navigation.x = runtime.camera.x;
+        runtime.navigation.z = runtime.camera.z;
+        runtime.navigation.yaw = runtime.camera.yaw;
+      }
       runtime.navigation.velX = 0;
       runtime.navigation.velZ = 0;
       runtime.bullets = [];
@@ -465,8 +469,6 @@ export const useZarchRuntime = ({
       runtimeRef.current.bullets = [];
       runtimeRef.current.lander = null;
       runtimeRef.current.tank = tankState;
-      runtimeRef.current.camera.x = tankState.x;
-      runtimeRef.current.camera.z = tankState.z;
     },
     inputRef,
     runtimeRef

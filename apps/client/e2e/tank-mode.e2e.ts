@@ -203,6 +203,19 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
     .toBeGreaterThan(0);
   await page.keyboard.up('KeyW');
 
+  await page.keyboard.down('KeyA');
+  await page.waitForTimeout(1500);
+  await page.keyboard.up('KeyA');
+  const centreBeforePivotDrive = await parsePair(centre);
+  await page.keyboard.down('KeyW');
+  await expect
+    .poll(async () => {
+      const current = await parsePair(centre);
+      return Math.abs(current.x - centreBeforePivotDrive.x);
+    })
+    .toBeGreaterThan(0.5);
+  await page.keyboard.up('KeyW');
+
   const surfaceBox = await surface.boundingBox();
   expect(surfaceBox).not.toBeNull();
   await page.mouse.move(
