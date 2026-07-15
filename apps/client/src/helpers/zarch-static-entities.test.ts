@@ -17,6 +17,7 @@ import {
   collectChunkStaticEntities,
   getSceneMetersScale,
   getStaticEntityGrounding,
+  getStaticEntityObstacleCollider,
   getStaticEntityScenePosition,
   isGameplayObstacleEligible,
   shouldUseStaticEntityInstancing
@@ -150,6 +151,32 @@ describe('zarch static entity helpers', () => {
         obstacleMode: 'solid'
       })
     ).toBeFalse();
+  });
+
+  test('keeps authored obstacle colliders in map metres at non-default render scales', () => {
+    const grounding = getStaticEntityGrounding({
+      assetVersion,
+      entity: baseEntity,
+      map,
+      terrain: {
+        sampleHeightAtWorld: () => 3
+      }
+    });
+
+    expect(grounding).not.toBeNull();
+    expect(
+      getStaticEntityObstacleCollider({
+        assetVersion,
+        entity: baseEntity,
+        grounding: grounding!
+      })
+    ).toEqual({
+      center: [5, 9, 5],
+      halfExtents: [2, 4, 2],
+      id: 'watchtower-1',
+      yawRadians: -0
+    });
+    expect(grounding?.sceneY).not.toBe(grounding?.effectiveHeightMeters);
   });
 
   test('deduplicates chunk entities and hides disabled placements', () => {

@@ -1,4 +1,3 @@
-import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 import {
   MotionType,
   box,
@@ -14,11 +13,6 @@ import {
   type Shape,
   type World
 } from 'crashcat';
-
-import {
-  buildChunkPhysicsGeometry,
-  getNearestWrapOffsets
-} from './zarch-physics-geometry';
 
 type StaticOwnerKind =
   | 'obstacle'
@@ -148,6 +142,28 @@ export type ZarchPhysicsWorld = {
   world: World;
 };
 
+export type ZarchStaticCollider =
+  | {
+      center: [number, number, number];
+      halfExtents: [number, number, number];
+      owner: ZarchPhysicsOwner;
+      shape: 'box';
+      yawRadians: number;
+    }
+  | {
+      center: [number, number, number];
+      halfHeight: number;
+      owner: ZarchPhysicsOwner;
+      radius: number;
+      shape: 'cylinder';
+    }
+  | {
+      geometry: TriangleGeometry;
+      offset?: { x: number; z: number };
+      owner: ZarchPhysicsOwner;
+      shape: 'triangle';
+    };
+
 export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
   registerZarchShapes();
   const settings = createWorldSettings();
@@ -196,7 +212,8 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
     owner: ZarchPhysicsOwner,
     geometry: TriangleGeometry,
     offset = { x: 0, z: 0 }
-  ) => replaceStaticBody({
+  ) =>
+    replaceStaticBody({
       owner,
       position: [offset.x, 0, offset.z],
       shape: triangleMesh.create(geometry)
@@ -231,90 +248,52 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
   };
 };
 
-export const createZarchChunkColliderBridge = ({
-  map,
-  physics,
-  seaY
-}: {
-  map: MapMetadata;
-  physics: ZarchPhysicsWorld;
-  seaY: number;
-}) => {
-  const activeOwners = new Map<string, ZarchPhysicsOwner>();
+export const createZarchStaticColliderBridge = (physics: ZarchPhysicsWorld) => {
+  const activeOwners = new Map<
+    string,
+    { owner: ZarchPhysicsOwner; signature: string }
+  >();
 
   const clear = () => {
-    for (const owner of activeOwners.values()) {
+    for (const { owner } of activeOwners.values()) {
       physics.removeOwner(owner);
     }
     activeOwners.clear();
   };
 
-  const sync = ({
-    chunks,
-    focusX,
-    focusZ
-  }: {
-    chunks: RuntimeMapChunk[];
-    focusX: number;
-    focusZ: number;
-  }) => {
-    const wrapOffsets = getNearestWrapOffsets({ focusX, focusZ, map });
-    const desired = new Map<
-      string,
-      {
-        geometry: TriangleGeometry;
-        offset: { x: number; z: number };
-        owner: ZarchPhysicsOwner;
-      }
-    >();
+  const sync = (colliders: ZarchStaticCollider[]) => {
+    const desired = new Map(
+      colliders.map(collider => [ownerKey(collider.owner), collider])
+    );
 
-    for (const chunk of chunks) {
-      const geometry = buildChunkPhysicsGeometry({ chunk, map, seaY });
-      for (const offset of wrapOffsets) {
-        const suffix = `${chunk.chunkX}:${chunk.chunkZ}@${offset.x}:${offset.z}`;
-        const entries: Array<{
-          geometry: TriangleGeometry | null;
-          kind: StaticOwnerKind;
-        }> = [
-          { geometry: geometry.terrain, kind: 'terrain' },
-          { geometry: geometry.waterSurface, kind: 'water-surface' },
-          { geometry: geometry.shoreline, kind: 'shoreline' }
-        ];
-
-        for (const entry of entries) {
-          if (!entry.geometry) {
-            continue;
-          }
-          const owner: ZarchPhysicsOwner = {
-            id: suffix,
-            kind: entry.kind
-          };
-          desired.set(ownerKey(owner), {
-            geometry: entry.geometry,
-            offset,
-            owner
-          });
-        }
-      }
-    }
-
-    for (const [key, owner] of activeOwners) {
+    for (const [key, { owner }] of activeOwners) {
       if (!desired.has(key)) {
         physics.removeOwner(owner);
         activeOwners.delete(key);
       }
     }
 
-    for (const [key, entry] of desired) {
-      if (activeOwners.has(key)) {
+    for (const [key, collider] of desired) {
+      const signature = JSON.stringify(collider);
+      if (activeOwners.get(key)?.signature === signature) {
         continue;
       }
-      physics.replaceStaticTriangleBody(
-        entry.owner,
-        entry.geometry,
-        entry.offset
-      );
-      activeOwners.set(key, entry.owner);
+      switch (collider.shape) {
+        case 'box':
+          physics.replaceStaticBoxBody(collider.owner, collider);
+          break;
+        case 'cylinder':
+          physics.replaceStaticCylinderBody(collider.owner, collider);
+          break;
+        case 'triangle':
+          physics.replaceStaticTriangleBody(
+            collider.owner,
+            collider.geometry,
+            collider.offset
+          );
+          break;
+      }
+      activeOwners.set(key, { owner: collider.owner, signature });
     }
   };
 

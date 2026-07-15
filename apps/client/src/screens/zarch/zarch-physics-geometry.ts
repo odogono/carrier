@@ -1,8 +1,83 @@
 import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 
+import type { StaticEntityObstacleCollider } from '@/helpers/zarch-static-entities';
+import type { ZarchTerrain } from '@/helpers/zarch-terrain';
+
+import type { ZarchStaticCollider } from './zarch-physics-world';
+
 type TriangleGeometry = {
   indices: number[];
   positions: number[];
+};
+
+type ZarchStaticColliderPatchTerrain = Pick<
+  ZarchTerrain,
+  | 'isTileLoaded'
+  | 'isWaterTile'
+  | 'sampleHeight'
+  | 'shouldHaveTree'
+  | 'treeType'
+>;
+
+export type ZarchStaticColliderPatchInput<
+  Terrain extends ZarchStaticColliderPatchTerrain =
+    ZarchStaticColliderPatchTerrain
+> = {
+  centerTileX: number;
+  centerTileZ: number;
+  obstacleColliders: StaticEntityObstacleCollider[];
+  radiusTiles: number;
+  seaY: number;
+  terrain: Terrain;
+  tileMeters: number;
+  wrapOffsets: Array<{ x: number; z: number }>;
+};
+
+export const getTerrainPatchContentSignature = ({
+  centerTileX,
+  centerTileZ,
+  obstacleColliders,
+  radiusTiles,
+  seaY,
+  terrain,
+  tileMeters,
+  wrapOffsets
+}: ZarchStaticColliderPatchInput) => {
+  const terrainState = [];
+  for (
+    let z = centerTileZ - radiusTiles - 1;
+    z <= centerTileZ + radiusTiles + 1;
+    z += 1
+  ) {
+    for (
+      let x = centerTileX - radiusTiles - 1;
+      x <= centerTileX + radiusTiles + 1;
+      x += 1
+    ) {
+      terrainState.push([
+        x,
+        z,
+        terrain.sampleHeight(x, z),
+        terrain.isTileLoaded(x, z),
+        terrain.isWaterTile(x, z),
+        terrain.shouldHaveTree(x, z),
+        terrain.treeType(x, z)
+      ]);
+    }
+  }
+
+  return JSON.stringify({
+    centerTileX,
+    centerTileZ,
+    obstacleColliders: [...obstacleColliders].sort((left, right) =>
+      left.id.localeCompare(right.id)
+    ),
+    radiusTiles,
+    seaY,
+    terrainState,
+    tileMeters,
+    wrapOffsets
+  });
 };
 
 export type ChunkPhysicsGeometry = {
@@ -43,7 +118,9 @@ export const buildTerrainPatchGeometry = ({
         terrain.sampleHeight(x, z + 1),
         terrain.sampleHeight(x + 1, z + 1)
       ];
-      if (heights.some(height => height === null)) {continue;}
+      if (heights.some(height => height === null)) {
+        continue;
+      }
       pushQuad(result, [
         [x * tileMeters, heights[0]!, z * tileMeters],
         [(x + 1) * tileMeters, heights[1]!, z * tileMeters],
@@ -86,7 +163,9 @@ export const buildWaterBoundaryPatchGeometry = ({
       x <= centerTileX + radiusTiles;
       x += 1
     ) {
-      if (!terrain.isTileLoaded(x, z) || !terrain.isWaterTile(x, z)) {continue;}
+      if (!terrain.isTileLoaded(x, z) || !terrain.isWaterTile(x, z)) {
+        continue;
+      }
       const minX = x * tileMeters;
       const maxX = minX + tileMeters;
       const minZ = z * tileMeters;
@@ -171,7 +250,9 @@ export const buildWaterSurfacePatchGeometry = ({
       x <= centerTileX + radiusTiles;
       x += 1
     ) {
-      if (!terrain.isTileLoaded(x, z) || !terrain.isWaterTile(x, z)) {continue;}
+      if (!terrain.isTileLoaded(x, z) || !terrain.isWaterTile(x, z)) {
+        continue;
+      }
       pushQuad(result, [
         [x * tileMeters, seaY, z * tileMeters],
         [(x + 1) * tileMeters, seaY, z * tileMeters],
@@ -181,6 +262,213 @@ export const buildWaterSurfacePatchGeometry = ({
     }
   }
   return result;
+};
+
+export const buildStreamBoundaryPatchGeometry = ({
+  centerTileX,
+  centerTileZ,
+  radiusTiles,
+  terrain,
+  tileMeters
+}: {
+  centerTileX: number;
+  centerTileZ: number;
+  radiusTiles: number;
+  terrain: {
+    isTileLoaded: (x: number, z: number) => boolean;
+  };
+  tileMeters: number;
+}): TriangleGeometry => {
+  const result: TriangleGeometry = { indices: [], positions: [] };
+  const bottom = -20;
+  const top = 40;
+
+  for (
+    let z = centerTileZ - radiusTiles;
+    z <= centerTileZ + radiusTiles;
+    z += 1
+  ) {
+    for (
+      let x = centerTileX - radiusTiles;
+      x <= centerTileX + radiusTiles;
+      x += 1
+    ) {
+      if (!terrain.isTileLoaded(x, z)) {
+        continue;
+      }
+      const minX = x * tileMeters;
+      const maxX = minX + tileMeters;
+      const minZ = z * tileMeters;
+      const maxZ = minZ + tileMeters;
+      const edges = [
+        {
+          neighbor: [x - 1, z],
+          vertices: [
+            [minX, bottom, minZ],
+            [minX, top, minZ],
+            [minX, bottom, maxZ],
+            [minX, top, maxZ]
+          ]
+        },
+        {
+          neighbor: [x + 1, z],
+          vertices: [
+            [maxX, bottom, maxZ],
+            [maxX, top, maxZ],
+            [maxX, bottom, minZ],
+            [maxX, top, minZ]
+          ]
+        },
+        {
+          neighbor: [x, z - 1],
+          vertices: [
+            [maxX, bottom, minZ],
+            [maxX, top, minZ],
+            [minX, bottom, minZ],
+            [minX, top, minZ]
+          ]
+        },
+        {
+          neighbor: [x, z + 1],
+          vertices: [
+            [minX, bottom, maxZ],
+            [minX, top, maxZ],
+            [maxX, bottom, maxZ],
+            [maxX, top, maxZ]
+          ]
+        }
+      ] as const;
+
+      for (const edge of edges) {
+        if (!terrain.isTileLoaded(edge.neighbor[0], edge.neighbor[1])) {
+          pushQuad(result, edge.vertices);
+        }
+      }
+    }
+  }
+
+  return result;
+};
+
+export const buildZarchStaticColliderPatch = ({
+  centerTileX,
+  centerTileZ,
+  obstacleColliders,
+  radiusTiles,
+  seaY,
+  terrain,
+  tileMeters,
+  wrapOffsets
+}: ZarchStaticColliderPatchInput<
+  ZarchStaticColliderPatchTerrain & Pick<ZarchTerrain, 'getTileAverageHeight'>
+>): ZarchStaticCollider[] => {
+  const colliders: ZarchStaticCollider[] = [];
+  const triangleEntries = [
+    {
+      geometry: buildTerrainPatchGeometry({
+        centerTileX,
+        centerTileZ,
+        radiusTiles,
+        terrain,
+        tileMeters
+      }),
+      kind: 'terrain' as const
+    },
+    {
+      geometry: buildWaterBoundaryPatchGeometry({
+        centerTileX,
+        centerTileZ,
+        radiusTiles,
+        seaY,
+        terrain,
+        tileMeters
+      }),
+      kind: 'shoreline' as const
+    },
+    {
+      geometry: buildWaterSurfacePatchGeometry({
+        centerTileX,
+        centerTileZ,
+        radiusTiles,
+        seaY,
+        terrain,
+        tileMeters
+      }),
+      kind: 'water-surface' as const
+    },
+    {
+      geometry: buildStreamBoundaryPatchGeometry({
+        centerTileX,
+        centerTileZ,
+        radiusTiles,
+        terrain,
+        tileMeters
+      }),
+      kind: 'stream-boundary' as const
+    }
+  ];
+
+  for (const { geometry, kind } of triangleEntries) {
+    if (geometry.indices.length > 0) {
+      colliders.push({
+        geometry,
+        owner: { id: 'active', kind },
+        shape: 'triangle'
+      });
+    }
+  }
+
+  for (
+    let tileZ = centerTileZ - radiusTiles;
+    tileZ <= centerTileZ + radiusTiles;
+    tileZ += 1
+  ) {
+    for (
+      let tileX = centerTileX - radiusTiles;
+      tileX <= centerTileX + radiusTiles;
+      tileX += 1
+    ) {
+      if (
+        !terrain.isTileLoaded(tileX, tileZ) ||
+        !terrain.shouldHaveTree(tileX, tileZ)
+      ) {
+        continue;
+      }
+      const large = terrain.treeType(tileX, tileZ) === 1;
+      colliders.push({
+        center: [
+          (tileX + 0.5) * tileMeters,
+          (terrain.getTileAverageHeight(tileX, tileZ) ?? 0) + (large ? 4 : 2.5),
+          (tileZ + 0.5) * tileMeters
+        ],
+        halfHeight: large ? 4 : 2.5,
+        owner: { id: `${tileX}:${tileZ}`, kind: 'vegetation' },
+        radius: large ? 1.5 : 0.8,
+        shape: 'cylinder'
+      });
+    }
+  }
+
+  for (const collider of obstacleColliders) {
+    for (const offset of wrapOffsets) {
+      colliders.push({
+        center: [
+          collider.center[0] + offset.x,
+          collider.center[1],
+          collider.center[2] + offset.z
+        ],
+        halfExtents: collider.halfExtents,
+        owner: {
+          id: `${collider.id}@${offset.x}:${offset.z}`,
+          kind: 'obstacle'
+        },
+        shape: 'box',
+        yawRadians: collider.yawRadians
+      });
+    }
+  }
+
+  return colliders;
 };
 
 const getHeight = (chunk: RuntimeMapChunk, x: number, z: number) =>

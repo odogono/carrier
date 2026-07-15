@@ -75,12 +75,14 @@ import {
   simulateParticleSystem
 } from './zarch-particles';
 import {
-  buildTerrainPatchGeometry,
-  buildWaterBoundaryPatchGeometry,
-  buildWaterSurfacePatchGeometry,
-  getNearestWrapOffsets
+  buildZarchStaticColliderPatch,
+  getNearestWrapOffsets,
+  getTerrainPatchContentSignature
 } from './zarch-physics-geometry';
-import { createZarchPhysicsWorld } from './zarch-physics-world';
+import {
+  createZarchPhysicsWorld,
+  createZarchStaticColliderBridge
+} from './zarch-physics-world';
 import {
   getPlayerShipExhaustDirection,
   getPlayerShipExhaustOrigin,
@@ -863,9 +865,9 @@ export const ZarchScene = ({
   const tankTurretRef = useRef<Object3D | null>(null);
   const tankSimulationRef = useRef<PlayerTankSimulation | null>(null);
   const tankTerrainPatchRef = useRef<string | null>(null);
-  const tankStaticOwnersRef = useRef<
-    Array<{ id: string; kind: 'obstacle' | 'vegetation' }>
-  >([]);
+  const tankColliderBridgeRef = useRef<ReturnType<
+    typeof createZarchStaticColliderBridge
+  > | null>(null);
   const worldRef = useRef<Group>(null);
   const tankPhysicsRef = useRef<ReturnType<
     typeof createZarchPhysicsWorld
@@ -874,6 +876,11 @@ export const ZarchScene = ({
     tankPhysicsRef.current ??= createZarchPhysicsWorld();
     return tankPhysicsRef.current;
   }, []);
+  const getTankColliderBridge = useCallback(() => {
+    tankColliderBridgeRef.current ??=
+      createZarchStaticColliderBridge(getTankPhysics());
+    return tankColliderBridgeRef.current;
+  }, [getTankPhysics]);
   const shipRuntimeEntityQuery = useQuery({
     queryFn: () =>
       client.maps.getZarchRuntimeEntity({
@@ -1038,16 +1045,8 @@ export const ZarchScene = ({
         destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
         tankSimulationRef.current = null;
       }
-      tankPhysics.removeOwner({ id: 'active', kind: 'terrain' });
-      tankPhysics.removeOwner({ id: 'active', kind: 'shoreline' });
-      tankPhysics.removeOwner({ id: 'active', kind: 'water-surface' });
-      for (const id of ['west', 'east', 'north', 'south']) {
-        tankPhysics.removeOwner({ id, kind: 'stream-boundary' });
-      }
-      for (const owner of tankStaticOwnersRef.current) {
-        tankPhysics.removeOwner(owner);
-      }
-      tankStaticOwnersRef.current = [];
+      tankColliderBridgeRef.current?.clear();
+      tankColliderBridgeRef.current = null;
       tankPhysicsRef.current = null;
     };
   }, [map.id]);
@@ -1079,16 +1078,7 @@ export const ZarchScene = ({
       destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
       tankSimulationRef.current = null;
       tankTerrainPatchRef.current = null;
-      for (const owner of tankStaticOwnersRef.current) {
-        tankPhysics.removeOwner(owner);
-      }
-      tankStaticOwnersRef.current = [];
-      tankPhysics.removeOwner({ id: 'active', kind: 'terrain' });
-      tankPhysics.removeOwner({ id: 'active', kind: 'shoreline' });
-      tankPhysics.removeOwner({ id: 'active', kind: 'water-surface' });
-      for (const id of ['west', 'east', 'north', 'south']) {
-        tankPhysics.removeOwner({ id, kind: 'stream-boundary' });
-      }
+      tankColliderBridgeRef.current?.clear();
     }
 
     // Imperative camera/light updates from config
@@ -1219,174 +1209,29 @@ export const ZarchScene = ({
           body.position[2] / map.resolution.metersPerTile
         );
         const radiusTiles = 12;
-        let loadedTileCount = 0;
-        for (
-          let tileZ = centerTileZ - radiusTiles;
-          tileZ <= centerTileZ + radiusTiles;
-          tileZ += 1
-        ) {
-          for (
-            let tileX = centerTileX - radiusTiles;
-            tileX <= centerTileX + radiusTiles;
-            tileX += 1
-          ) {
-            if (terrain.isTileLoaded(tileX, tileZ)) {
-              loadedTileCount += 1;
-            }
-          }
-        }
         const obstacleColliders =
           staticEntitiesHandleRef.current?.getObstacleColliders() ?? [];
-        const obstacleSignature = obstacleColliders
-          .map(
-            collider =>
-              `${collider.id}:${collider.center.join(':')}:${collider.yawRadians}`
-          )
-          .sort()
-          .join('|');
-        const patchKey = `${centerTileX >> 3}:${centerTileZ >> 3}:${terrain.id}:${map.revision}:${loadedTileCount}:${obstacleSignature}`;
+        const wrapOffsets = getNearestWrapOffsets({
+          focusX: body.position[0],
+          focusZ: body.position[2],
+          map
+        });
+        const patchInput = {
+          centerTileX,
+          centerTileZ,
+          obstacleColliders,
+          radiusTiles,
+          seaY: config.seaY,
+          terrain,
+          tileMeters: map.resolution.metersPerTile,
+          wrapOffsets
+        };
+        const patchKey = getTerrainPatchContentSignature(patchInput);
         if (tankTerrainPatchRef.current !== patchKey) {
           tankTerrainPatchRef.current = patchKey;
-          for (const owner of tankStaticOwnersRef.current) {
-            tankPhysics.removeOwner(owner);
-          }
-          tankStaticOwnersRef.current = [];
-          const geometry = buildTerrainPatchGeometry({
-            centerTileX,
-            centerTileZ,
-            radiusTiles,
-            terrain,
-            tileMeters: map.resolution.metersPerTile
-          });
-          if (geometry.indices.length > 0) {
-            tankPhysics.replaceStaticTriangleBody(
-              { id: 'active', kind: 'terrain' },
-              geometry
-            );
-          }
-          const shoreline = buildWaterBoundaryPatchGeometry({
-            centerTileX,
-            centerTileZ,
-            radiusTiles,
-            seaY: config.seaY,
-            terrain,
-            tileMeters: map.resolution.metersPerTile
-          });
-          if (shoreline.indices.length > 0) {
-            tankPhysics.replaceStaticTriangleBody(
-              { id: 'active', kind: 'shoreline' },
-              shoreline
-            );
-          }
-          const waterSurface = buildWaterSurfacePatchGeometry({
-            centerTileX,
-            centerTileZ,
-            radiusTiles,
-            seaY: config.seaY,
-            terrain,
-            tileMeters: map.resolution.metersPerTile
-          });
-          if (waterSurface.indices.length > 0) {
-            tankPhysics.replaceStaticTriangleBody(
-              { id: 'active', kind: 'water-surface' },
-              waterSurface
-            );
-          }
-          const patchMinX =
-            (centerTileX - radiusTiles) * map.resolution.metersPerTile;
-          const patchMaxX =
-            (centerTileX + radiusTiles + 1) * map.resolution.metersPerTile;
-          const patchMinZ =
-            (centerTileZ - radiusTiles) * map.resolution.metersPerTile;
-          const patchMaxZ =
-            (centerTileZ + radiusTiles + 1) * map.resolution.metersPerTile;
-          const edgeOwners = [
-            {
-              center: [patchMinX, 10, (patchMinZ + patchMaxZ) / 2],
-              halfExtents: [0.25, 30, (patchMaxZ - patchMinZ) / 2],
-              id: 'west'
-            },
-            {
-              center: [patchMaxX, 10, (patchMinZ + patchMaxZ) / 2],
-              halfExtents: [0.25, 30, (patchMaxZ - patchMinZ) / 2],
-              id: 'east'
-            },
-            {
-              center: [(patchMinX + patchMaxX) / 2, 10, patchMinZ],
-              halfExtents: [(patchMaxX - patchMinX) / 2, 30, 0.25],
-              id: 'north'
-            },
-            {
-              center: [(patchMinX + patchMaxX) / 2, 10, patchMaxZ],
-              halfExtents: [(patchMaxX - patchMinX) / 2, 30, 0.25],
-              id: 'south'
-            }
-          ] as const;
-          for (const edge of edgeOwners) {
-            tankPhysics.replaceStaticBoxBody(
-              { id: edge.id, kind: 'stream-boundary' },
-              {
-                center: [...edge.center],
-                halfExtents: [...edge.halfExtents],
-                yawRadians: 0
-              }
-            );
-          }
-          for (
-            let tileZ = centerTileZ - radiusTiles;
-            tileZ <= centerTileZ + radiusTiles;
-            tileZ += 1
-          ) {
-            for (
-              let tileX = centerTileX - radiusTiles;
-              tileX <= centerTileX + radiusTiles;
-              tileX += 1
-            ) {
-              if (
-                !terrain.isTileLoaded(tileX, tileZ) ||
-                !terrain.shouldHaveTree(tileX, tileZ)
-              ) {
-                continue;
-              }
-              const owner = {
-                id: `${tileX}:${tileZ}`,
-                kind: 'vegetation' as const
-              };
-              const x = (tileX + 0.5) * map.resolution.metersPerTile;
-              const z = (tileZ + 0.5) * map.resolution.metersPerTile;
-              const height = terrain.getTileAverageHeight(tileX, tileZ) ?? 0;
-              const large = terrain.treeType(tileX, tileZ) === 1;
-              tankPhysics.replaceStaticCylinderBody(owner, {
-                center: [x, height + (large ? 4 : 2.5), z],
-                halfHeight: large ? 4 : 2.5,
-                radius: large ? 1.5 : 0.8
-              });
-              tankStaticOwnersRef.current.push(owner);
-            }
-          }
-          const wrapOffsets = getNearestWrapOffsets({
-            focusX: body.position[0],
-            focusZ: body.position[2],
-            map
-          });
-          for (const collider of obstacleColliders) {
-            for (const offset of wrapOffsets) {
-              const owner = {
-                id: `${collider.id}@${offset.x}:${offset.z}`,
-                kind: 'obstacle' as const
-              };
-              tankPhysics.replaceStaticBoxBody(owner, {
-                center: [
-                  collider.center[0] + offset.x,
-                  collider.center[1],
-                  collider.center[2] + offset.z
-                ],
-                halfExtents: collider.halfExtents,
-                yawRadians: collider.yawRadians
-              });
-              tankStaticOwnersRef.current.push(owner);
-            }
-          }
+          getTankColliderBridge().sync(
+            buildZarchStaticColliderPatch(patchInput)
+          );
         }
 
         let aimWorld: { x: number; z: number } | null = null;

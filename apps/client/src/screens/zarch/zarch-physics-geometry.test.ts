@@ -1,9 +1,12 @@
+/* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
 import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 
 import {
   buildChunkPhysicsGeometry,
-  getNearestWrapOffsets
+  buildStreamBoundaryPatchGeometry,
+  getNearestWrapOffsets,
+  getTerrainPatchContentSignature
 } from './zarch-physics-geometry';
 
 const map: MapMetadata = {
@@ -49,6 +52,49 @@ const chunk: RuntimeMapChunk = {
   tileWidth: 1
 };
 
+const getObstaclePatchSignature = (halfExtents: [number, number, number]) =>
+  getTerrainPatchContentSignature({
+    centerTileX: 0,
+    centerTileZ: 0,
+    obstacleColliders: [
+      {
+        center: [5, 5, 5],
+        halfExtents,
+        id: 'tower',
+        yawRadians: 0
+      }
+    ],
+    radiusTiles: 0,
+    seaY: -12,
+    terrain: {
+      isTileLoaded: () => true,
+      isWaterTile: () => false,
+      sampleHeight: () => 1,
+      shouldHaveTree: () => false,
+      treeType: () => 0
+    },
+    tileMeters: 10,
+    wrapOffsets: [{ x: 0, z: 0 }]
+  });
+
+const getEnvironmentPatchSignature = (seaY: number, tileMeters: number) =>
+  getTerrainPatchContentSignature({
+    centerTileX: 0,
+    centerTileZ: 0,
+    obstacleColliders: [],
+    radiusTiles: 0,
+    seaY,
+    terrain: {
+      isTileLoaded: () => true,
+      isWaterTile: () => true,
+      sampleHeight: () => -1,
+      shouldHaveTree: () => false,
+      treeType: () => 0
+    },
+    tileMeters,
+    wrapOffsets: [{ x: 0, z: 0 }]
+  });
+
 describe('zarch physics geometry', () => {
   test('builds chunk terrain in canonical map metres', () => {
     const geometry = buildChunkPhysicsGeometry({ chunk, map, seaY: -12 });
@@ -89,16 +135,78 @@ describe('zarch physics geometry', () => {
         map: {
           ...map,
           extent: {
+            heightMeters: 20,
+            heightTiles: 2,
             kind: 'finite',
             widthMeters: 40,
-            heightMeters: 20,
             widthTiles: 4,
-            heightTiles: 2,
             wrapX: true,
             wrapZ: true
           }
         }
       })
     ).toContainEqual({ x: 40, z: -20 });
+  });
+
+  test('invalidates collider patches when loaded topology or heights change', () => {
+    const tiles = new Map<string, number | null>([
+      ['0:0', 1],
+      ['1:0', 1]
+    ]);
+    const signature = () =>
+      getTerrainPatchContentSignature({
+        centerTileX: 0,
+        centerTileZ: 0,
+        obstacleColliders: [],
+        radiusTiles: 0,
+        seaY: -12,
+        terrain: {
+          isTileLoaded: (x, z) =>
+            tiles.has(`${x}:${z}`) && tiles.get(`${x}:${z}`) !== null,
+          isWaterTile: () => false,
+          sampleHeight: (x, z) => tiles.get(`${x}:${z}`) ?? null,
+          shouldHaveTree: () => false,
+          treeType: () => 0
+        },
+        tileMeters: 10,
+        wrapOffsets: [{ x: 0, z: 0 }]
+      });
+
+    const initial = signature();
+    tiles.set('0:0', null);
+    tiles.set('1:0', 2);
+
+    expect(signature()).not.toBe(initial);
+  });
+
+  test('invalidates collider patches when only obstacle dimensions change', () => {
+    expect(getObstaclePatchSignature([1, 2, 1])).not.toBe(
+      getObstaclePatchSignature([2, 2, 1])
+    );
+  });
+
+  test('invalidates collider patches when sea level or tile scale changes', () => {
+    expect(getEnvironmentPatchSignature(-12, 10)).not.toBe(
+      getEnvironmentPatchSignature(-8, 10)
+    );
+    expect(getEnvironmentPatchSignature(-12, 10)).not.toBe(
+      getEnvironmentPatchSignature(-12, 24)
+    );
+  });
+
+  test('builds fail-closed barriers around internal unloaded edges', () => {
+    const geometry = buildStreamBoundaryPatchGeometry({
+      centerTileX: 0,
+      centerTileZ: 0,
+      radiusTiles: 1,
+      terrain: {
+        isTileLoaded: (x, z) => !(x === 0 && z === 0)
+      },
+      tileMeters: 10
+    });
+
+    expect(geometry.indices.length).toBeGreaterThanOrEqual(24);
+    expect(geometry.positions).toContain(0);
+    expect(geometry.positions).toContain(10);
   });
 });
