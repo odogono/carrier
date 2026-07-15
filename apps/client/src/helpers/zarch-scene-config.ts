@@ -4,6 +4,10 @@ import {
   DEFAULT_PARTICLE_CONFIG,
   type ZarchParticleConfig
 } from '@/screens/zarch/zarch-particles';
+import {
+  DEFAULT_TANK_DYNAMICS_CONFIG,
+  type TankDynamicsConfig
+} from '@/screens/zarch/zarch-player-tank';
 
 export {
   LANDSCAPE_CLIP_SCALE_MAX,
@@ -30,6 +34,7 @@ export type ZarchSceneConfig = ZarchParticleConfig & {
   showHud: boolean;
   showMinimap: boolean;
   showTrees: boolean;
+  tankDynamics: TankDynamicsConfig;
   viewRadiusBase: number;
   wireframe: boolean;
   zoomDamping: number;
@@ -58,6 +63,7 @@ export const DEFAULT_SCENE_CONFIG: ZarchSceneConfig = {
   showHud: true,
   showMinimap: true,
   showTrees: true,
+  tankDynamics: DEFAULT_TANK_DYNAMICS_CONFIG,
   viewRadiusBase: 6,
   wireframe: false,
   zoomDamping: 7,

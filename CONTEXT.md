@@ -70,6 +70,10 @@ A Shell is a short-lived ballistic projectile fired by the Tank. It uses
 continuous collision detection and is removed on its first impact or lifetime
 expiry.
 
+Tank Suspension is the Tank's compliant terrain-contact behavior. It supports
+the hull independently at four corners, allowing limited vertical travel,
+pitch, and roll while the Tank remains upright.
+
 ## Gameplay Obstacles
 
 A Gameplay Obstacle blocks a locally simulated Tank or Shell. An Authored

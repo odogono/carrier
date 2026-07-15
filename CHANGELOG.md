@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Tank Mode now uses four-corner suspension, force-driven differential tracks, slope-aware traction, limited terrain-following attitude, streamed-support recovery, and a damped velocity-led camera
 - Infinite vector map generation now treats authored polygons as primary land footprint, filling polygons instead of collapsing to central domes
 - Infinite vector polygon terrain now exposes `Interior Fill` parameter for controlling land expansion from shoreline
 - Client Zarch landing adjustments for better gameplay feel
