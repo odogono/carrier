@@ -1,6 +1,5 @@
 /* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
-
 import type { AssetVersionListItem } from 'carrier-contracts/types';
 
 import {
@@ -30,6 +29,7 @@ const createItem = (
     id,
     instancingEligible: false,
     maxHeightDeltaMeters: 1,
+    obstacleMode: 'solid',
     originalFile: {
       contentType: 'model/gltf-binary',
       path: `uploads/${id}.glb`,

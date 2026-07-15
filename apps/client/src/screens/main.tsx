@@ -35,7 +35,10 @@ import { palette } from '@/components/leva-palette-plugin';
 import { client, connectApi } from '@/helpers/api-link';
 import { ensurePlaneToArrayCompat } from '@/helpers/three-plane-compat';
 import { sceneConfigStore } from '@/helpers/zarch-scene-config';
-import { collectChunkStaticEntities } from '@/helpers/zarch-static-entities';
+import {
+  collectChunkStaticEntities,
+  getSceneMetersScale
+} from '@/helpers/zarch-static-entities';
 import { SEA_Y, TILE } from '@/helpers/zarch-terrain';
 import {
   DevSceneControls,
@@ -47,7 +50,10 @@ import {
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useServerMapTerrain } from './zarch/use-server-map-terrain';
-import { useZarchRuntime } from './zarch/use-zarch-runtime';
+import {
+  useZarchRuntime,
+  type ZarchRuntimeMode
+} from './zarch/use-zarch-runtime';
 import {
   createZarchEntityEditState,
   reduceZarchEntityEditState,
@@ -57,6 +63,7 @@ import { normalizeEntityYaw } from './zarch/zarch-entity-transform';
 import { ZarchHud } from './zarch/zarch-hud';
 import { ZarchMinimap } from './zarch/zarch-minimap';
 import { createPlayerShipSpawnState } from './zarch/zarch-player-ship';
+import { findNearestTankSpawn } from './zarch/zarch-player-tank';
 import { ZarchScene } from './zarch/zarch-scene';
 import {
   computeAreaHeightEdits,
@@ -280,13 +287,19 @@ const MainInner = () => {
     onRotateEntity: (direction: 'cw' | 'ccw') => void;
     selectedEntityId: string | null;
   } | null>(null);
-  const { containerProps, enterShipMode, exitShipMode, inputRef, runtimeRef } =
-    useZarchRuntime({
-      containerElement,
-      editEnabled: editState.enabled,
-      editorMode,
-      entityEditCallbacksRef
-    });
+  const {
+    containerProps,
+    enterLanderMode,
+    enterNavigationMode,
+    enterTankMode,
+    inputRef,
+    runtimeRef
+  } = useZarchRuntime({
+    containerElement,
+    editEnabled: editState.enabled,
+    editorMode,
+    entityEditCallbacksRef
+  });
   const { editConfig, error, isLoading, map, terrain } = useServerMapTerrain();
   const showHud = useSceneConfigValue('showHud');
   const showMinimap = useSceneConfigValue('showMinimap');
@@ -560,53 +573,79 @@ const MainInner = () => {
     runtimeRef.current.navigation.yaw = 0;
     runtimeRef.current.navigation.velX = 0;
     runtimeRef.current.navigation.velZ = 0;
-    runtimeRef.current.ship = null;
+    runtimeRef.current.lander = null;
+    runtimeRef.current.tank = null;
     dispatchEdit({ enabled: false, type: 'set-enabled' });
     dispatchEdit({ type: 'reset-draft' });
   }, [map, runtimeRef]);
 
-  const handleToggleMode = useCallback(() => {
-    if (!map || !activeTerrain || editState.enabled) {
-      return;
-    }
+  const handleSelectMode = useCallback(
+    (mode: ZarchRuntimeMode) => {
+      if (!map || !activeTerrain || editState.enabled) {
+        return;
+      }
 
-    if (runtimeRef.current.mode === 'ship') {
-      exitShipMode();
+      if (mode === 'navigation') {
+        enterNavigationMode();
+        containerElement?.focus();
+        return;
+      }
+
+      const focus = runtimeRef.current.camera;
+      enterNavigationMode();
+      if (mode === 'lander') {
+        enterLanderMode(
+          createPlayerShipSpawnState({
+            surface: {
+              sampleHeightAtWorld: activeTerrain.sampleHeightAtWorld,
+              waterHeight: SEA_Y
+            },
+            x: focus.x,
+            z: focus.z
+          })
+        );
+      } else {
+        if (runtimeRef.current.tankAvailability !== 'ready') {return;}
+        const spawn = findNearestTankSpawn({
+          surface: activeTerrain,
+          tileMeters: TILE,
+          x: focus.x,
+          z: focus.z
+        });
+        if (!spawn) {return;}
+        const sceneScale = getSceneMetersScale(map);
+        enterTankMode({
+          speedMetersPerSecond: 0,
+          turretYaw: 0,
+          x: spawn.x / sceneScale,
+          y: spawn.y,
+          yaw: runtimeRef.current.camera.yaw,
+          z: spawn.z / sceneScale
+        });
+      }
       containerElement?.focus();
-      return;
-    }
-
-    const initialCamera = getInitialCameraState(map);
-    enterShipMode(
-      createPlayerShipSpawnState({
-        surface: {
-          sampleHeightAtWorld: activeTerrain.sampleHeightAtWorld,
-          waterHeight: SEA_Y
-        },
-        x: initialCamera.camX,
-        z: initialCamera.camZ
-      })
-    );
-    containerElement?.focus();
-  }, [
-    activeTerrain,
-    containerElement,
-    editState.enabled,
-    enterShipMode,
-    exitShipMode,
-    map,
-    runtimeRef
-  ]);
+    },
+    [
+      activeTerrain,
+      containerElement,
+      editState.enabled,
+      enterLanderMode,
+      enterNavigationMode,
+      enterTankMode,
+      map,
+      runtimeRef
+    ]
+  );
 
   const handleSetEditEnabled = useCallback(
     (enabled: boolean) => {
-      if (enabled && runtimeRef.current.mode === 'ship') {
-        exitShipMode();
+      if (enabled && runtimeRef.current.mode !== 'navigation') {
+        enterNavigationMode();
       }
 
       dispatchEdit({ enabled, type: 'set-enabled' });
     },
-    [exitShipMode, runtimeRef]
+    [enterNavigationMode, runtimeRef]
   );
 
   const handleEditTileHover = useCallback(
@@ -2023,7 +2062,7 @@ const MainInner = () => {
         {showHud && (
           <ZarchHud
             editEnabled={editState.enabled}
-            onToggleMode={handleToggleMode}
+            onSelectMode={handleSelectMode}
             runtimeRef={runtimeRef}
             terrain={activeTerrain}
           />

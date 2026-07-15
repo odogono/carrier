@@ -57,3 +57,27 @@ Scene Scale is the gameplay client's horizontal map-to-Three.js projection:
 and separately derives `sceneY` for rendering by adding the scaled offset's
 scene-space displacement to the averaged terrain Y. Scene Scale does not change
 the map-space maximum-height-delta tolerance.
+
+## Gameplay Modes
+
+A Gameplay Mode is one of three mutually exclusive local client activities.
+Navigation Mode moves the map focus without a player body. Lander Mode flies the
+existing thrust-driven craft. Tank Mode drives the local physics-driven Tank.
+Mode changes pass through Navigation so mode-specific bodies and projectiles are
+cleaned up before the next mode begins.
+
+A Shell is a short-lived ballistic projectile fired by the Tank. It uses
+continuous collision detection and is removed on its first impact or lifetime
+expiry.
+
+## Gameplay Obstacles
+
+A Gameplay Obstacle blocks a locally simulated Tank or Shell. An Authored
+Obstacle is an active, validly grounded Static Entity whose immutable asset
+version has Obstacle Mode `solid`. Obstacle Mode `none` makes the asset
+non-blocking. Legacy exported manifests that omit Obstacle Mode resolve to
+`solid` without rewriting the immutable snapshot.
+
+A Vegetation Obstacle is the deterministic cylinder collider derived from the
+same procedural tree rule used for rendering. Terrain, shoreline, authored, and
+vegetation colliders all use canonical map metres in the client physics world.

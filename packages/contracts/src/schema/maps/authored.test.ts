@@ -27,6 +27,8 @@ import {
   MapMetadataSchema,
   MapOverviewSchema,
   MapMetadataSummarySchema,
+  ObstacleModeSchema,
+  resolveObstacleMode,
   StaticEntitySchema,
   StaticEntityExportManifestSchema,
   StaticEntityListItemSchema,
@@ -239,6 +241,39 @@ describe("authored map schemas", () => {
     ).toBe("review");
 
     expect(
+      AssetVersionSchema.parse({
+        collisionBox: {
+          depthMeters: 18,
+          heightMeters: 24,
+          widthMeters: 20,
+        },
+        collisionClass: "foliage",
+        createdAt: now,
+        diagnostics: [],
+        footprint: {
+          depthMeters: 18,
+          widthMeters: 20,
+        },
+        groundingPolicy: "terrain-average-footprint",
+        id: "hedge-v1",
+        instancingEligible: true,
+        maxHeightDeltaMeters: 2.5,
+        obstacleMode: "none",
+        originalFile: {
+          contentType: "model/gltf-binary",
+          path: "uploads/hedge/source.glb",
+          sizeBytes: 1024,
+        },
+        runtimeFile: null,
+        status: "review",
+        updatedAt: now,
+      }).obstacleMode,
+    ).toBe("none");
+    expect(ObstacleModeSchema.parse("solid")).toBe("solid");
+    expect(resolveObstacleMode(undefined)).toBe("solid");
+    expect(() => ObstacleModeSchema.parse("trigger")).toThrow();
+
+    expect(
       AssetVersionListItemSchema.parse({
         asset: {
           collisionBox: {
@@ -366,6 +401,9 @@ describe("authored map schemas", () => {
     expect(() => ArchetypeCategorySchema.parse("bridge")).toThrow();
     expect(ZarchRuntimeEntityKindSchema.parse("player-ship")).toBe(
       "player-ship",
+    );
+    expect(ZarchRuntimeEntityKindSchema.parse("player-tank")).toBe(
+      "player-tank",
     );
     expect(ListAssetVersionsInput.parse({ status: "archived" }).status).toBe(
       "archived",
@@ -502,6 +540,7 @@ describe("authored map schemas", () => {
           id: "watchtower-v1",
           instancingEligible: true,
           maxHeightDeltaMeters: 1.5,
+          obstacleMode: "none",
           runtimeFile: {
             contentType: "model/gltf-binary",
             path: "runtime/watchtower/normalized.glb",
@@ -554,6 +593,21 @@ describe("authored map schemas", () => {
         updatedAt: now,
       }).export?.staticEntities?.manifest,
     ).toEqual(manifest);
+    expect(manifest[0]?.assetVersion.obstacleMode).toBe("none");
+
+    const legacyManifest = StaticEntityExportManifestSchema.parse([
+      {
+        ...manifest[0],
+        assetVersion: {
+          ...manifest[0]!.assetVersion,
+          obstacleMode: undefined,
+        },
+      },
+    ]);
+    expect(legacyManifest[0]?.assetVersion.obstacleMode).toBeUndefined();
+    expect(
+      resolveObstacleMode(legacyManifest[0]?.assetVersion.obstacleMode),
+    ).toBe("solid");
 
     expect(
       MapMetadataSummarySchema.parse({

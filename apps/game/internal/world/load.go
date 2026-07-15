@@ -82,6 +82,7 @@ type manifestAssetVersionRecord struct {
 	CollisionBox         dimensions3Record `json:"collisionBox"`
 	Footprint            dimensions2Record `json:"footprint"`
 	MaxHeightDeltaMeters float64           `json:"maxHeightDeltaMeters"`
+	ObstacleMode         string            `json:"obstacleMode"`
 }
 
 type dimensions2Record struct {
@@ -251,7 +252,7 @@ func LoadExportedWorld(ctx context.Context, cfg LoaderConfig) (*World, error) {
 		}
 		entities = append(entities, resolved)
 
-		if resolved.State == "active" {
+		if resolved.State == "active" && resolved.GroundingValid && resolved.ObstacleMode == "solid" {
 			index.Insert(resolved)
 		}
 	}
@@ -563,6 +564,7 @@ func resolveStaticEntity(mapID string, placement staticEntityPlacementRecord, ma
 		CollisionDepthMeters:  collisionDepth,
 		CollisionHeightMeters: collisionHeight,
 		MaxHeightDeltaMeters:  manifest.AssetVersion.MaxHeightDeltaMeters,
+		ObstacleMode:          resolveObstacleMode(manifest.AssetVersion.ObstacleMode),
 		EffectiveHeightMeters: grounding.EffectiveHeightMeters,
 		GroundingValid:        grounding.Valid,
 		FootprintCorners:      corners,
@@ -580,6 +582,13 @@ func resolveStaticEntity(mapID string, placement staticEntityPlacementRecord, ma
 			YawRadians:       placement.Rotation.Yaw * math.Pi / 180,
 		},
 	}, nil
+}
+
+func resolveObstacleMode(value string) string {
+	if value == "none" {
+		return "none"
+	}
+	return "solid"
 }
 
 func parseRequiredInt(fields map[string]string, key string) (int, error) {

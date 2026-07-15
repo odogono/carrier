@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 
 import {
   BufferAttribute,
@@ -75,10 +75,25 @@ import {
   simulateParticleSystem
 } from './zarch-particles';
 import {
+  buildTerrainPatchGeometry,
+  buildWaterBoundaryPatchGeometry,
+  buildWaterSurfacePatchGeometry,
+  getNearestWrapOffsets
+} from './zarch-physics-geometry';
+import { createZarchPhysicsWorld } from './zarch-physics-world';
+import {
   getPlayerShipExhaustDirection,
   getPlayerShipExhaustOrigin,
   stepPlayerShip
 } from './zarch-player-ship';
+import {
+  createPlayerTankSimulation,
+  destroyPlayerTankSimulation,
+  findNearestTankSpawn,
+  getPlayerTankBody,
+  stepPlayerTankSimulation,
+  type PlayerTankSimulation
+} from './zarch-player-tank';
 import { TAP_MAX_MOVEMENT_PX } from './zarch-pointer';
 import { loadZarchRuntimeEntityModel } from './zarch-runtime-entity-model';
 import {
@@ -844,7 +859,21 @@ export const ZarchScene = ({
   const respawnCameraBlendSecondsRef = useRef(0);
   const poolsRef = useRef<ScenePools | null>(null);
   const shipGroupRef = useRef<Group>(null);
+  const tankGroupRef = useRef<Group>(null);
+  const tankTurretRef = useRef<Object3D | null>(null);
+  const tankSimulationRef = useRef<PlayerTankSimulation | null>(null);
+  const tankTerrainPatchRef = useRef<string | null>(null);
+  const tankStaticOwnersRef = useRef<
+    Array<{ id: string; kind: 'obstacle' | 'vegetation' }>
+  >([]);
   const worldRef = useRef<Group>(null);
+  const tankPhysicsRef = useRef<ReturnType<
+    typeof createZarchPhysicsWorld
+  > | null>(null);
+  const getTankPhysics = useCallback(() => {
+    tankPhysicsRef.current ??= createZarchPhysicsWorld();
+    return tankPhysicsRef.current;
+  }, []);
   const shipRuntimeEntityQuery = useQuery({
     queryFn: () =>
       client.maps.getZarchRuntimeEntity({
@@ -876,6 +905,32 @@ export const ZarchScene = ({
       Math.max(loadedModel.size.x, 0.001)
     );
   }, [shipModelQuery.data, shipRuntimeEntityQuery.data]);
+  const tankRuntimeEntityQuery = useQuery({
+    queryFn: () =>
+      client.maps.getZarchRuntimeEntity({ id: 'zarch-player-tank' }),
+    queryKey: ['zarch-runtime-entity', 'zarch-player-tank'],
+    retry: false,
+    staleTime: 60_000
+  });
+  const tankModelQuery = useQuery({
+    enabled: Boolean(tankRuntimeEntityQuery.data),
+    queryFn: () => loadZarchRuntimeEntityModel(tankRuntimeEntityQuery.data!),
+    queryKey: [
+      'zarch-runtime-entity-model',
+      tankRuntimeEntityQuery.data?.id,
+      tankRuntimeEntityQuery.data?.assetVersionId
+    ],
+    staleTime: 60_000
+  });
+  const tankModelScale = useMemo(() => {
+    if (!tankRuntimeEntityQuery.data || !tankModelQuery.data) {
+      return 1;
+    }
+    return (
+      tankRuntimeEntityQuery.data.renderDimensions.lengthMeters /
+      Math.max(tankModelQuery.data.size.z, 0.001)
+    );
+  }, [tankModelQuery.data, tankRuntimeEntityQuery.data]);
   const selectedTileKeys = useMemo(
     () =>
       new Set(selectedHeightTiles.map(tile => `${tile.tileX}:${tile.tileZ}`)),
@@ -939,8 +994,63 @@ export const ZarchScene = ({
   useEffect(() => {
     particleSystemRef.current.count = 0;
     runtimeRef.current.bullets = [];
-    runtimeRef.current.shipFireCooldownSeconds = 0;
+    runtimeRef.current.landerFireCooldownSeconds = 0;
   }, [runtimeRef, terrain.id]);
+
+  useEffect(() => {
+    tankTerrainPatchRef.current = null;
+  }, [terrain]);
+
+  useEffect(() => {
+    const object = tankModelQuery.data?.object;
+    tankTurretRef.current = object?.getObjectByName('TurretPivot') ?? null;
+    if (tankRuntimeEntityQuery.error || tankModelQuery.error) {
+      runtimeRef.current.tankAvailability = 'error';
+      runtimeRef.current.tankError = 'Tank runtime asset is not provisioned';
+    } else if (
+      object &&
+      tankTurretRef.current &&
+      object.getObjectByName('CannonPivot') &&
+      object.getObjectByName('Muzzle')
+    ) {
+      runtimeRef.current.tankAvailability = 'ready';
+      runtimeRef.current.tankError = null;
+    } else {
+      runtimeRef.current.tankAvailability = 'loading';
+      runtimeRef.current.tankError = null;
+    }
+  }, [
+    runtimeRef,
+    tankModelQuery.data,
+    tankModelQuery.error,
+    tankRuntimeEntityQuery.error
+  ]);
+
+  useEffect(() => {
+    const physicsMapId = map.id;
+    return () => {
+      void physicsMapId;
+      const tankPhysics = tankPhysicsRef.current;
+      if (!tankPhysics) {
+        return;
+      }
+      if (tankSimulationRef.current) {
+        destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
+        tankSimulationRef.current = null;
+      }
+      tankPhysics.removeOwner({ id: 'active', kind: 'terrain' });
+      tankPhysics.removeOwner({ id: 'active', kind: 'shoreline' });
+      tankPhysics.removeOwner({ id: 'active', kind: 'water-surface' });
+      for (const id of ['west', 'east', 'north', 'south']) {
+        tankPhysics.removeOwner({ id, kind: 'stream-boundary' });
+      }
+      for (const owner of tankStaticOwnersRef.current) {
+        tankPhysics.removeOwner(owner);
+      }
+      tankStaticOwnersRef.current = [];
+      tankPhysicsRef.current = null;
+    };
+  }, [map.id]);
 
   useFrame((state, delta) => {
     const camera = cameraRef.current;
@@ -959,6 +1069,26 @@ export const ZarchScene = ({
 
     if (!camera || !pools) {
       return;
+    }
+
+    if (runtime.mode !== 'tank' && tankSimulationRef.current) {
+      const tankPhysics = tankPhysicsRef.current;
+      if (!tankPhysics) {
+        throw new Error('Tank simulation lost its physics world');
+      }
+      destroyPlayerTankSimulation(tankPhysics, tankSimulationRef.current);
+      tankSimulationRef.current = null;
+      tankTerrainPatchRef.current = null;
+      for (const owner of tankStaticOwnersRef.current) {
+        tankPhysics.removeOwner(owner);
+      }
+      tankStaticOwnersRef.current = [];
+      tankPhysics.removeOwner({ id: 'active', kind: 'terrain' });
+      tankPhysics.removeOwner({ id: 'active', kind: 'shoreline' });
+      tankPhysics.removeOwner({ id: 'active', kind: 'water-surface' });
+      for (const id of ['west', 'east', 'north', 'south']) {
+        tankPhysics.removeOwner({ id, kind: 'stream-boundary' });
+      }
     }
 
     // Imperative camera/light updates from config
@@ -1025,11 +1155,318 @@ export const ZarchScene = ({
           Math.abs(runtime.navigation.velX) + Math.abs(runtime.navigation.velZ)
         ) * dt
       );
-    } else if (runtime.ship) {
-      const previousRespawnDelaySeconds = runtime.ship.respawnDelaySeconds;
-      runtime.shipFireCooldownSeconds = Math.max(
+    } else if (runtime.mode === 'tank' && runtime.tank) {
+      const tankPhysics = getTankPhysics();
+      const sceneScale = getSceneMetersScale(map);
+      let simulation = tankSimulationRef.current;
+      if (!simulation) {
+        const obstacleColliders =
+          staticEntitiesHandleRef.current?.getObstacleColliders() ?? [];
+        const spawn = findNearestTankSpawn({
+          isObstacleFree: (x, z) => {
+            const tileX = Math.floor(x / map.resolution.metersPerTile);
+            const tileZ = Math.floor(z / map.resolution.metersPerTile);
+            if (terrain.shouldHaveTree(tileX, tileZ)) {
+              return false;
+            }
+            return obstacleColliders.every(collider => {
+              const dx = x - collider.center[0];
+              const dz = z - collider.center[2];
+              const cosine = Math.cos(-collider.yawRadians);
+              const sine = Math.sin(-collider.yawRadians);
+              const localX = dx * cosine - dz * sine;
+              const localZ = dx * sine + dz * cosine;
+              return (
+                Math.abs(localX) > collider.halfExtents[0] + 2.1 ||
+                Math.abs(localZ) > collider.halfExtents[2] + 3.4
+              );
+            });
+          },
+          surface: {
+            isTileLoaded: terrain.isTileLoaded,
+            isWaterTile: terrain.isWaterTile,
+            sampleHeightAtWorld: (x, z) =>
+              terrain.sampleHeightAtWorld(x * sceneScale, z * sceneScale),
+            sampleNormalAtWorld: (x, z) =>
+              terrain.sampleNormalAtWorld(x * sceneScale, z * sceneScale)
+          },
+          tileMeters: map.resolution.metersPerTile,
+          x: runtime.tank.x,
+          z: runtime.tank.z
+        });
+        if (!spawn) {
+          runtime.tankError = 'No valid loaded Tank spawn is available';
+          return;
+        }
+        runtime.tank.x = spawn.x;
+        runtime.tank.y = spawn.y;
+        runtime.tank.z = spawn.z;
+        simulation = createPlayerTankSimulation({
+          physics: tankPhysics,
+          x: runtime.tank.x,
+          y: runtime.tank.y,
+          yaw: runtime.tank.yaw,
+          z: runtime.tank.z
+        });
+        tankSimulationRef.current = simulation;
+      }
+      const body = getPlayerTankBody(tankPhysics, simulation);
+      if (body) {
+        const centerTileX = Math.floor(
+          body.position[0] / map.resolution.metersPerTile
+        );
+        const centerTileZ = Math.floor(
+          body.position[2] / map.resolution.metersPerTile
+        );
+        const radiusTiles = 12;
+        let loadedTileCount = 0;
+        for (
+          let tileZ = centerTileZ - radiusTiles;
+          tileZ <= centerTileZ + radiusTiles;
+          tileZ += 1
+        ) {
+          for (
+            let tileX = centerTileX - radiusTiles;
+            tileX <= centerTileX + radiusTiles;
+            tileX += 1
+          ) {
+            if (terrain.isTileLoaded(tileX, tileZ)) {
+              loadedTileCount += 1;
+            }
+          }
+        }
+        const obstacleColliders =
+          staticEntitiesHandleRef.current?.getObstacleColliders() ?? [];
+        const obstacleSignature = obstacleColliders
+          .map(
+            collider =>
+              `${collider.id}:${collider.center.join(':')}:${collider.yawRadians}`
+          )
+          .sort()
+          .join('|');
+        const patchKey = `${centerTileX >> 3}:${centerTileZ >> 3}:${terrain.id}:${map.revision}:${loadedTileCount}:${obstacleSignature}`;
+        if (tankTerrainPatchRef.current !== patchKey) {
+          tankTerrainPatchRef.current = patchKey;
+          for (const owner of tankStaticOwnersRef.current) {
+            tankPhysics.removeOwner(owner);
+          }
+          tankStaticOwnersRef.current = [];
+          const geometry = buildTerrainPatchGeometry({
+            centerTileX,
+            centerTileZ,
+            radiusTiles,
+            terrain,
+            tileMeters: map.resolution.metersPerTile
+          });
+          if (geometry.indices.length > 0) {
+            tankPhysics.replaceStaticTriangleBody(
+              { id: 'active', kind: 'terrain' },
+              geometry
+            );
+          }
+          const shoreline = buildWaterBoundaryPatchGeometry({
+            centerTileX,
+            centerTileZ,
+            radiusTiles,
+            seaY: config.seaY,
+            terrain,
+            tileMeters: map.resolution.metersPerTile
+          });
+          if (shoreline.indices.length > 0) {
+            tankPhysics.replaceStaticTriangleBody(
+              { id: 'active', kind: 'shoreline' },
+              shoreline
+            );
+          }
+          const waterSurface = buildWaterSurfacePatchGeometry({
+            centerTileX,
+            centerTileZ,
+            radiusTiles,
+            seaY: config.seaY,
+            terrain,
+            tileMeters: map.resolution.metersPerTile
+          });
+          if (waterSurface.indices.length > 0) {
+            tankPhysics.replaceStaticTriangleBody(
+              { id: 'active', kind: 'water-surface' },
+              waterSurface
+            );
+          }
+          const patchMinX =
+            (centerTileX - radiusTiles) * map.resolution.metersPerTile;
+          const patchMaxX =
+            (centerTileX + radiusTiles + 1) * map.resolution.metersPerTile;
+          const patchMinZ =
+            (centerTileZ - radiusTiles) * map.resolution.metersPerTile;
+          const patchMaxZ =
+            (centerTileZ + radiusTiles + 1) * map.resolution.metersPerTile;
+          const edgeOwners = [
+            {
+              center: [patchMinX, 10, (patchMinZ + patchMaxZ) / 2],
+              halfExtents: [0.25, 30, (patchMaxZ - patchMinZ) / 2],
+              id: 'west'
+            },
+            {
+              center: [patchMaxX, 10, (patchMinZ + patchMaxZ) / 2],
+              halfExtents: [0.25, 30, (patchMaxZ - patchMinZ) / 2],
+              id: 'east'
+            },
+            {
+              center: [(patchMinX + patchMaxX) / 2, 10, patchMinZ],
+              halfExtents: [(patchMaxX - patchMinX) / 2, 30, 0.25],
+              id: 'north'
+            },
+            {
+              center: [(patchMinX + patchMaxX) / 2, 10, patchMaxZ],
+              halfExtents: [(patchMaxX - patchMinX) / 2, 30, 0.25],
+              id: 'south'
+            }
+          ] as const;
+          for (const edge of edgeOwners) {
+            tankPhysics.replaceStaticBoxBody(
+              { id: edge.id, kind: 'stream-boundary' },
+              {
+                center: [...edge.center],
+                halfExtents: [...edge.halfExtents],
+                yawRadians: 0
+              }
+            );
+          }
+          for (
+            let tileZ = centerTileZ - radiusTiles;
+            tileZ <= centerTileZ + radiusTiles;
+            tileZ += 1
+          ) {
+            for (
+              let tileX = centerTileX - radiusTiles;
+              tileX <= centerTileX + radiusTiles;
+              tileX += 1
+            ) {
+              if (
+                !terrain.isTileLoaded(tileX, tileZ) ||
+                !terrain.shouldHaveTree(tileX, tileZ)
+              ) {
+                continue;
+              }
+              const owner = {
+                id: `${tileX}:${tileZ}`,
+                kind: 'vegetation' as const
+              };
+              const x = (tileX + 0.5) * map.resolution.metersPerTile;
+              const z = (tileZ + 0.5) * map.resolution.metersPerTile;
+              const height = terrain.getTileAverageHeight(tileX, tileZ) ?? 0;
+              const large = terrain.treeType(tileX, tileZ) === 1;
+              tankPhysics.replaceStaticCylinderBody(owner, {
+                center: [x, height + (large ? 4 : 2.5), z],
+                halfHeight: large ? 4 : 2.5,
+                radius: large ? 1.5 : 0.8
+              });
+              tankStaticOwnersRef.current.push(owner);
+            }
+          }
+          const wrapOffsets = getNearestWrapOffsets({
+            focusX: body.position[0],
+            focusZ: body.position[2],
+            map
+          });
+          for (const collider of obstacleColliders) {
+            for (const offset of wrapOffsets) {
+              const owner = {
+                id: `${collider.id}@${offset.x}:${offset.z}`,
+                kind: 'obstacle' as const
+              };
+              tankPhysics.replaceStaticBoxBody(owner, {
+                center: [
+                  collider.center[0] + offset.x,
+                  collider.center[1],
+                  collider.center[2] + offset.z
+                ],
+                halfExtents: collider.halfExtents,
+                yawRadians: collider.yawRadians
+              });
+              tankStaticOwnersRef.current.push(owner);
+            }
+          }
+        }
+
+        let aimWorld: { x: number; z: number } | null = null;
+        if (input.hoverPointer) {
+          const rect = state.gl.domElement.getBoundingClientRect();
+          const aimedTile = raycastToTile(
+            input.hoverPointer,
+            rect,
+            particleRaycaster,
+            particleNdc,
+            camera,
+            pools.tilePool,
+            intersections
+          );
+          const hit = intersections[0];
+          if (
+            aimedTile &&
+            hit &&
+            terrain.isTileLoaded(aimedTile.gx, aimedTile.gz)
+          ) {
+            aimWorld = {
+              x: (hit.point.x + runtime.camera.x) / sceneScale,
+              z: (hit.point.z + runtime.camera.z) / sceneScale
+            };
+          }
+        }
+        stepPlayerTankSimulation({
+          aimWorld,
+          deltaSeconds: dt,
+          fire: input.fireHeld,
+          forward:
+            (isCodePressed(input, 'KeyW', 'w') || input.keys.W ? 1 : 0) -
+            (isCodePressed(input, 'KeyS', 's') || input.keys.S ? 1 : 0),
+          physics: tankPhysics,
+          simulation,
+          steer:
+            (isCodePressed(input, 'KeyA', 'a') || input.keys.A ? 1 : 0) -
+            (isCodePressed(input, 'KeyD', 'd') || input.keys.D ? 1 : 0),
+          tractionFactor: (() => {
+            const normal = terrain.sampleNormalAtWorld(
+              body.position[0] * sceneScale,
+              body.position[2] * sceneScale
+            );
+            if (!normal) {
+              return 0;
+            }
+            const slope = Math.acos(Math.max(-1, Math.min(1, normal.y)));
+            const low = (25 * Math.PI) / 180;
+            const high = (35 * Math.PI) / 180;
+            return slope <= low
+              ? 1
+              : slope >= high
+                ? 0
+                : 1 - (slope - low) / (high - low);
+          })()
+        });
+        const updatedBody = getPlayerTankBody(tankPhysics, simulation);
+        if (updatedBody) {
+          const velocity = updatedBody.motionProperties.linearVelocity;
+          runtime.tank.x = updatedBody.position[0];
+          runtime.tank.y = updatedBody.position[1];
+          runtime.tank.z = updatedBody.position[2];
+          runtime.tank.yaw =
+            2 *
+            Math.atan2(updatedBody.quaternion[1], updatedBody.quaternion[3]);
+          runtime.tank.turretYaw = simulation.turretYaw;
+          runtime.tank.speedMetersPerSecond = Math.hypot(
+            velocity[0],
+            velocity[2]
+          );
+          runtime.camera.x = runtime.tank.x * sceneScale;
+          runtime.camera.z = runtime.tank.z * sceneScale;
+          runtime.score += Math.trunc(runtime.tank.speedMetersPerSecond * dt);
+        }
+      }
+    } else if (runtime.mode === 'lander' && runtime.lander) {
+      const previousRespawnDelaySeconds = runtime.lander.respawnDelaySeconds;
+      runtime.landerFireCooldownSeconds = Math.max(
         0,
-        runtime.shipFireCooldownSeconds - dt
+        runtime.landerFireCooldownSeconds - dt
       );
 
       const thrustActive = isCodePressed(input, 'Space', ' ');
@@ -1042,7 +1479,7 @@ export const ZarchScene = ({
           yawLeft: isCodePressed(input, 'KeyA', 'a') || input.keys.A,
           yawRight: isCodePressed(input, 'KeyD', 'd') || input.keys.D
         },
-        state: runtime.ship,
+        state: runtime.lander,
         surface: {
           getTileTypeIdAtWorld: (worldX, worldZ) =>
             terrain.getTileTypeId(
@@ -1056,10 +1493,10 @@ export const ZarchScene = ({
         }
       });
 
-      runtime.ship = shipStep.state;
+      runtime.lander = shipStep.state;
       if (
         previousRespawnDelaySeconds > 0 &&
-        runtime.ship.respawnDelaySeconds === 0
+        runtime.lander.respawnDelaySeconds === 0
       ) {
         respawnCameraBlendSecondsRef.current = 0.7;
       }
@@ -1071,25 +1508,25 @@ export const ZarchScene = ({
         );
         runtime.camera.x = MathUtils.damp(
           runtime.camera.x,
-          runtime.ship.x,
+          runtime.lander.x,
           4.5,
           dt
         );
         runtime.camera.z = MathUtils.damp(
           runtime.camera.z,
-          runtime.ship.z,
+          runtime.lander.z,
           4.5,
           dt
         );
       } else {
-        runtime.camera.x = runtime.ship.x;
-        runtime.camera.z = runtime.ship.z;
+        runtime.camera.x = runtime.lander.x;
+        runtime.camera.z = runtime.lander.z;
       }
       runtime.score += Math.trunc(
         Math.round(
-          Math.abs(runtime.ship.velX) +
-            Math.abs(runtime.ship.velY) +
-            Math.abs(runtime.ship.velZ)
+          Math.abs(runtime.lander.velX) +
+            Math.abs(runtime.lander.velY) +
+            Math.abs(runtime.lander.velZ)
         ) * dt
       );
 
@@ -1098,10 +1535,10 @@ export const ZarchScene = ({
           particleSystem,
           {
             direction: getPlayerShipExhaustDirection(
-              runtime.ship.yaw,
-              runtime.ship.pitch
+              runtime.lander.yaw,
+              runtime.lander.pitch
             ),
-            origin: getPlayerShipExhaustOrigin(runtime.ship),
+            origin: getPlayerShipExhaustOrigin(runtime.lander),
             surface: particleSurface
           },
           config,
@@ -1111,19 +1548,19 @@ export const ZarchScene = ({
       }
 
       if (
-        input.shipFireHeld &&
-        !runtime.ship.landed &&
-        runtime.ship.respawnDelaySeconds <= 0 &&
+        input.fireHeld &&
+        !runtime.lander.landed &&
+        runtime.lander.respawnDelaySeconds <= 0 &&
         runtime.bullets.length < ZARCH_BULLET_CAPACITY &&
-        runtime.shipFireCooldownSeconds <= 0
+        runtime.landerFireCooldownSeconds <= 0
       ) {
         runtime.bullets.push(
           createShipBullet({
-            ship: runtime.ship,
+            ship: runtime.lander,
             spec: DEFAULT_ZARCH_BULLET_SPEC
           })
         );
-        runtime.shipFireCooldownSeconds =
+        runtime.landerFireCooldownSeconds =
           DEFAULT_ZARCH_BULLET_SPEC.fireCooldownSeconds;
       }
 
@@ -1196,7 +1633,12 @@ export const ZarchScene = ({
       });
     const pullBack = cameraClipRadius * config.cameraPullbackMultiplier;
     const cameraHeight = cameraClipRadius * config.cameraHeightMultiplier;
-    const focusY = runtime.mode === 'ship' && runtime.ship ? runtime.ship.y : 0;
+    const focusY =
+      runtime.mode === 'lander' && runtime.lander
+        ? runtime.lander.y
+        : runtime.mode === 'tank' && runtime.tank
+          ? runtime.tank.y
+          : 0;
 
     camera.position.set(
       -Math.sin(runtime.camera.yaw) * pullBack,
@@ -1212,24 +1654,41 @@ export const ZarchScene = ({
 
     if (shipGroupRef.current) {
       if (
-        runtime.mode === 'ship' &&
-        runtime.ship &&
-        runtime.ship.respawnDelaySeconds <= 0
+        runtime.mode === 'lander' &&
+        runtime.lander &&
+        runtime.lander.respawnDelaySeconds <= 0
       ) {
         shipGroupRef.current.visible = true;
         shipGroupRef.current.rotation.order = 'YXZ';
         shipGroupRef.current.position.set(
-          runtime.ship.x - runtime.camera.x,
-          runtime.ship.y,
-          runtime.ship.z - runtime.camera.z
+          runtime.lander.x - runtime.camera.x,
+          runtime.lander.y,
+          runtime.lander.z - runtime.camera.z
         );
         shipGroupRef.current.rotation.set(
-          runtime.ship.pitch,
-          runtime.ship.yaw,
+          runtime.lander.pitch,
+          runtime.lander.yaw,
           0
         );
       } else {
         shipGroupRef.current.visible = false;
+      }
+    }
+
+    if (tankGroupRef.current) {
+      const tank = runtime.mode === 'tank' ? runtime.tank : null;
+      tankGroupRef.current.visible = Boolean(tank);
+      if (tank) {
+        const sceneScale = getSceneMetersScale(map);
+        tankGroupRef.current.position.set(
+          tank.x * sceneScale - runtime.camera.x,
+          tank.y,
+          tank.z * sceneScale - runtime.camera.z
+        );
+        tankGroupRef.current.rotation.set(0, tank.yaw, 0);
+        if (tankTurretRef.current) {
+          tankTurretRef.current.rotation.y = tank.turretYaw;
+        }
       }
     }
 
@@ -1876,7 +2335,33 @@ export const ZarchScene = ({
       pools.bulletMesh.setMatrixAt(index, bulletDummy.matrix);
     }
 
-    pools.bulletMesh.count = runtime.bullets.length;
+    let projectileCount = runtime.bullets.length;
+    const tankSimulation = tankSimulationRef.current;
+    if (runtime.mode === 'tank' && tankSimulation) {
+      const tankPhysics = getTankPhysics();
+      const sceneScale = getSceneMetersScale(map);
+      for (const shell of tankSimulation.shells) {
+        const body = getPlayerTankBody(tankPhysics, {
+          ...tankSimulation,
+          bodyId: shell.bodyId
+        });
+        if (!body || projectileCount >= ZARCH_BULLET_CAPACITY) {
+          continue;
+        }
+        bulletDummy.position.set(
+          body.position[0] * sceneScale - runtime.camera.x,
+          body.position[1],
+          body.position[2] * sceneScale - runtime.camera.z
+        );
+        bulletDummy.quaternion.copy(camera.quaternion);
+        bulletDummy.scale.set(1.2, 1.2, 1.2);
+        bulletDummy.updateMatrix();
+        pools.bulletMesh.setMatrixAt(projectileCount, bulletDummy.matrix);
+        projectileCount += 1;
+      }
+    }
+
+    pools.bulletMesh.count = projectileCount;
     pools.bulletMesh.instanceMatrix.needsUpdate = true;
 
     let shadowCount = 0;
@@ -1973,6 +2458,14 @@ export const ZarchScene = ({
             <primitive
               object={shipModelQuery.data.object}
               scale={shipModelScale}
+            />
+          ) : null}
+        </group>
+        <group ref={tankGroupRef} visible={false}>
+          {tankModelQuery.data ? (
+            <primitive
+              object={tankModelQuery.data.object}
+              scale={tankModelScale}
             />
           ) : null}
         </group>

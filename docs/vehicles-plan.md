@@ -1,9 +1,15 @@
 # Vehicle Support Additions
 
+> Superseded by [Tank Mode](./tank-mode.md) and ADRs 0003-0004. This document is
+> retained as the original exploration; its heightfield-following vehicle model
+> was replaced by the accepted Crashcat Tank design.
+
 ## Summary
+
 Add vehicles as first-class simulated entities in the client runtime, with arcade handling and deterministic terrain and obstacle queries. Treat this phase as single-player-first: build a local vehicle simulation that follows the heightfield, blocks on trees, water, and cliffs, and resolves contact against other vehicles, while leaving a clean path to later server authority.
 
 ## Key Changes
+
 - Replace the current camera-only movement model in `apps/client/src/screens/zarch/use-zarch-runtime.ts` with a `playerVehicle` state plus a camera-follow rig.
 - Extend the terrain abstraction in `apps/client/src/helpers/zarch-terrain.ts` so gameplay can query:
   - interpolated height at world position, not just tile corners
@@ -31,6 +37,7 @@ Add vehicles as first-class simulated entities in the client runtime, with arcad
   - shape local state and input so it can later serialize as `vehicle_input` and `vehicle_state`
 
 ## Public Interfaces / Data Additions
+
 - `ZarchTerrain` should grow methods similar to:
   - `sampleHeightAtWorld(x, z)`
   - `sampleNormalAtWorld(x, z)`
@@ -48,6 +55,7 @@ Add vehicles as first-class simulated entities in the client runtime, with arcad
   - vehicles: 2D footprint collision with height sampled from terrain beneath each vehicle
 
 ## Test Plan
+
 - Terrain following:
   - vehicle stays grounded over flat, sloped, and uneven sampled terrain
   - vehicle pitch and roll remain stable across chunk boundaries
@@ -67,6 +75,7 @@ Add vehicles as first-class simulated entities in the client runtime, with arcad
   - new tests for obstacle generation determinism and world-position terrain sampling
 
 ## Assumptions
+
 - First milestone is local and single-player, not server-authoritative multiplayer.
 - Handling target is arcade, not wheel-by-wheel simulation.
 - Trees become gameplay obstacles, not just visual decoration.

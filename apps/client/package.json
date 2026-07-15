@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun ./index.html",
     "build": "bun run build.ts",
+    "generate:zarch-player-tank": "bun scripts/generate-zarch-player-tank-glb.ts",
     "prepare": "bun run scripts/setup-git-hooks.ts",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
@@ -34,6 +35,7 @@
     "carrier-preview": "workspace:*",
     "carrier-terrain-edit": "workspace:*",
     "clsx": "^2.1.1",
+    "crashcat": "0.0.5",
     "jotai": "^2.19.1",
     "leva": "^0.10.1",
     "mitt": "^3.0.1",
