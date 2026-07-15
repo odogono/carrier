@@ -18,6 +18,7 @@ type ZarchHudProps = {
 };
 
 type ViewCenterState = {
+  activeShellCount: number | null;
   height: number | null;
   mode: ZarchRuntimeState['mode'];
   shipAltitude: number | null;
@@ -38,6 +39,7 @@ export const ZarchHud = ({
 }: ZarchHudProps) => {
   const [score, setScore] = useState(0);
   const [viewCenter, setViewCenter] = useState<ViewCenterState>({
+    activeShellCount: null,
     height: null,
     mode: 'navigation',
     shipAltitude: null,
@@ -61,6 +63,10 @@ export const ZarchHud = ({
 
       setScore(Math.round(runtimeRef.current?.score ?? 0));
       setViewCenter({
+        activeShellCount:
+          runtime?.mode === 'tank' && runtime.tank
+            ? runtime.tank.activeShellCount
+            : null,
         height: terrainHeight,
         mode: runtime?.mode ?? 'navigation',
         shipAltitude:
@@ -97,7 +103,7 @@ export const ZarchHud = ({
         <span className="text-[15px] font-bold text-[#60b8ff]">Zarch</span>
         <span>💣</span>
         <span>Wave: {DEFAULT_WAVE}</span>
-        <span>
+        <span data-testid="zarch-hud-mode">
           Mode:{' '}
           {viewCenter.mode === 'lander'
             ? 'Lander'
@@ -106,13 +112,13 @@ export const ZarchHud = ({
               : 'Navigation'}
         </span>
         {editEnabled ? <span>Edit: On</span> : null}
-        <span>
+        <span data-testid="zarch-hud-centre">
           Centre: {viewCenter.worldX.toFixed(1)}, {viewCenter.worldZ.toFixed(1)}
         </span>
         <span>
           Tile: {viewCenter.tileX}, {viewCenter.tileZ}
         </span>
-        <span>
+        <span data-testid="zarch-hud-height">
           Height:{' '}
           {viewCenter.height === null ? '--' : viewCenter.height.toFixed(1)}
         </span>
@@ -120,7 +126,14 @@ export const ZarchHud = ({
           <span>Altitude: {viewCenter.shipAltitude.toFixed(1)}</span>
         ) : null}
         {viewCenter.tankSpeed !== null ? (
-          <span>Speed: {viewCenter.tankSpeed.toFixed(1)} m/s</span>
+          <span data-testid="zarch-hud-tank-speed">
+            Speed: {viewCenter.tankSpeed.toFixed(1)} m/s
+          </span>
+        ) : null}
+        {viewCenter.activeShellCount !== null ? (
+          <span data-testid="zarch-hud-shell-count">
+            Shells: {viewCenter.activeShellCount}
+          </span>
         ) : null}
         {viewCenter.tankError ? (
           <span className="text-[#ff6060]">{viewCenter.tankError}</span>
@@ -129,6 +142,7 @@ export const ZarchHud = ({
         {(['navigation', 'lander', 'tank'] as const).map(mode => (
           <button
             className="pointer-events-auto rounded border border-[#c8a000] bg-[#2a2200] px-2 py-1 text-[#ffe58a] transition hover:bg-[#403400] disabled:opacity-40"
+            data-testid={`zarch-mode-${mode}`}
             disabled={
               editEnabled ||
               viewCenter.mode === mode ||

@@ -1443,6 +1443,7 @@ export const ZarchScene = ({
                 : 1 - (slope - low) / (high - low);
           })()
         });
+        runtime.tank.activeShellCount = simulation.shells.length;
         const updatedBody = getPlayerTankBody(tankPhysics, simulation);
         if (updatedBody) {
           const velocity = updatedBody.motionProperties.linearVelocity;

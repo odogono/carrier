@@ -56,6 +56,7 @@ export type ZarchLanderState = {
 export type ZarchShipState = ZarchLanderState;
 
 export type ZarchTankState = {
+  activeShellCount: number;
   speedMetersPerSecond: number;
   turretYaw: number;
   x: number;
