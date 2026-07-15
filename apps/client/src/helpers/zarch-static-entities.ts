@@ -17,6 +17,13 @@ export type StaticEntityGroundingResult = {
   valid: boolean;
 };
 
+export type StaticEntityObstacleCollider = {
+  center: [number, number, number];
+  halfExtents: [number, number, number];
+  id: string;
+  yawRadians: number;
+};
+
 export const isGameplayObstacleEligible = ({
   entity,
   groundingValid,
@@ -113,3 +120,27 @@ export const getStaticEntityGrounding = ({
     valid: grounding.valid
   };
 };
+
+export const getStaticEntityObstacleCollider = ({
+  assetVersion,
+  entity,
+  grounding
+}: {
+  assetVersion: Pick<AssetVersion, 'collisionBox'>;
+  entity: Pick<StaticEntity, 'id' | 'position' | 'rotation' | 'scale'>;
+  grounding: StaticEntityGroundingResult;
+}): StaticEntityObstacleCollider => ({
+  center: [
+    entity.position.x,
+    grounding.effectiveHeightMeters +
+      (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
+    entity.position.z
+  ],
+  halfExtents: [
+    (assetVersion.collisionBox.widthMeters * entity.scale) / 2,
+    (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
+    (assetVersion.collisionBox.depthMeters * entity.scale) / 2
+  ],
+  id: entity.id,
+  yawRadians: (-entity.rotation.yaw * Math.PI) / 180
+});

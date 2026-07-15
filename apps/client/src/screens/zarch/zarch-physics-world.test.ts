@@ -1,10 +1,10 @@
+/* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
-import type { MapMetadata, RuntimeMapChunk } from 'carrier-contracts/types';
 import { layers, rigidBody } from 'crashcat';
 
 import {
-  createZarchChunkColliderBridge,
   createZarchPhysicsWorld,
+  createZarchStaticColliderBridge,
   type ZarchPhysicsOwner
 } from './zarch-physics-world';
 
@@ -17,35 +17,31 @@ describe('zarch physics world', () => {
   test('uses the agreed Tank and Shell collision matrix', () => {
     const physics = createZarchPhysicsWorld();
     const matrix = physics.layers;
+    const expected = new Set([
+      'obstacle:shell',
+      'obstacle:tank',
+      'shell:terrain',
+      'shell:vegetation',
+      'shell:waterSurface',
+      'shoreline:tank',
+      'streamBoundary:tank',
+      'tank:terrain',
+      'tank:vegetation'
+    ]);
 
-    expect(
-      layers.objectLayerCollidesWithObjectLayer(
-        physics.world.settings.layers,
-        matrix.tank,
-        matrix.terrain
-      )
-    ).toBeTrue();
-    expect(
-      layers.objectLayerCollidesWithObjectLayer(
-        physics.world.settings.layers,
-        matrix.shell,
-        matrix.waterSurface
-      )
-    ).toBeTrue();
-    expect(
-      layers.objectLayerCollidesWithObjectLayer(
-        physics.world.settings.layers,
-        matrix.tank,
-        matrix.waterSurface
-      )
-    ).toBeFalse();
-    expect(
-      layers.objectLayerCollidesWithObjectLayer(
-        physics.world.settings.layers,
-        matrix.shell,
-        matrix.tank
-      )
-    ).toBeFalse();
+    for (const [leftName, leftLayer] of Object.entries(matrix)) {
+      for (const [rightName, rightLayer] of Object.entries(matrix)) {
+        const key = [leftName, rightName].sort().join(':');
+        expect(
+          layers.objectLayerCollidesWithObjectLayer(
+            physics.world.settings.layers,
+            leftLayer,
+            rightLayer
+          ),
+          key
+        ).toBe(expected.has(key));
+      }
+    }
   });
 
   test('replaces and removes bodies through stable domain owners', () => {
@@ -85,47 +81,62 @@ describe('zarch physics world', () => {
     expect([...rigidBody.iterate(physics.world)]).toHaveLength(2);
   });
 
-  test('reconciles wrapped chunk collider images around the focus', () => {
-    const map: MapMetadata = {
-      createdAt: '',
-      extent: {
-        heightMeters: 20,
-        heightTiles: 2,
-        kind: 'finite',
-        widthMeters: 20,
-        widthTiles: 2,
-        wrapX: true,
-        wrapZ: true
-      },
-      id: 'map-1',
-      kind: 'wrapped-classic',
-      name: null,
-      resolution: { chunkSizeTiles: 2, metersPerTile: 10 },
-      revision: 1,
-      seed: 'seed',
-      updatedAt: ''
-    };
-    const chunk: RuntimeMapChunk = {
-      chunkX: 0,
-      chunkZ: 0,
-      heights: new Float32Array([1, 1, 1, 1]),
-      layers: { height: { encoding: 'float32', unit: 'metres' } },
-      mapId: map.id,
-      originTileX: 0,
-      originTileZ: 0,
-      samplesHigh: 2,
-      samplesWide: 2,
-      staticEntities: [],
-      tileHeight: 1,
-      tileWidth: 1
-    };
+  test('reconciles the production owner set and removes stale water bodies', () => {
     const physics = createZarchPhysicsWorld();
-    const bridge = createZarchChunkColliderBridge({ map, physics, seaY: -12 });
+    const bridge = createZarchStaticColliderBridge(physics);
 
-    bridge.sync({ chunks: [chunk], focusX: 39, focusZ: -1 });
-    expect([...rigidBody.iterate(physics.world)]).toHaveLength(9);
+    bridge.sync([
+      {
+        geometry: triangle,
+        owner: { id: 'active', kind: 'terrain' },
+        shape: 'triangle'
+      },
+      {
+        geometry: triangle,
+        owner: { id: 'active', kind: 'water-surface' },
+        shape: 'triangle'
+      }
+    ]);
+    const waterBody = [...rigidBody.iterate(physics.world)].find(
+      body => (body.userData as ZarchPhysicsOwner).kind === 'water-surface'
+    );
+    const terrainBody = [...rigidBody.iterate(physics.world)].find(
+      body => (body.userData as ZarchPhysicsOwner).kind === 'terrain'
+    );
+    expect(waterBody).toBeDefined();
+    expect(terrainBody).toBeDefined();
+    const waterBodyId = waterBody!.id;
+    const terrainBodyId = terrainBody!.id;
 
-    bridge.sync({ chunks: [], focusX: 39, focusZ: -1 });
+    bridge.sync([
+      {
+        geometry: triangle,
+        owner: { id: 'active', kind: 'terrain' },
+        shape: 'triangle'
+      },
+      {
+        geometry: {
+          ...triangle,
+          positions: [...triangle.positions, 1, 1, 1]
+        },
+        owner: { id: 'active', kind: 'water-surface' },
+        shape: 'triangle'
+      }
+    ]);
+    expect(rigidBody.get(physics.world, terrainBodyId)).toBeDefined();
+    expect(rigidBody.get(physics.world, waterBodyId)).toBeUndefined();
+
+    bridge.sync([
+      {
+        geometry: triangle,
+        owner: { id: 'active', kind: 'terrain' },
+        shape: 'triangle'
+      }
+    ]);
+    expect(rigidBody.get(physics.world, waterBodyId)).toBeUndefined();
+    expect([...rigidBody.iterate(physics.world)]).toHaveLength(1);
+
+    bridge.clear();
     expect([...rigidBody.iterate(physics.world)]).toHaveLength(0);
   });
 });

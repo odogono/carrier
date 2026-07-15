@@ -51,6 +51,7 @@ import {
   collectChunkStaticEntities,
   getSceneMetersScale,
   getStaticEntityGrounding,
+  getStaticEntityObstacleCollider,
   isGameplayObstacleEligible,
   shouldUseStaticEntityInstancing
 } from '@/helpers/zarch-static-entities';
@@ -491,7 +492,9 @@ export const ZarchStaticEntities = ({
           const assetVersion = archetype
             ? assetVersionsById.get(archetype.assetVersionId)
             : null;
-          if (!assetVersion) {continue;}
+          if (!assetVersion) {
+            continue;
+          }
           const grounding = getStaticEntityGrounding({
             assetVersion,
             entity,
@@ -505,23 +508,16 @@ export const ZarchStaticEntities = ({
               groundingValid: grounding.valid,
               obstacleMode: assetVersion.obstacleMode
             })
-          )
-            {continue;}
-          result.push({
-            center: [
-              entity.position.x,
-              grounding.sceneY +
-                (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
-              entity.position.z
-            ] as [number, number, number],
-            halfExtents: [
-              (assetVersion.collisionBox.widthMeters * entity.scale) / 2,
-              (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
-              (assetVersion.collisionBox.depthMeters * entity.scale) / 2
-            ] as [number, number, number],
-            id: entity.id,
-            yawRadians: (-entity.rotation.yaw * Math.PI) / 180
-          });
+          ) {
+            continue;
+          }
+          result.push(
+            getStaticEntityObstacleCollider({
+              assetVersion,
+              entity,
+              grounding
+            })
+          );
         }
         return result;
       },

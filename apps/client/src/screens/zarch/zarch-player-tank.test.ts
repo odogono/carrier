@@ -1,3 +1,4 @@
+/* eslint-disable import-x/no-unresolved */
 import { describe, expect, test } from 'bun:test';
 
 import { createZarchPhysicsWorld } from './zarch-physics-world';
@@ -70,5 +71,28 @@ describe('zarch player tank', () => {
     expect(body?.position[2]).toBeLessThan(-5);
     expect(body?.quaternion[0]).toBeCloseTo(0);
     expect(body?.quaternion[2]).toBeCloseTo(0);
+  });
+
+  test('caps long-frame catch-up at five fixed steps and drops the backlog', () => {
+    const physics = createZarchPhysicsWorld();
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 0,
+      y: 2,
+      yaw: 0,
+      z: 0
+    });
+
+    stepPlayerTankSimulation({
+      aimWorld: null,
+      deltaSeconds: 1,
+      fire: false,
+      forward: 0,
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(simulation.accumulatorSeconds).toBe(0);
   });
 });
