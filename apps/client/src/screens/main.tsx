@@ -620,12 +620,14 @@ const MainInner = () => {
         const sceneScale = getSceneMetersScale(map);
         enterTankMode({
           activeShellCount: 0,
+          lastShellImpactSurface: null,
           quaternion: [
             0,
             Math.sin(runtimeRef.current.camera.yaw / 2),
             0,
             Math.cos(runtimeRef.current.camera.yaw / 2)
           ],
+          shellImpactCount: 0,
           speedMetersPerSecond: 0,
           turretYaw: 0,
           x: spawn.x / sceneScale,

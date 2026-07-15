@@ -8,7 +8,7 @@ import {
   type ZarchTerrain
 } from '@/helpers/zarch-terrain';
 
-import type { ZarchRuntimeState } from './use-zarch-runtime';
+import type { ZarchRuntimeState, ZarchTankState } from './use-zarch-runtime';
 
 type ZarchHudProps = {
   editEnabled: boolean;
@@ -20,7 +20,9 @@ type ZarchHudProps = {
 type ViewCenterState = {
   activeShellCount: number | null;
   height: number | null;
+  lastShellImpactSurface: ZarchTankState['lastShellImpactSurface'];
   mode: ZarchRuntimeState['mode'];
+  shellImpactCount: number | null;
   shipAltitude: number | null;
   tankAvailability: ZarchRuntimeState['tankAvailability'];
   tankError: string | null;
@@ -41,7 +43,9 @@ export const ZarchHud = ({
   const [viewCenter, setViewCenter] = useState<ViewCenterState>({
     activeShellCount: null,
     height: null,
+    lastShellImpactSurface: null,
     mode: 'navigation',
+    shellImpactCount: null,
     shipAltitude: null,
     tankAvailability: 'loading',
     tankError: null,
@@ -68,7 +72,15 @@ export const ZarchHud = ({
             ? runtime.tank.activeShellCount
             : null,
         height: terrainHeight,
+        lastShellImpactSurface:
+          runtime?.mode === 'tank' && runtime.tank
+            ? runtime.tank.lastShellImpactSurface
+            : null,
         mode: runtime?.mode ?? 'navigation',
+        shellImpactCount:
+          runtime?.mode === 'tank' && runtime.tank
+            ? runtime.tank.shellImpactCount
+            : null,
         shipAltitude:
           runtime?.mode === 'lander' && runtime.lander && terrainHeight !== null
             ? runtime.lander.y - terrainHeight
@@ -133,6 +145,16 @@ export const ZarchHud = ({
         {viewCenter.activeShellCount !== null ? (
           <span data-testid="zarch-hud-shell-count">
             Shells: {viewCenter.activeShellCount}
+          </span>
+        ) : null}
+        {viewCenter.shellImpactCount !== null ? (
+          <span
+            aria-hidden="true"
+            className="hidden"
+            data-testid="zarch-hud-shell-impact"
+          >
+            Impacts: {viewCenter.shellImpactCount}; Last:{' '}
+            {viewCenter.lastShellImpactSurface ?? 'none'}
           </span>
         ) : null}
         {viewCenter.tankError ? (

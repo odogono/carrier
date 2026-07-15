@@ -1,10 +1,14 @@
 import {
   CastRayStatus,
+  CastShapeStatus,
   MotionType,
   box,
   castRay,
+  castShape,
+  createAllCastShapeCollector,
   createClosestCastRayCollector,
   createDefaultCastRaySettings,
+  createDefaultCastShapeSettings,
   createWorld,
   createWorldSettings,
   cylinder,
@@ -28,9 +32,27 @@ type StaticOwnerKind =
   | 'water-surface';
 
 export type ZarchPhysicsOwner = {
-  id: string;
+  id: number | string;
   kind: StaticOwnerKind | 'shell' | 'tank';
 };
+
+export type ZarchShellColliderOwner = ZarchPhysicsOwner & {
+  kind: 'obstacle' | 'terrain' | 'vegetation' | 'water-surface';
+};
+
+export type ZarchShellSweepHit = {
+  fraction: number;
+  point: [number, number, number];
+  target: ZarchShellColliderOwner;
+};
+
+export const isZarchShellColliderOwner = (
+  owner: ZarchPhysicsOwner | null | undefined
+): owner is ZarchShellColliderOwner =>
+  owner?.kind === 'obstacle' ||
+  owner?.kind === 'terrain' ||
+  owner?.kind === 'vegetation' ||
+  owner?.kind === 'water-surface';
 
 export type ZarchPhysicsLayers = Record<
   | 'obstacle'
@@ -153,6 +175,10 @@ export type ZarchPhysicsWorld = {
     geometry: TriangleGeometry,
     offset?: { x: number; z: number }
   ) => BodyId;
+  sweepShell: (
+    position: [number, number, number],
+    displacement: [number, number, number]
+  ) => ZarchShellSweepHit[];
   world: World;
 };
 
@@ -197,6 +223,20 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
   }
   const tankSupportCollector = createClosestCastRayCollector();
   const tankSupportSettings = createDefaultCastRaySettings();
+  const shellSweepCollector = createAllCastShapeCollector();
+  const shellSweepSettings = createDefaultCastShapeSettings();
+  shellSweepSettings.collideWithBackfaces = true;
+  const shellSweepShape = sphere.create({ radius: 0.12 });
+  const shellSweepFilter = filter.create(world.settings.layers);
+  filter.disableAllLayers(shellSweepFilter, world.settings.layers);
+  for (const layer of [
+    physicsLayers.obstacle,
+    physicsLayers.terrain,
+    physicsLayers.vegetation,
+    physicsLayers.waterSurface
+  ]) {
+    filter.enableObjectLayer(shellSweepFilter, world.settings.layers, layer);
+  }
 
   const removeOwner = (owner: ZarchPhysicsOwner) => {
     const key = ownerKey(owner);
@@ -308,6 +348,41 @@ export const createZarchPhysicsWorld = (): ZarchPhysicsWorld => {
         })
       }),
     replaceStaticTriangleBody,
+    sweepShell: (position, displacement) => {
+      shellSweepCollector.reset();
+      castShape(
+        world,
+        shellSweepCollector,
+        shellSweepSettings,
+        shellSweepShape,
+        position,
+        [0, 0, 0, 1],
+        [1, 1, 1],
+        displacement,
+        shellSweepFilter
+      );
+      return shellSweepCollector.hits.flatMap(hit => {
+        if (hit.status !== CastShapeStatus.COLLIDING) {
+          return [];
+        }
+        const body = rigidBody.get(world, hit.bodyIdB);
+        const target = body?.userData as ZarchPhysicsOwner | null;
+        if (!isZarchShellColliderOwner(target)) {
+          return [];
+        }
+        return [
+          {
+            fraction: hit.fraction,
+            point: [hit.pointB[0], hit.pointB[1], hit.pointB[2]] as [
+              number,
+              number,
+              number
+            ],
+            target
+          }
+        ];
+      });
+    },
     world
   };
 };

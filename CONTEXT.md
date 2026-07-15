@@ -70,6 +70,10 @@ A Shell is a short-lived ballistic projectile fired by the Tank. It uses
 continuous collision detection and is removed on its first impact or lifetime
 expiry.
 
+A Shell Impact is a Shell's first accepted physical contact. It produces local
+land or water feedback and ends the Shell without implying damage or
+destruction.
+
 Tank Suspension is the Tank's compliant terrain-contact behavior. It supports
 the hull independently at four corners, allowing limited vertical travel,
 pitch, and roll while the Tank remains upright.

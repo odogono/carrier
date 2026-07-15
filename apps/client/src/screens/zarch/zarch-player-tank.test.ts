@@ -6,6 +6,7 @@ import { createZarchPhysicsWorld } from './zarch-physics-world';
 import {
   clampTankTurretYaw,
   createPlayerTankSimulation,
+  destroyPlayerTankSimulation,
   findNearestTankSpawn,
   getPlayerTankBody,
   getTankHullYaw,
@@ -61,7 +62,6 @@ describe('zarch player tank', () => {
     });
     for (let frame = 0; frame < 90; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 1,
@@ -96,7 +96,6 @@ describe('zarch player tank', () => {
     const drive = (forward: number, frames: number) => {
       for (let frame = 0; frame < frames; frame += 1) {
         stepPlayerTankSimulation({
-          aimWorld: null,
           deltaSeconds: 1 / 60,
           fire: false,
           forward,
@@ -146,7 +145,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 240; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -190,7 +188,6 @@ describe('zarch player tank', () => {
     });
 
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 1 / 60,
       fire: false,
       forward: 0,
@@ -222,7 +219,6 @@ describe('zarch player tank', () => {
     });
 
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 1 / 60,
       fire: false,
       forward: 0,
@@ -258,7 +254,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 180; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -317,7 +312,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 240; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -343,7 +337,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 40; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 1,
@@ -376,7 +369,6 @@ describe('zarch player tank', () => {
     rigidBody.setLinearVelocity(physics.world, body, [5, 0, 0]);
 
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 1 / 60,
       fire: false,
       forward: 1,
@@ -411,7 +403,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 90; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -423,6 +414,360 @@ describe('zarch player tank', () => {
 
     expect(body.position[2]).toBeGreaterThan(-7);
     expect(body.position[0]).toBeGreaterThan(2);
+  });
+
+  test('reports one Shell Impact and removes the Shell after a CCD contact', () => {
+    const physics = createZarchPhysicsWorld();
+    physics.replaceStaticBoxBody(
+      { id: 'target', kind: 'obstacle' },
+      {
+        center: [0, 0, -1.5],
+        halfExtents: [1, 1, 0.05],
+        yawRadians: 0
+      }
+    );
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+    physics.sweepShell = () => [];
+
+    const result = stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: true,
+      forward: 0,
+      muzzlePose: {
+        direction: [0, 0, -1],
+        position: [0, 0, 0]
+      },
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(result.impacts).toHaveLength(1);
+    expect(result.impacts[0]?.surface).toBe('land');
+    expect(result.impacts[0]?.target.kind).toBe('obstacle');
+    expect(result.impacts[0]?.position[2]).toBeCloseTo(-1.45, 2);
+    expect(simulation.shells).toHaveLength(0);
+  });
+
+  test('does not fire without an authored Muzzle pose', () => {
+    const physics = createZarchPhysicsWorld();
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 0,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+
+    const result = stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: true,
+      forward: 0,
+      muzzlePose: null,
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(result.impacts).toHaveLength(0);
+    expect(simulation.shells).toHaveLength(0);
+  });
+
+  test('classifies terrain, vegetation, and water Shell Impacts', () => {
+    const cases = [
+      {
+        createTarget: (physics: ReturnType<typeof createZarchPhysicsWorld>) =>
+          physics.replaceStaticTriangleBody(
+            { id: 'terrain-target', kind: 'terrain' },
+            {
+              indices: [0, 1, 2],
+              positions: [-2, 0, -2, 2, 0, -2, 0, 0, 2]
+            }
+          ),
+        direction: [0, -1, 0] as const,
+        kind: 'terrain',
+        position: [0, 1.5, 0] as const,
+        surface: 'land'
+      },
+      {
+        createTarget: (physics: ReturnType<typeof createZarchPhysicsWorld>) =>
+          physics.replaceStaticCylinderBody(
+            { id: 'tree-target', kind: 'vegetation' },
+            { center: [0, 0, -1.5], halfHeight: 2, radius: 0.1 }
+          ),
+        direction: [0, 0, -1] as const,
+        kind: 'vegetation',
+        position: [0, 0, 0] as const,
+        surface: 'land'
+      },
+      {
+        createTarget: (physics: ReturnType<typeof createZarchPhysicsWorld>) =>
+          physics.replaceStaticTriangleBody(
+            { id: 'water-target', kind: 'water-surface' },
+            {
+              indices: [0, 1, 2],
+              positions: [-2, 0, -2, 2, 0, -2, 0, 0, 2]
+            }
+          ),
+        direction: [0, -1, 0] as const,
+        kind: 'water-surface',
+        position: [0, 1.5, 0] as const,
+        surface: 'water'
+      }
+    ] as const;
+
+    for (const scenario of cases) {
+      const physics = createZarchPhysicsWorld();
+      scenario.createTarget(physics);
+      const simulation = createPlayerTankSimulation({
+        physics,
+        x: 20,
+        y: 0,
+        yaw: 0,
+        z: 0
+      });
+
+      const result = stepPlayerTankSimulation({
+        deltaSeconds: 1 / 60,
+        fire: true,
+        forward: 0,
+        muzzlePose: {
+          direction: [...scenario.direction],
+          position: [...scenario.position]
+        },
+        physics,
+        simulation,
+        steer: 0
+      });
+
+      expect(result.impacts, scenario.kind).toHaveLength(1);
+      expect(result.impacts[0]?.target.kind).toBe(scenario.kind);
+      expect(result.impacts[0]?.surface).toBe(scenario.surface);
+      expect(simulation.shells).toHaveLength(0);
+    }
+  });
+
+  test('chooses the nearest Shell contact reported in one fixed step', () => {
+    const physics = createZarchPhysicsWorld();
+    for (const [id, z] of [
+      ['far-target', -1.7],
+      ['near-target', -1.2]
+    ] as const) {
+      physics.replaceStaticBoxBody(
+        { id, kind: 'obstacle' },
+        {
+          center: [0, 0, z],
+          halfExtents: [1, 1, 0.05],
+          yawRadians: 0
+        }
+      );
+    }
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+
+    const result = stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: true,
+      forward: 0,
+      muzzlePose: {
+        direction: [0, 0, -1],
+        position: [0, 0, 0]
+      },
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(result.impacts).toHaveLength(1);
+    expect(result.impacts[0]?.target.id).toBe('near-target');
+  });
+
+  test('uses the stable owner ID tie-break for equidistant contacts', () => {
+    const physics = createZarchPhysicsWorld();
+    for (const id of ['z-target', 'a-target']) {
+      physics.replaceStaticBoxBody(
+        { id, kind: 'obstacle' },
+        {
+          center: [0, 0, -1.2],
+          halfExtents: [1, 1, 0.05],
+          yawRadians: 0
+        }
+      );
+    }
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+
+    const result = stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: true,
+      forward: 0,
+      muzzlePose: {
+        direction: [0, 0, -1],
+        position: [0, 0, 0]
+      },
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(result.impacts).toHaveLength(1);
+    expect(result.impacts[0]?.target.id).toBe('a-target');
+  });
+
+  test('uses the stable owner-kind tie-break for equidistant contacts', () => {
+    const physics = createZarchPhysicsWorld();
+    physics.sweepShell = () => [
+      {
+        fraction: 0.5,
+        point: [0, 0, -1],
+        target: { id: 'tree', kind: 'vegetation' }
+      },
+      {
+        fraction: 0.5,
+        point: [0, 0, -1],
+        target: { id: 'wall', kind: 'obstacle' }
+      }
+    ];
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+
+    const result = stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: true,
+      forward: 0,
+      muzzlePose: {
+        direction: [0, 0, -1],
+        position: [0, 0, 0]
+      },
+      physics,
+      simulation,
+      steer: 0
+    });
+
+    expect(result.impacts).toHaveLength(1);
+    expect(result.impacts[0]?.target.kind).toBe('obstacle');
+  });
+
+  test('expires Shells on fixed simulated time without an impact', () => {
+    const physics = createZarchPhysicsWorld();
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+    const impacts = [];
+
+    for (let frame = 0; frame < 300; frame += 1) {
+      const result = stepPlayerTankSimulation({
+        deltaSeconds: 1 / 60,
+        fire: frame === 0,
+        forward: 0,
+        muzzlePose:
+          frame === 0 ? { direction: [0, 1, 0], position: [0, 0, 0] } : null,
+        physics,
+        simulation,
+        steer: 0
+      });
+      impacts.push(...result.impacts);
+    }
+
+    expect(impacts).toHaveLength(0);
+    expect(simulation.shells).toHaveLength(0);
+  });
+
+  test('releases Shell capacity after cleanup and clears bodies on mode exit', () => {
+    const physics = createZarchPhysicsWorld();
+    const simulation = createPlayerTankSimulation({
+      physics,
+      x: 20,
+      y: 0,
+      yaw: 0,
+      z: 0
+    });
+    const muzzlePose = {
+      direction: [0, 1, 0] as [number, number, number],
+      position: [0, 0, 0] as [number, number, number]
+    };
+
+    for (let index = 0; index < 16; index += 1) {
+      stepPlayerTankSimulation({
+        deltaSeconds: 0.5,
+        fire: true,
+        forward: 0,
+        muzzlePose,
+        physics,
+        simulation,
+        steer: 0
+      });
+    }
+    expect(simulation.shells).toHaveLength(16);
+
+    stepPlayerTankSimulation({
+      deltaSeconds: 0.5,
+      fire: true,
+      forward: 0,
+      muzzlePose,
+      physics,
+      simulation,
+      steer: 0
+    });
+    expect(simulation.shells).toHaveLength(16);
+
+    simulation.shells[0]!.lifetimeSeconds = 5;
+    stepPlayerTankSimulation({
+      deltaSeconds: 1 / 60,
+      fire: false,
+      forward: 0,
+      physics,
+      simulation,
+      steer: 0
+    });
+    expect(simulation.shells).toHaveLength(15);
+
+    stepPlayerTankSimulation({
+      deltaSeconds: 0.5,
+      fire: true,
+      forward: 0,
+      muzzlePose,
+      physics,
+      simulation,
+      steer: 0
+    });
+    expect(simulation.shells).toHaveLength(16);
+    const ownedBodyIds = [
+      simulation.bodyId,
+      ...simulation.shells.map(s => s.bodyId)
+    ];
+
+    destroyPlayerTankSimulation(physics, simulation);
+
+    expect(simulation.shells).toHaveLength(0);
+    for (const bodyId of ownedBodyIds) {
+      expect(rigidBody.get(physics.world, bodyId)).toBeUndefined();
+    }
   });
 
   test('restores the last supported pose when streamed support disappears', () => {
@@ -442,7 +787,6 @@ describe('zarch player tank', () => {
     });
     for (let frame = 0; frame < 120; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -456,7 +800,6 @@ describe('zarch player tank', () => {
     let recovered = false;
     for (let frame = 0; frame < 35; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 1 / 60,
         fire: false,
         forward: 0,
@@ -497,7 +840,6 @@ describe('zarch player tank', () => {
     );
 
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 1 / 60,
       fire: false,
       forward: 0,
@@ -511,7 +853,6 @@ describe('zarch player tank', () => {
 
     for (let frame = 0; frame < 2; frame += 1) {
       stepPlayerTankSimulation({
-        aimWorld: null,
         deltaSeconds: 0.1,
         fire: false,
         forward: 0,
@@ -522,7 +863,6 @@ describe('zarch player tank', () => {
       expect(simulation.diagnostics.recovered).toBe(true);
     }
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 0.1,
       fire: false,
       forward: 0,
@@ -544,7 +884,6 @@ describe('zarch player tank', () => {
     });
 
     stepPlayerTankSimulation({
-      aimWorld: null,
       deltaSeconds: 1,
       fire: false,
       forward: 0,

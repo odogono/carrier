@@ -3,15 +3,24 @@ import {
   MotionType,
   box,
   dof,
+  getWorldSpaceContactPointOnA,
+  getWorldSpaceContactPointOnB,
   rigidBody,
   sphere,
   updateWorld,
   type BodyId,
+  type ContactManifold,
   type Listener,
   type RigidBody
 } from 'crashcat';
 
-import type { ZarchPhysicsWorld } from './zarch-physics-world';
+import {
+  isZarchShellColliderOwner,
+  type ZarchPhysicsOwner,
+  type ZarchPhysicsWorld,
+  type ZarchShellColliderOwner
+} from './zarch-physics-world';
+import type { TankMuzzlePose } from './zarch-tank-muzzle';
 
 export const TANK_TURRET_LIMIT_RADIANS = Math.PI / 2;
 export const TANK_TURRET_TRAVERSE_RADIANS_PER_SECOND = (Math.PI * 2) / 3;
@@ -19,7 +28,6 @@ export const TANK_SHELL_SPEED_METERS_PER_SECOND = 120;
 export const TANK_SHELL_LIFETIME_SECONDS = 5;
 export const TANK_SHELL_CAPACITY = 16;
 export const TANK_FIRE_COOLDOWN_SECONDS = 0.5;
-export const TANK_CANNON_ELEVATION_RADIANS = (6 * Math.PI) / 180;
 
 const TANK_MASS_KILOGRAMS = 2400;
 const TANK_GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
@@ -216,6 +224,19 @@ export type TankShellState = {
   lifetimeSeconds: number;
 };
 
+export type TankShellImpactSurface = 'land' | 'water';
+
+export type TankShellImpact = Readonly<{
+  position: Readonly<TankVector>;
+  shellId: number;
+  surface: TankShellImpactSurface;
+  target: Readonly<ZarchShellColliderOwner>;
+}>;
+
+export type TankSimulationStepResult = {
+  impacts: readonly TankShellImpact[];
+};
+
 export type TankSuspensionContact = {
   compression: number;
   normal: TankVector | null;
@@ -317,6 +338,21 @@ const removeBody = (physics: ZarchPhysicsWorld, bodyId: BodyId) => {
   }
 };
 
+const createTankShellImpact = ({
+  position,
+  shellId,
+  target
+}: {
+  position: TankVector;
+  shellId: number;
+  target: ZarchShellColliderOwner;
+}): TankShellImpact => ({
+  position,
+  shellId,
+  surface: target.kind === 'water-surface' ? 'water' : 'land',
+  target
+});
+
 export const destroyPlayerTankSimulation = (
   physics: ZarchPhysicsWorld,
   simulation: PlayerTankSimulation
@@ -328,42 +364,57 @@ export const destroyPlayerTankSimulation = (
   simulation.shells = [];
 };
 
-export const stepPlayerTankSimulation = ({
+export const updatePlayerTankAim = ({
   aimWorld,
+  deltaSeconds,
+  physics,
+  simulation
+}: {
+  aimWorld: { x: number; z: number } | null;
+  deltaSeconds: number;
+  physics: ZarchPhysicsWorld;
+  simulation: PlayerTankSimulation;
+}) => {
+  const tank = rigidBody.get(physics.world, simulation.bodyId);
+  if (!tank || !aimWorld) {
+    return;
+  }
+  const yaw = getTankHullYaw(tank.quaternion as TankQuaternion);
+  const aimYaw = Math.atan2(
+    -(aimWorld.x - tank.position[0]),
+    -(aimWorld.z - tank.position[2])
+  );
+  simulation.turretYaw = stepTankTurretYaw(
+    simulation.turretYaw,
+    wrapAngle(aimYaw - yaw),
+    Math.min(deltaSeconds, 0.1)
+  );
+};
+
+export const stepPlayerTankSimulation = ({
   config = DEFAULT_TANK_DYNAMICS_CONFIG,
   deltaSeconds,
   fire,
   forward,
   isSupportDataAvailable = () => true,
+  muzzlePose = null,
   physics,
   simulation,
   steer
 }: {
-  aimWorld: { x: number; z: number } | null;
   config?: TankDynamicsConfig;
   deltaSeconds: number;
   fire: boolean;
   forward: number;
   isSupportDataAvailable?: (x: number, z: number) => boolean;
+  muzzlePose?: TankMuzzlePose | null;
   physics: ZarchPhysicsWorld;
   simulation: PlayerTankSimulation;
   steer: number;
-}) => {
+}): TankSimulationStepResult => {
   const tank = rigidBody.get(physics.world, simulation.bodyId);
   if (!tank) {
-    return;
-  }
-  const yaw = getTankHullYaw(tank.quaternion as TankQuaternion);
-  if (aimWorld) {
-    const aimYaw = Math.atan2(
-      -(aimWorld.x - tank.position[0]),
-      -(aimWorld.z - tank.position[2])
-    );
-    simulation.turretYaw = stepTankTurretYaw(
-      simulation.turretYaw,
-      wrapAngle(aimYaw - yaw),
-      Math.min(deltaSeconds, 0.1)
-    );
+    return { impacts: [] };
   }
   simulation.fireCooldownSeconds = Math.max(
     0,
@@ -374,19 +425,112 @@ export const stepPlayerTankSimulation = ({
     simulation.recoveryDiagnosticSeconds - deltaSeconds
   );
   simulation.accumulatorSeconds += Math.min(deltaSeconds, 0.1);
-  const hitShellIds = new Set<number>();
+  const impacts: TankShellImpact[] = [];
+  let contactCandidates = new Map<number, TankShellImpact[]>();
+  let shellStepStarts = new Map<number, TankVector>();
+  const collectContact = (
+    shellOwner: ZarchPhysicsOwner,
+    targetOwner: ZarchShellColliderOwner,
+    manifold: ContactManifold,
+    shellIsBodyA: boolean
+  ) => {
+    if (typeof shellOwner.id !== 'number') {
+      return;
+    }
+    const candidates = contactCandidates.get(shellOwner.id) ?? [];
+    for (let index = 0; index < manifold.numContactPoints; index += 1) {
+      const point = shellIsBodyA
+        ? getWorldSpaceContactPointOnB([0, 0, 0], manifold, index)
+        : getWorldSpaceContactPointOnA([0, 0, 0], manifold, index);
+      candidates.push(
+        createTankShellImpact({
+          position: [point[0], point[1], point[2]],
+          shellId: shellOwner.id,
+          target: targetOwner
+        })
+      );
+    }
+    contactCandidates.set(shellOwner.id, candidates);
+  };
   const listener: Listener = {
-    onContactAdded: (a, b) => {
-      for (const body of [a, b]) {
-        const owner = body.userData as { id?: number; kind?: string } | null;
-        if (owner?.kind === 'shell' && typeof owner.id === 'number') {
-          hitShellIds.add(owner.id);
-        }
+    onContactAdded: (a, b, manifold) => {
+      const ownerA = a.userData as ZarchPhysicsOwner | null;
+      const ownerB = b.userData as ZarchPhysicsOwner | null;
+      if (ownerA?.kind === 'shell' && isZarchShellColliderOwner(ownerB)) {
+        collectContact(ownerA, ownerB, manifold, true);
+      } else if (
+        ownerB?.kind === 'shell' &&
+        isZarchShellColliderOwner(ownerA)
+      ) {
+        collectContact(ownerB, ownerA, manifold, false);
       }
     }
   };
+
+  if (
+    fire &&
+    muzzlePose &&
+    simulation.fireCooldownSeconds === 0 &&
+    simulation.shells.length < TANK_SHELL_CAPACITY
+  ) {
+    const direction = normalize(muzzlePose.direction);
+    const id = simulation.nextShellId++;
+    const shell = rigidBody.create(physics.world, {
+      allowSleeping: false,
+      mass: 8,
+      motionQuality: MotionQuality.LINEAR_CAST,
+      motionType: MotionType.DYNAMIC,
+      objectLayer: physics.layers.shell,
+      position: [...muzzlePose.position],
+      shape: sphere.create({ radius: 0.12 }),
+      userData: { id, kind: 'shell' }
+    });
+    rigidBody.setLinearVelocity(physics.world, shell, [
+      direction[0] * TANK_SHELL_SPEED_METERS_PER_SECOND +
+        tank.motionProperties.linearVelocity[0],
+      direction[1] * TANK_SHELL_SPEED_METERS_PER_SECOND +
+        tank.motionProperties.linearVelocity[1],
+      direction[2] * TANK_SHELL_SPEED_METERS_PER_SECOND +
+        tank.motionProperties.linearVelocity[2]
+    ]);
+    simulation.shells.push({ bodyId: shell.id, id, lifetimeSeconds: 0 });
+    simulation.fireCooldownSeconds = TANK_FIRE_COOLDOWN_SECONDS;
+  }
+
   let steps = 0;
   while (simulation.accumulatorSeconds >= 1 / 60 && steps < 5) {
+    contactCandidates = new Map();
+    shellStepStarts = new Map(
+      simulation.shells.flatMap(shell => {
+        const body = rigidBody.get(physics.world, shell.bodyId);
+        return body
+          ? [[shell.id, [body.position[0], body.position[1], body.position[2]]]]
+          : [];
+      })
+    );
+    for (const shell of simulation.shells) {
+      const body = rigidBody.get(physics.world, shell.bodyId);
+      const start = shellStepStarts.get(shell.id);
+      if (!body || !start) {
+        continue;
+      }
+      const displacement: TankVector = [
+        body.motionProperties.linearVelocity[0] / 60,
+        body.motionProperties.linearVelocity[1] / 60,
+        body.motionProperties.linearVelocity[2] / 60
+      ];
+      const candidates = contactCandidates.get(shell.id) ?? [];
+      for (const hit of physics.sweepShell(start, displacement)) {
+        candidates.push(
+          createTankShellImpact({
+            position: hit.point,
+            shellId: shell.id,
+            target: hit.target
+          })
+        );
+      }
+      contactCandidates.set(shell.id, candidates);
+    }
     const quaternion = tank.quaternion as TankQuaternion;
     const forwardDirection = normalize(rotateVector([0, 0, -1], quaternion));
     const rightDirection = normalize(rotateVector([1, 0, 0], quaternion));
@@ -585,6 +729,43 @@ export const stepPlayerTankSimulation = ({
     );
 
     updateWorld(physics.world, listener, 1 / 60);
+
+    const hitShellIds = new Set<number>();
+    for (const [shellId, candidates] of contactCandidates) {
+      const start = shellStepStarts.get(shellId);
+      if (!start || candidates.length === 0) {
+        continue;
+      }
+      candidates.sort((left, right) => {
+        const leftDistance =
+          (left.position[0] - start[0]) ** 2 +
+          (left.position[1] - start[1]) ** 2 +
+          (left.position[2] - start[2]) ** 2;
+        const rightDistance =
+          (right.position[0] - start[0]) ** 2 +
+          (right.position[1] - start[1]) ** 2 +
+          (right.position[2] - start[2]) ** 2;
+        return (
+          leftDistance - rightDistance ||
+          left.target.kind.localeCompare(right.target.kind) ||
+          String(left.target.id).localeCompare(String(right.target.id))
+        );
+      });
+      impacts.push(candidates[0]!);
+      hitShellIds.add(shellId);
+    }
+
+    simulation.shells = simulation.shells.filter(shell => {
+      shell.lifetimeSeconds += 1 / 60;
+      if (
+        hitShellIds.has(shell.id) ||
+        shell.lifetimeSeconds >= TANK_SHELL_LIFETIME_SECONDS - 1e-9
+      ) {
+        removeBody(physics, shell.bodyId);
+        return false;
+      }
+      return true;
+    });
     const updatedUp = normalize(
       rotateVector([0, 1, 0], tank.quaternion as TankQuaternion)
     );
@@ -636,57 +817,7 @@ export const stepPlayerTankSimulation = ({
     simulation.accumulatorSeconds = 0;
   }
 
-  if (
-    fire &&
-    aimWorld &&
-    simulation.fireCooldownSeconds === 0 &&
-    simulation.shells.length < TANK_SHELL_CAPACITY
-  ) {
-    const barrelYaw = yaw + simulation.turretYaw;
-    const horizontal = Math.cos(TANK_CANNON_ELEVATION_RADIANS);
-    const direction = [
-      -Math.sin(barrelYaw) * horizontal,
-      Math.sin(TANK_CANNON_ELEVATION_RADIANS),
-      -Math.cos(barrelYaw) * horizontal
-    ] as const;
-    const id = simulation.nextShellId++;
-    const shell = rigidBody.create(physics.world, {
-      allowSleeping: false,
-      mass: 8,
-      motionQuality: MotionQuality.LINEAR_CAST,
-      motionType: MotionType.DYNAMIC,
-      objectLayer: physics.layers.shell,
-      position: [
-        tank.position[0] + direction[0] * 4.8,
-        tank.position[1] + 1.4 + direction[1] * 4.8,
-        tank.position[2] + direction[2] * 4.8
-      ],
-      shape: sphere.create({ radius: 0.12 }),
-      userData: { id, kind: 'shell' }
-    });
-    rigidBody.setLinearVelocity(physics.world, shell, [
-      direction[0] * TANK_SHELL_SPEED_METERS_PER_SECOND +
-        tank.motionProperties.linearVelocity[0],
-      direction[1] * TANK_SHELL_SPEED_METERS_PER_SECOND +
-        tank.motionProperties.linearVelocity[1],
-      direction[2] * TANK_SHELL_SPEED_METERS_PER_SECOND +
-        tank.motionProperties.linearVelocity[2]
-    ]);
-    simulation.shells.push({ bodyId: shell.id, id, lifetimeSeconds: 0 });
-    simulation.fireCooldownSeconds = TANK_FIRE_COOLDOWN_SECONDS;
-  }
-
-  simulation.shells = simulation.shells.filter(shell => {
-    shell.lifetimeSeconds += deltaSeconds;
-    if (
-      hitShellIds.has(shell.id) ||
-      shell.lifetimeSeconds >= TANK_SHELL_LIFETIME_SECONDS
-    ) {
-      removeBody(physics, shell.bodyId);
-      return false;
-    }
-    return true;
-  });
+  return { impacts };
 };
 
 export const getPlayerTankBody = (

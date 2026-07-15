@@ -95,6 +95,7 @@ import {
   getPlayerTankBody,
   getTankHullYaw,
   stepPlayerTankSimulation,
+  updatePlayerTankAim,
   type PlayerTankSimulation
 } from './zarch-player-tank';
 import { TAP_MAX_MOVEMENT_PX } from './zarch-pointer';
@@ -106,6 +107,8 @@ import {
 } from './zarch-static-entities';
 import { stepTankCameraFocus } from './zarch-tank-camera';
 import { setLatestTankDiagnostics } from './zarch-tank-diagnostics';
+import { dispatchTankShellImpacts } from './zarch-tank-impacts';
+import { resolveTankMuzzlePose } from './zarch-tank-muzzle';
 
 type TileMesh = Mesh<BufferGeometryType, MeshLambertMaterial>;
 type ParticleMesh = InstancedMesh<PlaneGeometry, MeshBasicMaterial>;
@@ -866,6 +869,7 @@ export const ZarchScene = ({
   const shipGroupRef = useRef<Group>(null);
   const tankGroupRef = useRef<Group>(null);
   const tankModelOffsetRef = useRef<Group>(null);
+  const tankMuzzleRef = useRef<Object3D | null>(null);
   const tankTurretRef = useRef<Object3D | null>(null);
   const tankSimulationRef = useRef<PlayerTankSimulation | null>(null);
   const tankTerrainPatchRef = useRef<string | null>(null);
@@ -1015,6 +1019,7 @@ export const ZarchScene = ({
   useEffect(() => {
     const object = tankModelQuery.data?.object;
     tankTurretRef.current = object?.getObjectByName('TurretPivot') ?? null;
+    tankMuzzleRef.current = object?.getObjectByName('Muzzle') ?? null;
     if (tankRuntimeEntityQuery.error || tankModelQuery.error) {
       runtimeRef.current.tankAvailability = 'error';
       runtimeRef.current.tankError = 'Tank runtime asset is not provisioned';
@@ -1022,7 +1027,7 @@ export const ZarchScene = ({
       object &&
       tankTurretRef.current &&
       object.getObjectByName('CannonPivot') &&
-      object.getObjectByName('Muzzle')
+      tankMuzzleRef.current
     ) {
       runtimeRef.current.tankAvailability = 'ready';
       runtimeRef.current.tankError = null;
@@ -1264,8 +1269,42 @@ export const ZarchScene = ({
             };
           }
         }
-        stepPlayerTankSimulation({
+        updatePlayerTankAim({
           aimWorld,
+          deltaSeconds: dt,
+          physics: tankPhysics,
+          simulation
+        });
+        runtime.tank.turretYaw = simulation.turretYaw;
+
+        let muzzlePose = null;
+        if (tankGroupRef.current && tankMuzzleRef.current) {
+          tankGroupRef.current.position.set(
+            body.position[0] * sceneScale - runtime.camera.x,
+            body.position[1],
+            body.position[2] * sceneScale - runtime.camera.z
+          );
+          tankGroupRef.current.quaternion.set(...body.quaternion);
+          if (tankModelOffsetRef.current) {
+            tankModelOffsetRef.current.position.y =
+              -config.tankDynamics.suspensionRideDistance;
+          }
+          if (tankTurretRef.current) {
+            tankTurretRef.current.rotation.y = simulation.turretYaw;
+          }
+          muzzlePose = resolveTankMuzzlePose({
+            muzzle: tankMuzzleRef.current,
+            sceneScale,
+            tankPhysicsPosition: [
+              body.position[0],
+              body.position[1],
+              body.position[2]
+            ],
+            tankRoot: tankGroupRef.current
+          });
+        }
+
+        const stepResult = stepPlayerTankSimulation({
           config: config.tankDynamics,
           deltaSeconds: dt,
           fire: input.fireHeld,
@@ -1277,12 +1316,23 @@ export const ZarchScene = ({
               Math.floor(x / map.resolution.metersPerTile),
               Math.floor(z / map.resolution.metersPerTile)
             ),
+          muzzlePose,
           physics: tankPhysics,
           simulation,
           steer:
             (isCodePressed(input, 'KeyA', 'a') || input.keys.A ? 1 : 0) -
             (isCodePressed(input, 'KeyD', 'd') || input.keys.D ? 1 : 0)
         });
+        const impactDispatch = dispatchTankShellImpacts({
+          config,
+          impacts: stepResult.impacts,
+          particleSystem,
+          sceneScale
+        });
+        if (impactDispatch.count > 0) {
+          runtime.tank.shellImpactCount += impactDispatch.count;
+          runtime.tank.lastShellImpactSurface = impactDispatch.lastSurface;
+        }
         runtime.tank.activeShellCount = simulation.shells.length;
         setLatestTankDiagnostics(simulation.diagnostics);
         const updatedBody = getPlayerTankBody(tankPhysics, simulation);

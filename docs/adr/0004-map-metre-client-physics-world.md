@@ -24,9 +24,11 @@ coordinate is chosen only when leaving Tank Mode.
 
 The host owns a 60 Hz fixed-step accumulator. Each rendered frame contributes at
 most 0.1 seconds, performs at most five physics steps, and drops any remaining
-backlog after that cap. Collider reconciliation runs before those steps. Contact
-callbacks collect Shell IDs only; body removal happens after `updateWorld`
-returns.
+backlog after that cap. Collider reconciliation runs before those steps. Each
+step collects immutable Shell contact events from Crashcat contact callbacks and
+shape sweeps, selects the nearest contact along the Shell's travel with a stable
+owner tie-break, and removes impacted bodies only after `updateWorld` returns.
+Fixed simulated time, rather than render time, advances Shell lifetime.
 
 One static-collider bridge owns terrain, shoreline, water-surface, streamed-edge,
 vegetation, and authored-obstacle bodies. Its desired owner set is content-based:
@@ -44,8 +46,9 @@ boundary; authored OBB vertical centres use canonical Effective Height directly.
 Vehicle tuning and asset collision dimensions are independent of render scale.
 Collider replacement is explicit and removable as chunks stream or editor
 drafts change. Shells collide with terrain, water surfaces, authored obstacles,
-and vegetation; the Tank additionally collides with shoreline and temporary
-stream boundaries. Leaving Tank Mode or changing maps clears every static owner
-and removes the Tank and Shell bodies. The empty world remains alive for the
-selected map session; changing maps also releases that persistent world
+and vegetation, producing exactly one Shell Impact before post-step removal;
+the Tank additionally collides with shoreline and temporary stream boundaries.
+Leaving Tank Mode or changing maps clears every static owner and removes the
+Tank and Shell bodies without producing impacts. The empty world remains alive
+for the selected map session; changing maps also releases that persistent world
 reference.
