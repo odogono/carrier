@@ -29,6 +29,16 @@ type RuntimeEntityFixture = {
   kind: 'player-ship' | 'player-tank';
   lengthMeters: number;
   name: string;
+  review?: {
+    collisionBox: {
+      depthMeters: number;
+      heightMeters: number;
+      widthMeters: number;
+    };
+    footprint: { depthMeters: number; widthMeters: number };
+    maxHeightDeltaMeters: number;
+    obstacleMode: 'solid';
+  };
 };
 
 const uploadReadyRuntimeEntity = async (
@@ -62,6 +72,17 @@ const uploadReadyRuntimeEntity = async (
     )
     .toBe('review');
 
+  if (fixture.review) {
+    const reviewResponse = await request.patch(
+      `${apiBase}/maps/assets/${uploaded.id}/review`,
+      {
+        data: { id: uploaded.id, ...fixture.review },
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    expect(reviewResponse.ok()).toBeTruthy();
+  }
+
   const approveResponse = await request.post(
     `${apiBase}/maps/assets/${uploaded.id}/approve`
   );
@@ -82,6 +103,7 @@ const uploadReadyRuntimeEntity = async (
     }
   );
   expect(bindResponse.ok()).toBeTruthy();
+  return uploaded.id;
 };
 
 const createWrappedClassicMap = async (request: APIRequestContext) => {
@@ -103,7 +125,62 @@ const createWrappedClassicMap = async (request: APIRequestContext) => {
     headers: { 'Content-Type': 'application/json' }
   });
   expect(response.ok()).toBeTruthy();
-  return (await response.json()) as { id: string };
+  return (await response.json()) as {
+    extent: { heightTiles: number; widthTiles: number };
+    id: string;
+    resolution: { metersPerTile: number };
+  };
+};
+
+const createShellTarget = async ({
+  assetVersionId,
+  map,
+  request
+}: {
+  assetVersionId: string;
+  map: {
+    extent: { heightTiles: number; widthTiles: number };
+    id: string;
+    resolution: { metersPerTile: number };
+  };
+  request: APIRequestContext;
+}) => {
+  const archetypeId = 'tank-shell-e2e-target';
+  const archetypeResponse = await request.post(`${apiBase}/maps/archetypes`, {
+    data: {
+      assetVersionId,
+      category: 'industrial',
+      id: archetypeId,
+      name: 'Tank Shell E2E Target',
+      status: 'active',
+      tags: ['e2e']
+    },
+    headers: { 'Content-Type': 'application/json' }
+  });
+  expect(archetypeResponse.ok()).toBeTruthy();
+
+  const targetResponse = await request.post(
+    `${apiBase}/maps/${map.id}/entities`,
+    {
+      data: {
+        archetypeId,
+        expectedRevision: 0,
+        id: 'tank-shell-e2e-target-1',
+        label: null,
+        mapId: map.id,
+        position: {
+          x: (map.extent.widthTiles * map.resolution.metersPerTile) / 2,
+          z: (map.extent.heightTiles * map.resolution.metersPerTile) / 2
+        },
+        rotation: { yaw: 0 },
+        scale: 1,
+        state: 'active',
+        yOffset: 2.8
+      },
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
+  expect(targetResponse.ok()).toBeTruthy();
 };
 
 const parsePair = async (locator: Locator) => {
@@ -130,15 +207,30 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
   test.setTimeout(120_000);
   await page.setViewportSize({ height: 900, width: 1600 });
 
-  await uploadReadyRuntimeEntity(request, {
+  const shellTargetAssetVersionId = await uploadReadyRuntimeEntity(request, {
     assetPath: shipAssetPath,
     fileName: 'zarch-player-ship.glb',
     id: 'zarch-player-ship',
     kind: 'player-ship',
     lengthMeters: 5,
-    name: 'Player Lander'
+    name: 'Player Lander',
+    review: {
+      collisionBox: {
+        depthMeters: 2,
+        heightMeters: 0.4,
+        widthMeters: 80
+      },
+      footprint: { depthMeters: 2, widthMeters: 80 },
+      maxHeightDeltaMeters: 100,
+      obstacleMode: 'solid'
+    }
   });
   const map = await createWrappedClassicMap(request);
+  await createShellTarget({
+    assetVersionId: shellTargetAssetVersionId,
+    map,
+    request
+  });
 
   await page.goto(`/?mapId=${map.id}`);
 
@@ -170,7 +262,7 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
   const centre = page.getByTestId('zarch-hud-centre');
   const speed = page.getByTestId('zarch-hud-tank-speed');
   const shellCount = page.getByTestId('zarch-hud-shell-count');
-  const surface = page.getByTestId('zarch-gameplay-surface');
+  const shellImpact = page.getByTestId('zarch-hud-shell-impact');
 
   await expect
     .poll(
@@ -185,6 +277,14 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
     )
     .toContain('Tank');
   await expect(speed).toBeVisible();
+  await expect(shellCount).toHaveText(/Shells:\s*0/);
+  await expect(shellImpact).toHaveText(/Impacts:\s*0; Last:\s*none/);
+
+  await page.keyboard.down('KeyF');
+  await expect(shellImpact).toHaveText(/Impacts:\s*1; Last:\s*land/, {
+    timeout: 4500
+  });
+  await page.keyboard.up('KeyF');
   await expect(shellCount).toHaveText(/Shells:\s*0/);
 
   const centreBeforeDrive = await parsePair(centre);
@@ -216,18 +316,21 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
     .toBeGreaterThan(0.5);
   await page.keyboard.up('KeyW');
 
-  const surfaceBox = await surface.boundingBox();
-  expect(surfaceBox).not.toBeNull();
-  await page.mouse.move(
-    surfaceBox!.x + surfaceBox!.width * 0.65,
-    surfaceBox!.y + surfaceBox!.height * 0.55
-  );
-  await page.keyboard.down('KeyF');
-  await expect
-    .poll(() => parseNumber(shellCount), { timeout: 10_000 })
-    .toBeGreaterThan(0);
-  await page.keyboard.up('KeyF');
-  await expect(shellCount).toHaveText(/Shells:\s*0/, { timeout: 7000 });
+  await page.keyboard.down('KeyS');
+  let previousSpeed = Number.POSITIVE_INFINITY;
+  let minimumSpeed = previousSpeed;
+  for (let sample = 0; sample < 200; sample += 1) {
+    await page.waitForTimeout(25);
+    const currentSpeed = Math.abs(await parseNumber(speed));
+    minimumSpeed = Math.min(minimumSpeed, currentSpeed);
+    if (currentSpeed > previousSpeed) {
+      break;
+    }
+    previousSpeed = currentSpeed;
+  }
+  await page.keyboard.up('KeyS');
+  expect(minimumSpeed).toBeLessThan(0.5);
+  await page.waitForTimeout(1500);
 
   const tankFinalCentre = await parsePair(centre);
   await navigationButton.dispatchEvent('click');

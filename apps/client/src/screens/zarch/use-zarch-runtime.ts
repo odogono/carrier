@@ -11,6 +11,7 @@ import { clampZoom } from '@/helpers/zarch-terrain';
 import { useSceneConfigRef } from '@/hooks/use-scene-controls';
 
 import type { ZarchBulletState } from './zarch-bullets';
+import type { TankShellImpactSurface } from './zarch-player-tank';
 import {
   isQuickTapGesture,
   type PointerTapCandidate,
@@ -57,7 +58,9 @@ export type ZarchShipState = ZarchLanderState;
 
 export type ZarchTankState = {
   activeShellCount: number;
+  lastShellImpactSurface: TankShellImpactSurface | null;
   quaternion: [number, number, number, number];
+  shellImpactCount: number;
   speedMetersPerSecond: number;
   turretYaw: number;
   x: number;
