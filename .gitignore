@@ -35,8 +35,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /.vscode/settings.json
 *.sqlite
 
-# Playwright (apps/admin)
+# Playwright
 apps/admin/playwright-report/
 apps/admin/test-results/
 apps/admin/blob-report/
+apps/client/playwright-report/
+apps/client/test-results/
+apps/client/blob-report/
 /apps/.data/assets

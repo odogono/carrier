@@ -15,6 +15,9 @@
 - `bun run preview` — preview production build.
 - `bun run test` — run Bun's built-in test runner.
 - `bun run coverage` — Bun coverage (text + lcov).
+- `bun run test:e2e` — Chromium Playwright E2E against an isolated API/client.
+- `bun run test:e2e:ui` — open the Playwright UI for the client E2E suite.
+- `bun run playwright:install` — download Chromium for Playwright.
 - `bun run lint` / `bun run lint:fix` — ESLint check/fix.
 - `bun run format` / `bun run format:check` — Prettier write/check.
 - `bun run unused` — detect unused files/exports (Knip).
@@ -33,6 +36,8 @@
 - Framework: Bun test runner. Place tests near code as `*.test.ts`/`*.test.tsx` inside `src/`.
 - Prefer unit tests for `helpers`/`hooks`; mock Three/R3F where heavy.
 - Generate coverage via `bun run coverage`; keep meaningful coverage on changed lines.
+- Browser E2E specs live under `e2e/` as `*.e2e.ts` and run separately from `just verify`.
+- Client E2E uses client port `5278`, API port `16022`, an in-memory database, and per-run temporary asset storage. The Playwright process owns both servers; do not reuse manually started services on those ports.
 
 ## Commit & Pull Request Guidelines
 

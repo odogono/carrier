@@ -605,16 +605,21 @@ const MainInner = () => {
           })
         );
       } else {
-        if (runtimeRef.current.tankAvailability !== 'ready') {return;}
+        if (runtimeRef.current.tankAvailability !== 'ready') {
+          return;
+        }
         const spawn = findNearestTankSpawn({
           surface: activeTerrain,
           tileMeters: TILE,
           x: focus.x,
           z: focus.z
         });
-        if (!spawn) {return;}
+        if (!spawn) {
+          return;
+        }
         const sceneScale = getSceneMetersScale(map);
         enterTankMode({
+          activeShellCount: 0,
           speedMetersPerSecond: 0,
           turretYaw: 0,
           x: spawn.x / sceneScale,
@@ -2017,6 +2022,7 @@ const MainInner = () => {
       {IS_DEV && <DevSceneControls folderState={levaUiState.folderState} />}
       <div
         className="relative h-screen w-screen touch-none overflow-hidden bg-black text-white select-none"
+        data-testid="zarch-gameplay-surface"
         ref={handleContainerRef}
         tabIndex={0}
         {...containerProps}
