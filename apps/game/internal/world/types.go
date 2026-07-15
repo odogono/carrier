@@ -92,6 +92,7 @@ type ResolvedStaticEntity struct {
 	CollisionDepthMeters  float64
 	CollisionHeightMeters float64
 	MaxHeightDeltaMeters  float64
+	ObstacleMode          string
 	EffectiveHeightMeters float64
 	GroundingValid        bool
 	FootprintCorners      [4]Vector2

@@ -164,7 +164,10 @@ export type ArchetypeStatus = z.infer<typeof ArchetypeStatusSchema>;
 export const StaticEntityStateSchema = z.enum(["active", "disabled"]);
 export type StaticEntityState = z.infer<typeof StaticEntityStateSchema>;
 
-export const ZarchRuntimeEntityKindSchema = z.enum(["player-ship"]);
+export const ZarchRuntimeEntityKindSchema = z.enum([
+  "player-ship",
+  "player-tank",
+]);
 export type ZarchRuntimeEntityKind = z.infer<
   typeof ZarchRuntimeEntityKindSchema
 >;
@@ -204,6 +207,13 @@ export type AssetVersionCollisionBox = z.infer<
   typeof AssetVersionCollisionBoxSchema
 >;
 
+export const ObstacleModeSchema = z.enum(["none", "solid"]);
+export type ObstacleMode = z.infer<typeof ObstacleModeSchema>;
+
+export const resolveObstacleMode = (
+  value: ObstacleMode | null | undefined,
+): ObstacleMode => value ?? "solid";
+
 export const AssetVersionSchema = z.object({
   collisionBox: AssetVersionCollisionBoxSchema,
   collisionClass: z.string().trim().min(1).max(120),
@@ -214,6 +224,7 @@ export const AssetVersionSchema = z.object({
   id: z.string().min(1),
   instancingEligible: z.boolean(),
   maxHeightDeltaMeters: nonNegativeFiniteNumber,
+  obstacleMode: ObstacleModeSchema.default("solid"),
   originalFile: AssetFileMetadataSchema,
   runtimeFile: AssetFileMetadataSchema.nullable(),
   status: AssetVersionStatusSchema,
@@ -338,6 +349,7 @@ export const UpdateAssetVersionReviewInput = z.object({
   id: z.string().min(1),
   instancingEligible: z.boolean().optional(),
   maxHeightDeltaMeters: nonNegativeFiniteNumber.optional(),
+  obstacleMode: ObstacleModeSchema.optional(),
 });
 export type UpdateAssetVersionReviewInput = z.infer<
   typeof UpdateAssetVersionReviewInput

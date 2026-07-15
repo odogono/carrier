@@ -1,5 +1,22 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import type {
+  Archetype,
+  ArchetypeCategory,
+  ArchetypeStatus,
+  AssetVersion,
+  AssetVersionListItem,
+  AssetVersionStatus,
+  MapMetadata,
+  ZarchRuntimeEntity
+} from 'carrier-contracts/types';
 import { Archive, Boxes, Search, Trash2 } from 'lucide-react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent
+} from 'react';
 import { toast } from 'sonner';
 
 import { AssetPreviewPanel } from '@/components/assets/asset-preview';
@@ -35,21 +52,11 @@ import { apiUrl, client } from '@/lib/api-client';
 import { formatTimestamp, parseTags } from '@/lib/format';
 import { toMessage } from '@/pages/maps/editor/helpers/errors';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
-  Archetype,
-  ArchetypeCategory,
-  ArchetypeStatus,
-  AssetVersion,
-  AssetVersionListItem,
-  AssetVersionStatus,
-  MapMetadata,
-  ZarchRuntimeEntity
-} from 'carrier-contracts/types';
 
 import {
-  type AssetWorkflowFilter,
   filterAssetItems,
-  sortAssetItems
+  sortAssetItems,
+  type AssetWorkflowFilter
 } from './assets.helpers';
 
 const PAGE_SIZE = 12;
@@ -81,7 +88,11 @@ const archetypeCategories: ArchetypeCategory[] = [
   'industrial',
   'natural-prop'
 ];
-const archetypeStatuses: ArchetypeStatus[] = ['active', 'deprecated', 'archived'];
+const archetypeStatuses: ArchetypeStatus[] = [
+  'active',
+  'deprecated',
+  'archived'
+];
 const DEFAULT_ZARCH_RUNTIME_ENTITY_ID = 'zarch-player-ship';
 const DEFAULT_ZARCH_RUNTIME_ENTITY_NAME = 'Zarch Player Ship';
 const DEFAULT_ZARCH_RUNTIME_ENTITY_LENGTH_METERS = 18;
@@ -113,6 +124,7 @@ type ReviewDraft = {
   groundingPolicy: string;
   instancingEligible: boolean;
   maxHeightDeltaMeters: string;
+  obstacleMode: AssetVersion['obstacleMode'];
 };
 
 type ZarchRuntimeEntityDraft = {
@@ -157,7 +169,8 @@ const buildReviewDraft = (asset: AssetVersion): ReviewDraft => ({
   footprintWidthMeters: String(asset.footprint.widthMeters),
   groundingPolicy: asset.groundingPolicy,
   instancingEligible: asset.instancingEligible,
-  maxHeightDeltaMeters: String(asset.maxHeightDeltaMeters)
+  maxHeightDeltaMeters: String(asset.maxHeightDeltaMeters),
+  obstacleMode: asset.obstacleMode
 });
 
 const buildReviewPayload = (assetId: string, draft: ReviewDraft) => ({
@@ -178,7 +191,8 @@ const buildReviewPayload = (assetId: string, draft: ReviewDraft) => ({
   groundingPolicy: draft.groundingPolicy.trim(),
   id: assetId,
   instancingEligible: draft.instancingEligible,
-  maxHeightDeltaMeters: Number(draft.maxHeightDeltaMeters)
+  maxHeightDeltaMeters: Number(draft.maxHeightDeltaMeters),
+  obstacleMode: draft.obstacleMode
 });
 
 const buildArchetypeDraft = (asset: AssetVersion): ArchetypeDraft => {
@@ -215,9 +229,9 @@ async function uploadAsset(file: File) {
   });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { message?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
     throw new Error(error?.message ?? 'Failed to upload asset');
   }
 
@@ -230,7 +244,9 @@ const parseAssetsPageUrlState = (): AssetsPageUrlState => {
   const statusParam = params.get('status');
   const pageParam = Number(params.get('page') ?? '1');
 
-  const workflow = workflowOptions.some(option => option.value === workflowParam)
+  const workflow = workflowOptions.some(
+    option => option.value === workflowParam
+  )
     ? (workflowParam as AssetWorkflowFilter)
     : defaultWorkflowFilter;
   const status = assetStatusOptions.includes(
@@ -240,7 +256,8 @@ const parseAssetsPageUrlState = (): AssetsPageUrlState => {
     : 'all';
 
   return {
-    page: Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1,
+    page:
+      Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1,
     search: params.get('search') ?? '',
     selectedAssetId: params.get('asset'),
     status,
@@ -435,24 +452,31 @@ function AssetDetailPanel({
     deleteMutation.isPending;
 
   const runtimeHref =
-    asset.runtimeFile === null ? null : `${apiUrl}/maps/assets/${asset.id}/runtime`;
+    asset.runtimeFile === null
+      ? null
+      : `${apiUrl}/maps/assets/${asset.id}/runtime`;
   const targetRuntimeBinding =
-    runtimeEntities.find(entity => entity.id === runtimeEntityDraft.id.trim()) ??
-    null;
+    runtimeEntities.find(
+      entity => entity.id === runtimeEntityDraft.id.trim()
+    ) ?? null;
 
   return (
     <>
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-2xl font-semibold tracking-tight">{asset.id}</h3>
+            <h3 className="text-2xl font-semibold tracking-tight">
+              {asset.id}
+            </h3>
             <p className="text-sm text-muted-foreground">
               Uploaded {formatTimestamp(asset.createdAt)}. Updated{' '}
               {formatTimestamp(asset.updatedAt)}.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant={statusBadgeVariant(asset.status)}>{asset.status}</Badge>
+            <Badge variant={statusBadgeVariant(asset.status)}>
+              {asset.status}
+            </Badge>
             {assetItem.isDeletable ? (
               <Badge variant="outline">Deletable</Badge>
             ) : (
@@ -465,8 +489,8 @@ function AssetDetailPanel({
           <CardHeader>
             <CardTitle className="text-xl">Preview</CardTitle>
             <CardDescription>
-              Inspect the runtime artifact against current footprint and grounding
-              settings.
+              Inspect the runtime artifact against current footprint and
+              grounding settings.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -491,7 +515,8 @@ function AssetDetailPanel({
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <div>Original: {asset.originalFile.path}</div>
             <div>
-              Runtime: {asset.runtimeFile ? asset.runtimeFile.path : 'Not available yet'}
+              Runtime:{' '}
+              {asset.runtimeFile ? asset.runtimeFile.path : 'Not available yet'}
             </div>
             {runtimeHref ? (
               <a
@@ -510,8 +535,8 @@ function AssetDetailPanel({
           <CardHeader>
             <CardTitle className="text-xl">Relationships</CardTitle>
             <CardDescription>
-              See how this asset is used before promoting, archiving, or deleting
-              it.
+              See how this asset is used before promoting, archiving, or
+              deleting it.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -526,7 +551,9 @@ function AssetDetailPanel({
                       </Badge>
                     ))
                   ) : (
-                    <span className="text-sm text-muted-foreground">Unbound</span>
+                    <span className="text-sm text-muted-foreground">
+                      Unbound
+                    </span>
                   )}
                 </div>
               </div>
@@ -540,7 +567,9 @@ function AssetDetailPanel({
                       </Badge>
                     ))
                   ) : (
-                    <span className="text-sm text-muted-foreground">Unbound</span>
+                    <span className="text-sm text-muted-foreground">
+                      Unbound
+                    </span>
                   )}
                 </div>
               </div>
@@ -593,7 +622,9 @@ function AssetDetailPanel({
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-footprint-width`}>Footprint width</Label>
+                  <Label htmlFor={`${asset.id}-footprint-width`}>
+                    Footprint width
+                  </Label>
                   <Input
                     id={`${asset.id}-footprint-width`}
                     onChange={event =>
@@ -606,7 +637,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-footprint-depth`}>Footprint depth</Label>
+                  <Label htmlFor={`${asset.id}-footprint-depth`}>
+                    Footprint depth
+                  </Label>
                   <Input
                     id={`${asset.id}-footprint-depth`}
                     onChange={event =>
@@ -619,7 +652,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-collision-width`}>Collision width</Label>
+                  <Label htmlFor={`${asset.id}-collision-width`}>
+                    Collision width
+                  </Label>
                   <Input
                     id={`${asset.id}-collision-width`}
                     onChange={event =>
@@ -632,7 +667,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-collision-depth`}>Collision depth</Label>
+                  <Label htmlFor={`${asset.id}-collision-depth`}>
+                    Collision depth
+                  </Label>
                   <Input
                     id={`${asset.id}-collision-depth`}
                     onChange={event =>
@@ -645,7 +682,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-collision-height`}>Collision height</Label>
+                  <Label htmlFor={`${asset.id}-collision-height`}>
+                    Collision height
+                  </Label>
                   <Input
                     id={`${asset.id}-collision-height`}
                     onChange={event =>
@@ -658,7 +697,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-max-height-delta`}>Max height delta</Label>
+                  <Label htmlFor={`${asset.id}-max-height-delta`}>
+                    Max height delta
+                  </Label>
                   <Input
                     id={`${asset.id}-max-height-delta`}
                     onChange={event =>
@@ -671,7 +712,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-collision-class`}>Collision class</Label>
+                  <Label htmlFor={`${asset.id}-collision-class`}>
+                    Collision class
+                  </Label>
                   <Input
                     id={`${asset.id}-collision-class`}
                     onChange={event =>
@@ -684,7 +727,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-grounding-policy`}>Grounding policy</Label>
+                  <Label htmlFor={`${asset.id}-grounding-policy`}>
+                    Grounding policy
+                  </Label>
                   <Input
                     id={`${asset.id}-grounding-policy`}
                     onChange={event =>
@@ -695,6 +740,27 @@ function AssetDetailPanel({
                     }
                     value={reviewDraft.groundingPolicy}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`${asset.id}-obstacle-mode`}>
+                    Gameplay obstacle
+                  </Label>
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    disabled={asset.status !== 'review'}
+                    id={`${asset.id}-obstacle-mode`}
+                    onChange={event =>
+                      setReviewDraft(current => ({
+                        ...current,
+                        obstacleMode: event.target
+                          .value as AssetVersion['obstacleMode']
+                      }))
+                    }
+                    value={reviewDraft.obstacleMode}
+                  >
+                    <option value="solid">Solid</option>
+                    <option value="none">Non-blocking</option>
+                  </select>
                 </div>
               </div>
 
@@ -765,7 +831,9 @@ function AssetDetailPanel({
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-archetype-id`}>Archetype ID</Label>
+                  <Label htmlFor={`${asset.id}-archetype-id`}>
+                    Archetype ID
+                  </Label>
                   <Input
                     id={`${asset.id}-archetype-id`}
                     onChange={event =>
@@ -791,7 +859,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-archetype-category`}>Category</Label>
+                  <Label htmlFor={`${asset.id}-archetype-category`}>
+                    Category
+                  </Label>
                   <Select
                     id={`${asset.id}-archetype-category`}
                     onChange={event =>
@@ -865,7 +935,9 @@ function AssetDetailPanel({
 
             <div className="space-y-4 rounded-md border p-4">
               <div>
-                <div className="text-sm font-medium">Runtime Entity Binding</div>
+                <div className="text-sm font-medium">
+                  Runtime Entity Binding
+                </div>
                 <p className="text-sm text-muted-foreground">
                   Point a stable Zarch runtime entity id at this approved asset.
                 </p>
@@ -888,7 +960,9 @@ function AssetDetailPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor={`${asset.id}-runtime-entity-name`}>Name</Label>
+                  <Label htmlFor={`${asset.id}-runtime-entity-name`}>
+                    Name
+                  </Label>
                   <Input
                     id={`${asset.id}-runtime-entity-name`}
                     onChange={event =>
@@ -946,8 +1020,8 @@ function AssetDetailPanel({
               <div>
                 <div className="text-sm font-medium">Danger Zone</div>
                 <p className="text-sm text-muted-foreground">
-                  Archive to remove the asset from normal workflows, or delete it
-                  permanently when it is unreferenced.
+                  Archive to remove the asset from normal workflows, or delete
+                  it permanently when it is unreferenced.
                 </p>
               </div>
 
@@ -981,8 +1055,8 @@ function AssetDetailPanel({
           <DialogHeader>
             <DialogTitle>Archive Asset</DialogTitle>
             <DialogDescription>
-              {asset.id} will be hidden from the normal review queue and promotion
-              flows, but existing references will still resolve.
+              {asset.id} will be hidden from the normal review queue and
+              promotion flows, but existing references will still resolve.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1106,8 +1180,7 @@ export function AssetsPage() {
   );
   const totalPages = Math.max(Math.ceil(visibleAssets.length / PAGE_SIZE), 1);
   const pagedAssets = useMemo(
-    () =>
-      visibleAssets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    () => visibleAssets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [page, visibleAssets]
   );
 
@@ -1239,7 +1312,10 @@ export function AssetsPage() {
                 type="file"
               />
             </div>
-            <Button disabled={uploadMutation.isPending || file === null} type="submit">
+            <Button
+              disabled={uploadMutation.isPending || file === null}
+              type="submit"
+            >
               {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
             </Button>
           </form>
@@ -1291,27 +1367,28 @@ export function AssetsPage() {
               <div className="text-muted-foreground">Loading assets...</div>
             ) : assetsQuery.isError ? (
               <div className="rounded-lg border border-destructive/40 p-6 text-sm text-muted-foreground">
-                Failed to load assets: {toMessage(assetsQuery.error, 'Unknown error')}
+                Failed to load assets:{' '}
+                {toMessage(assetsQuery.error, 'Unknown error')}
               </div>
             ) : visibleAssets.length === 0 ? (
               <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
                 <div className="space-y-3">
                   <div>No assets found for the current queue and filters.</div>
                   {(() => {
-                    if (workflow === 'all') return null;
+                    if (workflow === 'all') {return null;}
                     const outsideCount = filterAssetItems({
                       items: sortedAssets,
                       search,
                       status,
                       workflow: 'all'
                     }).length;
-                    if (outsideCount === 0) return null;
+                    if (outsideCount === 0) {return null;}
                     return (
                       <div className="space-y-3">
                         <div className="text-sm">
                           {outsideCount} asset
-                          {outsideCount === 1 ? '' : 's'} exist
-                          outside the current workflow view.
+                          {outsideCount === 1 ? '' : 's'} exist outside the
+                          current workflow view.
                         </div>
                         <div className="flex flex-wrap justify-center gap-2">
                           <Button
@@ -1365,7 +1442,9 @@ export function AssetsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-2">
-                              <Badge variant={statusBadgeVariant(item.asset.status)}>
+                              <Badge
+                                variant={statusBadgeVariant(item.asset.status)}
+                              >
                                 {item.asset.status}
                               </Badge>
                               {!item.isDeletable ? (
@@ -1389,13 +1468,15 @@ export function AssetsPage() {
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm text-muted-foreground">
-                    Showing {pagedAssets.length} of {visibleAssets.length} matching
-                    assets.
+                    Showing {pagedAssets.length} of {visibleAssets.length}{' '}
+                    matching assets.
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
                       disabled={page <= 1}
-                      onClick={() => setPage(current => Math.max(current - 1, 1))}
+                      onClick={() =>
+                        setPage(current => Math.max(current - 1, 1))
+                      }
                       size="sm"
                       type="button"
                       variant="outline"

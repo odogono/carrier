@@ -17,7 +17,7 @@ import {
   type PointerTapPayload
 } from './zarch-pointer';
 
-export type ZarchRuntimeMode = 'navigation' | 'ship';
+export type ZarchRuntimeMode = 'lander' | 'navigation' | 'tank';
 
 export type ZarchCameraState = {
   x: number;
@@ -35,7 +35,7 @@ export type ZarchNavigationState = {
   z: number;
 };
 
-export type ZarchShipState = {
+export type ZarchLanderState = {
   landed: boolean;
   pitch: number;
   respawnDelaySeconds: number;
@@ -52,14 +52,29 @@ export type ZarchShipState = {
   z: number;
 };
 
+/** @deprecated The gameplay mode is called Lander; retained for simulation APIs. */
+export type ZarchShipState = ZarchLanderState;
+
+export type ZarchTankState = {
+  speedMetersPerSecond: number;
+  turretYaw: number;
+  x: number;
+  y: number;
+  yaw: number;
+  z: number;
+};
+
 export type ZarchRuntimeState = {
   bullets: ZarchBulletState[];
   camera: ZarchCameraState;
+  lander: ZarchLanderState | null;
+  landerFireCooldownSeconds: number;
   mode: ZarchRuntimeMode;
   navigation: ZarchNavigationState;
   score: number;
-  ship: ZarchShipState | null;
-  shipFireCooldownSeconds: number;
+  tank: ZarchTankState | null;
+  tankAvailability: 'error' | 'loading' | 'ready';
+  tankError: string | null;
 };
 
 export type ZarchInputState = {
@@ -67,6 +82,7 @@ export type ZarchInputState = {
   dragActive: boolean;
   editBrushActive: boolean;
   editBrushStarted: boolean;
+  fireHeld: boolean;
   hoverPointer: PointerTapPayload | null;
   keys: Record<string, boolean>;
   lastPointerX: number;
@@ -74,7 +90,6 @@ export type ZarchInputState = {
   pointerId: number | null;
   queuedEditTap: (PointerTapPayload & { shiftKey: boolean }) | null;
   queuedTap: PointerTapPayload | null;
-  shipFireHeld: boolean;
 };
 
 type EditorMode = 'terrain' | 'entities';
@@ -119,6 +134,8 @@ export const useZarchRuntime = ({
       zoom: 1,
       zoomTarget: 1
     },
+    lander: null,
+    landerFireCooldownSeconds: 0,
     mode: 'navigation',
     navigation: {
       velX: 0,
@@ -128,22 +145,23 @@ export const useZarchRuntime = ({
       z: 0
     },
     score: 0,
-    ship: null,
-    shipFireCooldownSeconds: 0
+    tank: null,
+    tankAvailability: 'loading',
+    tankError: null
   });
   const inputRef = useRef<ZarchInputState>({
     codes: {},
     dragActive: false,
     editBrushActive: false,
     editBrushStarted: false,
+    fireHeld: false,
     hoverPointer: null,
     keys: {},
     lastPointerX: 0,
     pointerCandidate: null,
     pointerId: null,
     queuedEditTap: null,
-    queuedTap: null,
-    shipFireHeld: false
+    queuedTap: null
   });
 
   useEffect(() => {
@@ -179,7 +197,7 @@ export const useZarchRuntime = ({
       inputRef.current.codes[event.code] = true;
 
       if (event.code === 'KeyF') {
-        inputRef.current.shipFireHeld = true;
+        inputRef.current.fireHeld = true;
       }
 
       if (PREVENT_SCROLL_KEYS.has(event.key)) {
@@ -216,7 +234,7 @@ export const useZarchRuntime = ({
       inputRef.current.codes[event.code] = false;
 
       if (event.code === 'KeyF') {
-        inputRef.current.shipFireHeld = false;
+        inputRef.current.fireHeld = false;
       }
     };
 
@@ -241,6 +259,16 @@ export const useZarchRuntime = ({
           timeStamp: event.timeStamp
         };
         inputRef.current.pointerId = event.pointerId;
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
+
+      if (runtimeRef.current.mode === 'tank') {
+        event.currentTarget.focus();
+        inputRef.current.fireHeld = true;
         inputRef.current.hoverPointer = {
           clientX: event.clientX,
           clientY: event.clientY
@@ -273,6 +301,14 @@ export const useZarchRuntime = ({
         return;
       }
 
+      if (runtimeRef.current.mode === 'tank') {
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
+
       if (
         !inputRef.current.dragActive ||
         runtimeRef.current.mode !== 'navigation' ||
@@ -288,6 +324,14 @@ export const useZarchRuntime = ({
     };
 
     const handlePointerUp = (event: PointerEvent<HTMLElement>) => {
+      if (runtimeRef.current.mode === 'tank') {
+        inputRef.current.fireHeld = false;
+        inputRef.current.hoverPointer = {
+          clientX: event.clientX,
+          clientY: event.clientY
+        };
+        return;
+      }
       if (
         editEnabled &&
         event.isPrimary &&
@@ -391,15 +435,16 @@ export const useZarchRuntime = ({
 
   return {
     containerProps,
-    enterShipMode: (shipState: ZarchShipState) => {
-      runtimeRef.current.mode = 'ship';
+    enterLanderMode: (landerState: ZarchLanderState) => {
+      runtimeRef.current.mode = 'lander';
       runtimeRef.current.bullets = [];
-      runtimeRef.current.ship = shipState;
-      runtimeRef.current.shipFireCooldownSeconds = 0;
-      runtimeRef.current.camera.x = shipState.x;
-      runtimeRef.current.camera.z = shipState.z;
+      runtimeRef.current.lander = landerState;
+      runtimeRef.current.landerFireCooldownSeconds = 0;
+      runtimeRef.current.tank = null;
+      runtimeRef.current.camera.x = landerState.x;
+      runtimeRef.current.camera.z = landerState.z;
     },
-    exitShipMode: () => {
+    enterNavigationMode: () => {
       const runtime = runtimeRef.current;
 
       runtime.mode = 'navigation';
@@ -409,9 +454,18 @@ export const useZarchRuntime = ({
       runtime.navigation.velX = 0;
       runtime.navigation.velZ = 0;
       runtime.bullets = [];
-      runtime.shipFireCooldownSeconds = 0;
-      runtime.ship = null;
-      inputRef.current.shipFireHeld = false;
+      runtime.landerFireCooldownSeconds = 0;
+      runtime.lander = null;
+      runtime.tank = null;
+      inputRef.current.fireHeld = false;
+    },
+    enterTankMode: (tankState: ZarchTankState) => {
+      runtimeRef.current.mode = 'tank';
+      runtimeRef.current.bullets = [];
+      runtimeRef.current.lander = null;
+      runtimeRef.current.tank = tankState;
+      runtimeRef.current.camera.x = tankState.x;
+      runtimeRef.current.camera.z = tankState.z;
     },
     inputRef,
     runtimeRef

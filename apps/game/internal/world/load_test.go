@@ -41,6 +41,11 @@ func TestLoadExportedWorldResolvesManifestAndDeduplicatesChunkPlacements(t *test
 			StaticEntities: &mapExportStaticEntitiesRecord{
 				Manifest: []manifestEntryRecord{
 					testManifestEntry("watchtower", "watchtower-v1", 8, 8, 8, 8, 10, 1),
+					func() manifestEntryRecord {
+						entry := testManifestEntry("flowerbed", "flowerbed-v1", 6, 6, 6, 6, 2, 1)
+						entry.AssetVersion.ObstacleMode = "none"
+						return entry
+					}(),
 				},
 			},
 		},
@@ -65,6 +70,7 @@ func TestLoadExportedWorldResolvesManifestAndDeduplicatesChunkPlacements(t *test
 				testPlacement("watchtower-center", "watchtower", 10, 10, 0, 1, "active"),
 				testPlacement("watchtower-edge", "watchtower", 19, 10, 45, 1, "active"),
 				testPlacement("watchtower-disabled", "watchtower", 5, 5, 0, 1, "disabled"),
+				testPlacement("flowerbed", "flowerbed", 15, 5, 0, 1, "active"),
 			},
 		},
 		"1:0": {
@@ -99,11 +105,14 @@ func TestLoadExportedWorldResolvesManifestAndDeduplicatesChunkPlacements(t *test
 		t.Fatalf("LoadExportedWorld returned error: %v", err)
 	}
 
-	if got, want := len(world.Entities), 3; got != want {
+	if got, want := len(world.Entities), 4; got != want {
 		t.Fatalf("got %d entities, want %d", got, want)
 	}
 	if got, want := world.ActiveObstacleCount(), 2; got != want {
 		t.Fatalf("got %d active obstacles, want %d", got, want)
+	}
+	if got := idsOf(world.QueryStaticObstaclesInAABB(10, 0, 20, 10)); strings.Contains(strings.Join(got, ","), "flowerbed") {
+		t.Fatalf("non-solid entity unexpectedly indexed: %#v", got)
 	}
 	if got := idsOf(world.QueryStaticObstaclesInAABB(0, 0, 12, 12)); strings.Join(got, ",") != "watchtower-center" {
 		t.Fatalf("unexpected center query results: %#v", got)

@@ -51,6 +51,7 @@ import {
   collectChunkStaticEntities,
   getSceneMetersScale,
   getStaticEntityGrounding,
+  isGameplayObstacleEligible,
   shouldUseStaticEntityInstancing
 } from '@/helpers/zarch-static-entities';
 import {
@@ -102,6 +103,12 @@ export type EntityRaycastResult = {
 };
 
 export type ZarchStaticEntitiesHandle = {
+  getObstacleColliders: () => Array<{
+    center: [number, number, number];
+    halfExtents: [number, number, number];
+    id: string;
+    yawRadians: number;
+  }>;
   raycastToEntity: (
     pointer: { clientX: number; clientY: number },
     rect: DOMRect,
@@ -477,6 +484,47 @@ export const ZarchStaticEntities = ({
   useImperativeHandle(
     handleRef,
     () => ({
+      getObstacleColliders: () => {
+        const result = [];
+        for (const entity of visibleEntitiesRef.current.values()) {
+          const archetype = archetypesById.get(entity.archetypeId);
+          const assetVersion = archetype
+            ? assetVersionsById.get(archetype.assetVersionId)
+            : null;
+          if (!assetVersion) {continue;}
+          const grounding = getStaticEntityGrounding({
+            assetVersion,
+            entity,
+            map,
+            terrain
+          });
+          if (
+            !grounding ||
+            !isGameplayObstacleEligible({
+              entity,
+              groundingValid: grounding.valid,
+              obstacleMode: assetVersion.obstacleMode
+            })
+          )
+            {continue;}
+          result.push({
+            center: [
+              entity.position.x,
+              grounding.sceneY +
+                (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
+              entity.position.z
+            ] as [number, number, number],
+            halfExtents: [
+              (assetVersion.collisionBox.widthMeters * entity.scale) / 2,
+              (assetVersion.collisionBox.heightMeters * entity.scale) / 2,
+              (assetVersion.collisionBox.depthMeters * entity.scale) / 2
+            ] as [number, number, number],
+            id: entity.id,
+            yawRadians: (-entity.rotation.yaw * Math.PI) / 180
+          });
+        }
+        return result;
+      },
       raycastToEntity: (
         pointer,
         rect,
@@ -565,7 +613,7 @@ export const ZarchStaticEntities = ({
         return null;
       }
     }),
-    [map, runtimeRef]
+    [archetypesById, assetVersionsById, map, runtimeRef, terrain]
   );
 
   useFrame(() => {

@@ -17,6 +17,16 @@ export type StaticEntityGroundingResult = {
   valid: boolean;
 };
 
+export const isGameplayObstacleEligible = ({
+  entity,
+  groundingValid,
+  obstacleMode
+}: {
+  entity: Pick<StaticEntity, 'state'>;
+  groundingValid: boolean;
+  obstacleMode: AssetVersion['obstacleMode'];
+}) => entity.state === 'active' && groundingValid && obstacleMode === 'solid';
+
 export const collectChunkStaticEntities = (chunks: RuntimeMapChunk[]) => {
   const entitiesById = new Map<string, StaticEntity>();
 

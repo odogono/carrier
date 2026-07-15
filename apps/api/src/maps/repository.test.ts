@@ -742,6 +742,7 @@ describe('map repository', () => {
       });
       expect(repository.listAssetVersions()).toEqual([assetVersion]);
       expect(repository.getAssetVersion(assetVersion.id)).toEqual(assetVersion);
+      expect(assetVersion.obstacleMode).toBe('solid');
 
       const updatedAssetVersion = repository.updateAssetVersion({
         diagnostics: ['normalized'],
@@ -771,10 +772,12 @@ describe('map repository', () => {
         },
         id: assetVersion.id,
         instancingEligible: true,
-        maxHeightDeltaMeters: 1.25
+        maxHeightDeltaMeters: 1.25,
+        obstacleMode: 'none'
       });
       expect(reviewedAssetVersion.footprint.widthMeters).toBe(19);
       expect(reviewedAssetVersion.instancingEligible).toBe(true);
+      expect(reviewedAssetVersion.obstacleMode).toBe('none');
 
       expect(() =>
         repository.createArchetype({

@@ -10,6 +10,7 @@ import {
   ZARCH_TILE_OVERRIDE_TYPE_SENTINEL,
   normalizeSourcePolygonParams,
   normalizeStaticEntityExportManifest,
+  resolveObstacleMode,
   slugify,
   stringifyStaticEntityExportManifest,
   type ApplyBooleanOutput,
@@ -192,6 +193,7 @@ type AssetVersionRow = {
   mapPreviewCategory: string | null;
   maxHeightDeltaMeters: number;
   originalFileJson: string;
+  obstacleMode: string;
   runtimeFileJson: string | null;
   status: string;
   updatedAt: string;
@@ -257,7 +259,12 @@ type MutateStaticEntityOptions = {
   mapId: string;
 };
 
-type CreateAssetVersionInput = Omit<AssetVersion, 'createdAt' | 'updatedAt'>;
+type CreateAssetVersionInput = Omit<
+  AssetVersion,
+  'createdAt' | 'obstacleMode' | 'updatedAt'
+> & {
+  obstacleMode?: AssetVersion['obstacleMode'];
+};
 
 type UpdateAssetVersionInput = {
   id: string;
@@ -269,6 +276,7 @@ type UpdateAssetVersionInput = {
   instancingEligible?: AssetVersion['instancingEligible'];
   maxHeightDeltaMeters?: AssetVersion['maxHeightDeltaMeters'];
   originalFile?: AssetVersion['originalFile'];
+  obstacleMode?: AssetVersion['obstacleMode'];
   runtimeFile?: AssetVersion['runtimeFile'];
   status?: AssetVersion['status'];
 };
@@ -433,6 +441,7 @@ const ASSET_VERSION_COLUMNS = `
   map_preview_category AS mapPreviewCategory,
   max_height_delta_meters AS maxHeightDeltaMeters,
   original_file_json AS originalFileJson,
+  obstacle_mode AS obstacleMode,
   runtime_file_json AS runtimeFileJson,
   status,
   updated_at AS updatedAt
@@ -853,6 +862,9 @@ const assetVersionRowToModel = (row: AssetVersionRow): AssetVersion => ({
   id: row.id,
   instancingEligible: row.instancingEligible === 1,
   maxHeightDeltaMeters: row.maxHeightDeltaMeters,
+  obstacleMode: resolveObstacleMode(
+    row.obstacleMode as AssetVersion['obstacleMode'] | undefined
+  ),
   originalFile: parseJson<AssetVersion['originalFile']>(row.originalFileJson),
   runtimeFile: row.runtimeFileJson
     ? parseJson<AssetVersion['runtimeFile']>(row.runtimeFileJson)
@@ -964,6 +976,7 @@ const assetVersionHasChanges = (current: AssetVersion, next: AssetVersion) =>
     instancingEligible: current.instancingEligible,
     maxHeightDeltaMeters: current.maxHeightDeltaMeters,
     originalFile: current.originalFile,
+    obstacleMode: current.obstacleMode,
     runtimeFile: current.runtimeFile,
     status: current.status
   }) !==
@@ -976,6 +989,7 @@ const assetVersionHasChanges = (current: AssetVersion, next: AssetVersion) =>
     instancingEligible: next.instancingEligible,
     maxHeightDeltaMeters: next.maxHeightDeltaMeters,
     originalFile: next.originalFile,
+    obstacleMode: next.obstacleMode,
     runtimeFile: next.runtimeFile,
     status: next.status
   });
@@ -1844,6 +1858,7 @@ export class MapRepository {
         id: assetVersion.id,
         instancingEligible: assetVersion.instancingEligible,
         maxHeightDeltaMeters: assetVersion.maxHeightDeltaMeters,
+        obstacleMode: assetVersion.obstacleMode,
         runtimeFile: assetVersion.runtimeFile
       }
     };
@@ -3056,8 +3071,9 @@ export class MapRepository {
             id, status, original_file_json, runtime_file_json,
             diagnostics_json, footprint_json, collision_box_json,
             collision_class, grounding_policy, max_height_delta_meters,
-            instancing_eligible, map_preview_category, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            obstacle_mode, instancing_eligible, map_preview_category, created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -3071,6 +3087,7 @@ export class MapRepository {
           input.collisionClass,
           input.groundingPolicy,
           input.maxHeightDeltaMeters,
+          resolveObstacleMode(input.obstacleMode),
           input.instancingEligible ? 1 : 0,
           null,
           now,
@@ -3140,6 +3157,7 @@ export class MapRepository {
       maxHeightDeltaMeters:
         input.maxHeightDeltaMeters ?? current.maxHeightDeltaMeters,
       originalFile: input.originalFile ?? current.originalFile,
+      obstacleMode: input.obstacleMode ?? current.obstacleMode,
       runtimeFile:
         input.runtimeFile === undefined
           ? current.runtimeFile
@@ -3170,6 +3188,7 @@ export class MapRepository {
             collision_class = ?,
             grounding_policy = ?,
             max_height_delta_meters = ?,
+            obstacle_mode = ?,
             instancing_eligible = ?,
             updated_at = ?
           WHERE id = ?
@@ -3185,6 +3204,7 @@ export class MapRepository {
           next.collisionClass,
           next.groundingPolicy,
           next.maxHeightDeltaMeters,
+          next.obstacleMode,
           next.instancingEligible ? 1 : 0,
           next.updatedAt,
           input.id
@@ -4716,6 +4736,7 @@ export class MapRepository {
         collision_class TEXT NOT NULL,
         grounding_policy TEXT NOT NULL,
         max_height_delta_meters REAL NOT NULL,
+        obstacle_mode TEXT NOT NULL DEFAULT 'solid',
         instancing_eligible INTEGER NOT NULL DEFAULT 0,
         map_preview_category TEXT,
         created_at TEXT NOT NULL,
@@ -4787,6 +4808,11 @@ export class MapRepository {
     `);
 
     this.ensureColumnExists('maps', 'revision', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumnExists(
+      'asset_versions',
+      'obstacle_mode',
+      "TEXT NOT NULL DEFAULT 'solid'"
+    );
     this.ensureColumnExists(
       'maps',
       'terrain_revision',

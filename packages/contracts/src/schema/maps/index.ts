@@ -10,6 +10,8 @@ import {
   AssetFileMetadataSchema,
   AssetVersionCollisionBoxSchema,
   AssetVersionFootprintSchema,
+  ObstacleModeSchema,
+  resolveObstacleMode,
   StaticEntitySchema,
   WorldBoundsSchema,
   authoredMapsContract,
@@ -164,8 +166,8 @@ export const ZARCH_TILE_OVERRIDE_TYPE_SENTINEL = 255;
 export const ZARCH_TILE_OVERRIDE_COLOR_SENTINEL = 255;
 export const ZARCH_TILE_EDIT_HEIGHT_STEP_METERS = 4;
 export const ZARCH_TILE_EDIT_MAX_ABS_HEIGHT_STEPS = 16;
-export const DEFAULT_ZARCH_TILE_TYPE_ID = 'normal';
-export const LANDING_PAD_ZARCH_TILE_TYPE_ID = 'landing-pad';
+export const DEFAULT_ZARCH_TILE_TYPE_ID = "normal";
+export const LANDING_PAD_ZARCH_TILE_TYPE_ID = "landing-pad";
 
 export const ZarchTileTypeDefinitionSchema = z.object({
   id: z.string().trim().min(1).max(120),
@@ -214,6 +216,7 @@ export const StaticEntityExportAssetVersionSchema = z.object({
   id: z.string().min(1),
   instancingEligible: z.boolean(),
   maxHeightDeltaMeters: z.number().finite().nonnegative(),
+  obstacleMode: ObstacleModeSchema.optional(),
   runtimeFile: AssetFileMetadataSchema,
 });
 export type StaticEntityExportAssetVersion = z.infer<
@@ -251,30 +254,29 @@ export const normalizeStaticEntityExportManifest = (
   manifest: readonly StaticEntityExportManifestEntry[],
 ): StaticEntityExportManifest =>
   manifest
-    .map(
-      (entry): StaticEntityExportManifestEntry => ({
-        archetype: {
-          assetVersionId: entry.archetype.assetVersionId,
-          category: entry.archetype.category,
-          id: entry.archetype.id,
-          name: entry.archetype.name,
-          status: entry.archetype.status,
-          tags: [...entry.archetype.tags].sort((left, right) =>
-            left.localeCompare(right),
-          ),
-        },
-        assetVersion: {
-          collisionBox: entry.assetVersion.collisionBox,
-          collisionClass: entry.assetVersion.collisionClass,
-          footprint: entry.assetVersion.footprint,
-          groundingPolicy: entry.assetVersion.groundingPolicy,
-          id: entry.assetVersion.id,
-          instancingEligible: entry.assetVersion.instancingEligible,
-          maxHeightDeltaMeters: entry.assetVersion.maxHeightDeltaMeters,
-          runtimeFile: entry.assetVersion.runtimeFile,
-        },
-      }),
-    )
+    .map((entry): StaticEntityExportManifestEntry => ({
+      archetype: {
+        assetVersionId: entry.archetype.assetVersionId,
+        category: entry.archetype.category,
+        id: entry.archetype.id,
+        name: entry.archetype.name,
+        status: entry.archetype.status,
+        tags: [...entry.archetype.tags].sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      },
+      assetVersion: {
+        collisionBox: entry.assetVersion.collisionBox,
+        collisionClass: entry.assetVersion.collisionClass,
+        footprint: entry.assetVersion.footprint,
+        groundingPolicy: entry.assetVersion.groundingPolicy,
+        id: entry.assetVersion.id,
+        instancingEligible: entry.assetVersion.instancingEligible,
+        maxHeightDeltaMeters: entry.assetVersion.maxHeightDeltaMeters,
+        obstacleMode: resolveObstacleMode(entry.assetVersion.obstacleMode),
+        runtimeFile: entry.assetVersion.runtimeFile,
+      },
+    }))
     .sort(
       (left, right) =>
         left.archetype.id.localeCompare(right.archetype.id) ||
@@ -350,13 +352,11 @@ export type MapMetadataSummary = z.infer<typeof MapMetadataSummarySchema>;
 
 export const isFiniteMap = <T extends MapMetadata | MapMetadataSummary>(
   meta: T | null | undefined,
-): meta is T & { extent: FiniteExtent } =>
-  meta?.extent?.kind === "finite";
+): meta is T & { extent: FiniteExtent } => meta?.extent?.kind === "finite";
 
 export const isInfiniteMap = <T extends MapMetadata | MapMetadataSummary>(
   meta: T | null | undefined,
-): meta is T & { extent: InfiniteExtent } =>
-  meta?.extent?.kind === "infinite";
+): meta is T & { extent: InfiniteExtent } => meta?.extent?.kind === "infinite";
 
 export const getMapChunkSizeTiles = (meta: MapMetadata): number =>
   meta.resolution.chunkSizeTiles;
@@ -578,7 +578,8 @@ export const DeleteMapRoute: Route = {
 } as const;
 
 export const RegenerateMapRoute: Route = {
-  description: "Regenerate a wrapped-classic map and wipe its persisted map data",
+  description:
+    "Regenerate a wrapped-classic map and wipe its persisted map data",
   method: "POST",
   path: "/maps/{id}/regenerate",
   tags: ["maps"],

@@ -18,6 +18,7 @@ import {
   getSceneMetersScale,
   getStaticEntityGrounding,
   getStaticEntityScenePosition,
+  isGameplayObstacleEligible,
   shouldUseStaticEntityInstancing
 } from './zarch-static-entities';
 
@@ -104,6 +105,7 @@ const assetVersion: AssetVersion = {
   id: 'watchtower-v1',
   instancingEligible: false,
   maxHeightDeltaMeters: 1.5,
+  obstacleMode: 'solid',
   originalFile: {
     contentType: 'model/gltf-binary',
     path: 'source.glb',
@@ -119,6 +121,37 @@ const assetVersion: AssetVersion = {
 };
 
 describe('zarch static entity helpers', () => {
+  test('only active, grounded, solid entities are gameplay obstacles', () => {
+    expect(
+      isGameplayObstacleEligible({
+        entity: baseEntity,
+        groundingValid: true,
+        obstacleMode: 'solid'
+      })
+    ).toBeTrue();
+    expect(
+      isGameplayObstacleEligible({
+        entity: baseEntity,
+        groundingValid: true,
+        obstacleMode: 'none'
+      })
+    ).toBeFalse();
+    expect(
+      isGameplayObstacleEligible({
+        entity: { ...baseEntity, state: 'disabled' },
+        groundingValid: true,
+        obstacleMode: 'solid'
+      })
+    ).toBeFalse();
+    expect(
+      isGameplayObstacleEligible({
+        entity: baseEntity,
+        groundingValid: false,
+        obstacleMode: 'solid'
+      })
+    ).toBeFalse();
+  });
+
   test('deduplicates chunk entities and hides disabled placements', () => {
     const disabledEntity = {
       ...baseEntity,
