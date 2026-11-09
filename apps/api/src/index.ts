@@ -320,6 +320,11 @@ export const createServer = async () => {
           });
 
           if (response) {
+            // Bun 1.4 drops a FormData body's implicit multipart content-type
+            // when `.body` is read before `.headers`, which is the order Elysia
+            // uses when it rewraps a returned Response. Reading the headers
+            // first materializes the content-type so it survives the rewrap.
+            void response.headers.get('content-type');
             return response;
           }
 
