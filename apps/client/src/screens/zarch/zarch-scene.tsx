@@ -1210,7 +1210,11 @@ export const ZarchScene = ({
           z: runtime.tank.z
         });
         if (!spawn) {
+          // Fail closed: no Tank body was created, so fall back to Navigation
+          // rather than leaving the client in Tank mode without a Tank.
           runtime.tankError = 'No valid loaded Tank spawn is available';
+          runtime.mode = 'navigation';
+          runtime.tank = null;
           return;
         }
         runtime.tank.x = spawn.x;

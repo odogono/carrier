@@ -50,7 +50,7 @@ the selected map session; changing maps releases that world.
 - Primary pointer or F fires a fixed-speed ballistic Shell from the authored
   `Muzzle`. Shells inherit Tank velocity, use Crashcat CCD plus an explicit shape
   sweep, accept only their nearest deterministic contact, emit one land burst or
-  water spray, and are removed after that physics step. Shell impacts do not
+  water spray, and are removed after that physics step. Shell Impacts do not
   imply damage, destruction, persistence, or score changes.
 - The elevated follow camera retains the world heading captured on Tank entry.
   Hull steering does not rotate the camera; damped velocity lead returns to the
@@ -64,7 +64,7 @@ immutable asset version has Obstacle Mode `solid` block the Tank. Obstacle Mode
 `solid` without being rewritten.
 
 Water uses separate collision surfaces: shoreline barriers block the Tank while
-the water surface accepts Shell impacts. Unloaded streamed edges, including
+the water surface accepts Shell Impacts. Unloaded streamed edges, including
 internal holes, fail closed with temporary Tank barriers. Shells collide with
 terrain, water surfaces, vegetation, and authored obstacles, but not shoreline
 or stream-boundary bodies.
@@ -93,22 +93,23 @@ Production uses the committed defaults without a runtime fallback.
 
 ## Acceptance matrix
 
-| Normative behavior                                                                                                                 | Evidence           | Verification seam                                                                            |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
-| Navigation, Lander, and Tank are direct peer modes; editing excludes vehicle modes                                                 | Automated + manual | Tank browser journey; Chromium playtest                                                      |
-| Runtime-only binding disables Tank until provisioned and has no bundled fallback                                                   | Automated          | Tank provisioning browser journey; GLB/runtime model tests; idempotent API provisioning test |
-| Spawn selects deterministic nearest loaded, obstacle-free, non-water land and fails closed when none exists                        | Automated + manual | Tank spawn unit tests; Chromium failure-state playtest                                       |
-| Runtime model exposes the articulated node contract and firing requires `Muzzle`                                                   | Automated          | GLB contract, muzzle conversion, and Tank firing tests                                       |
-| WASD drive, pivot steering, speed reversal, and physical momentum remain responsive                                                | Automated + manual | Tank dynamics tests; Tank browser journey; Chromium handling playtest                        |
-| Four-point suspension, slope traction, airtime, upright recovery, and stream-loss recovery obey their distinct rules               | Automated + manual | Tank dynamics tests; Chromium suspension/edge playtest                                       |
-| Camera heading stays fixed while damped lead follows and recentres                                                                 | Automated + manual | Tank camera tests; Chromium camera playtest                                                  |
-| Terrain, vegetation, authored obstacles, shoreline, water, and stream boundaries use the agreed collision matrix                   | Automated + manual | Crashcat world and physics geometry tests; Chromium boundary playtest                        |
-| Collider invalidation tracks loaded topology, height, water, obstacle dimensions, and stale-owner removal                          | Automated          | Physics geometry and production bridge tests                                                 |
-| Wrapped maps keep Tank physics unwrapped across a seam and canonicalize Navigation on exit                                         | Automated + manual | Wrapped-seam browser journey; wrap geometry tests; Chromium seam playtest                    |
-| Shells use authored muzzle direction, ballistic motion, CCD/sweeps, deterministic first contact, one effect, and post-step cleanup | Automated + manual | Tank, muzzle, impact-dispatch, and browser journey tests; Chromium impact playtest           |
-| Fixed-step catch-up, lifetime, capacity, mode exit, direct mode changes, map cleanup, and stale body removal are bounded           | Automated          | Tank lifecycle tests; direct-mode wrapped-seam browser journey; Crashcat owner tests         |
-| Navigation resumes at the Tank final canonical position within the displayed moving-body tolerance                                 | Automated          | Both Tank browser journeys                                                                   |
-| Obstacle Mode persists through contracts, repository, exported manifests, client filtering, and Go world loading                   | Automated          | Contracts, repository, client helper, and Go world tests                                     |
+| Normative behavior                                                                                                                 | Evidence           | Verification seam                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| Navigation, Lander, and Tank are direct peer modes; editing excludes vehicle modes                                                 | Automated + manual | Tank browser journey (Edit from Navigation); Chromium playtest (Edit from Tank and Lander) |
+| Runtime-only binding disables Tank until provisioned and has no bundled fallback                                                   | Automated          | Tank provisioning browser journey; GLB/runtime model tests                                 |
+| Spawn selects deterministic nearest loaded, obstacle-free, non-water land and fails closed when none exists                        | Automated + manual | Tank spawn unit tests; Chromium failure-state playtest                                     |
+| Runtime model exposes the articulated node contract and firing requires `Muzzle`                                                   | Automated          | GLB contract, muzzle conversion, and Tank firing tests                                     |
+| WASD drive, pivot steering, speed reversal, and physical momentum remain responsive                                                | Automated + manual | Tank dynamics tests; Tank browser journey; Chromium handling playtest                      |
+| Four-point suspension, slope traction, airtime, upright recovery, and stream-loss recovery obey their distinct rules               | Automated + manual | Tank dynamics tests; Chromium suspension/edge playtest                                     |
+| Camera heading stays fixed while damped lead follows and recentres                                                                 | Automated + manual | Tank camera tests; Chromium camera playtest                                                |
+| Terrain, vegetation, authored obstacles, shoreline, water, and stream boundaries use the agreed collision matrix                   | Automated + manual | Crashcat world and physics geometry tests; Chromium boundary playtest                      |
+| Collider invalidation tracks loaded topology, height, water, obstacle dimensions, and stale-owner removal                          | Automated          | Physics geometry and production bridge tests                                               |
+| Wrapped maps keep Tank physics unwrapped across a seam and canonicalize Navigation on exit                                         | Automated + manual | Wrapped-seam browser journey; wrap geometry tests; Chromium seam playtest                  |
+| Shells use authored muzzle direction, ballistic motion, CCD/sweeps, deterministic first contact, one effect, and post-step cleanup | Automated + manual | Tank, muzzle, impact-dispatch, and browser journey tests; Chromium impact playtest         |
+| Fixed-step catch-up, lifetime, capacity, mode exit, direct mode changes, and stale body removal are bounded                        | Automated          | Tank lifecycle tests; direct-mode wrapped-seam browser journey; Crashcat owner tests       |
+| Changing maps removes the Tank, every Shell body, and the collider owners, and releases the physics world                          | Manual             | Chromium map-change playtest                                                               |
+| Navigation resumes at the Tank final canonical position within the displayed moving-body tolerance                                 | Automated          | Both Tank browser journeys                                                                 |
+| Obstacle Mode persists through contracts, repository, exported manifests, client filtering, and Go world loading                   | Automated          | Contracts, repository, client helper, and Go world tests                                   |
 
 ## Manual Chromium playtest
 
@@ -122,10 +123,14 @@ Before closing the implementation issue, record pass/fail evidence for:
    its captured heading and recentres after stopping.
 4. Water, authored obstacles, vegetation, and unloaded edges block the Tank
    without rollover or escape into missing terrain.
-5. Land and water Shell impacts each produce one appropriate effect and no
+5. A Shell Impact on land or on water produces its one appropriate effect and no
    persistent damage.
 6. A wrapped seam can be crossed continuously, followed by a clean Lander/Tank
    transition and canonical Navigation handoff.
+7. Selecting Tank where no valid spawn exists (for example, focused over open
+   water) leaves the client in Navigation and shows the spawn failure.
+8. Changing maps while driving with Shells in flight removes the Tank and every
+   Shell, and the new map starts in Navigation.
 
 Tank Mode does not add multiplayer authority, persistent damage, AI vehicles,
 full rollover behavior, or water traversal.
