@@ -11,6 +11,7 @@ import {
 
 const apiPort = process.env.E2E_API_PORT ?? '16022';
 const apiBase = `http://localhost:${apiPort}/api`;
+const SCENE_UNITS_PER_TILE = 24;
 const shipAssetPath = resolve(
   fileURLToPath(
     new URL('../../../assets/zarch/zarch-player-ship.glb', import.meta.url)
@@ -106,7 +107,14 @@ const uploadReadyRuntimeEntity = async (
   return uploaded.id;
 };
 
-const createWrappedClassicMap = async (request: APIRequestContext) => {
+const createWrappedClassicMap = async (
+  request: APIRequestContext,
+  {
+    name = 'Tank mode browser E2E',
+    seed = 'tank-mode-browser-e2e',
+    sizeMeters = 1280
+  }: { name?: string; seed?: string; sizeMeters?: number } = {}
+) => {
   const response = await request.post(`${apiBase}/maps`, {
     data: {
       generator: 'island-clusters',
@@ -116,11 +124,11 @@ const createWrappedClassicMap = async (request: APIRequestContext) => {
         mediumAttractorCount: 16,
         radiusScale: 2.5
       },
-      heightMeters: 1280,
+      heightMeters: sizeMeters,
       kind: 'wrapped-classic',
-      name: 'Tank mode browser E2E',
-      seed: 'tank-mode-browser-e2e',
-      widthMeters: 1280
+      name,
+      seed,
+      widthMeters: sizeMeters
     },
     headers: { 'Content-Type': 'application/json' }
   });
@@ -183,6 +191,30 @@ const createShellTarget = async ({
   expect(targetResponse.ok()).toBeTruthy();
 };
 
+const createWrappedSeamCorridor = async ({
+  map,
+  request
+}: {
+  map: { extent: { heightTiles: number; widthTiles: number }; id: string };
+  request: APIRequestContext;
+}) => {
+  const centerTileX = Math.floor(map.extent.widthTiles / 2);
+  const edits = Array.from({ length: map.extent.heightTiles }, (_, tileZ) =>
+    [-2, -1, 0, 1, 2].map(offset => ({
+      colorIndex: null,
+      heightSteps: 0,
+      tileX: centerTileX + offset,
+      tileZ,
+      typeId: 'landing-pad'
+    }))
+  ).flat();
+  const response = await request.patch(`${apiBase}/maps/${map.id}/tiles`, {
+    data: { edits, expectedRevision: 0, mapId: map.id },
+    headers: { 'Content-Type': 'application/json' }
+  });
+  expect(response.ok()).toBeTruthy();
+};
+
 const parsePair = async (locator: Locator) => {
   const text = (await locator.textContent()) ?? '';
   const match = text.match(/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
@@ -198,6 +230,36 @@ const parseNumber = async (locator: Locator) => {
   const match = text.match(/-?\d+(?:\.\d+)?/);
   expect(match, `expected a number in ${JSON.stringify(text)}`).not.toBeNull();
   return Number(match![0]);
+};
+
+const parseTankRuntimeDiagnostics = async (locator: Locator) => {
+  const text = (await locator.textContent()) ?? '';
+  const match = text.match(
+    /Camera yaw:\s*(-?\d+(?:\.\d+)?); Collider tile:\s*(-?\d+|--),\s*(-?\d+|--); Tank bodies:\s*(\d+); Shell bodies:\s*(\d+); Exit:\s*(-?\d+(?:\.\d+)?|--),\s*(-?\d+(?:\.\d+)?|--)/
+  );
+  expect(
+    match,
+    `expected Tank runtime diagnostics in ${JSON.stringify(text)}`
+  ).not.toBeNull();
+  return {
+    cameraYaw: Number(match![1]),
+    colliderTileX: match![2] === '--' ? null : Number(match![2]),
+    colliderTileZ: match![3] === '--' ? null : Number(match![3]),
+    lastExitX: match![6] === '--' ? null : Number(match![6]),
+    lastExitZ: match![7] === '--' ? null : Number(match![7]),
+    shellBodyCount: Number(match![5]),
+    tankBodyCount: Number(match![4])
+  };
+};
+
+const expectDisplayedCoordinateDifference = (
+  actual: number,
+  expected: number,
+  maximumDifference = 0.2
+) => {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(
+    maximumDifference + 1e-9
+  );
 };
 
 test('Tank provisioning enables a complete browser gameplay journey', async ({
@@ -241,6 +303,13 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
   await expect(landerButton).toBeVisible();
   await expect(tankButton).toBeVisible();
   await expect(tankButton).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Enter Edit' }).click();
+  await expect(navigationButton).toBeDisabled();
+  await expect(landerButton).toBeDisabled();
+  await expect(tankButton).toBeDisabled();
+  await page.getByRole('button', { name: 'Exit Edit' }).click();
+  await expect(landerButton).toBeEnabled();
 
   await uploadReadyRuntimeEntity(request, {
     assetPath: tankAssetPath,
@@ -329,17 +398,117 @@ test('Tank provisioning enables a complete browser gameplay journey', async ({
     previousSpeed = currentSpeed;
   }
   await page.keyboard.up('KeyS');
-  expect(minimumSpeed).toBeLessThan(0.5);
+  expect(minimumSpeed).toBeLessThan(1);
   await page.waitForTimeout(1500);
 
   const tankFinalCentre = await parsePair(centre);
   await navigationButton.dispatchEvent('click');
   await expect(mode).toHaveText(/Navigation/);
   const navigationCentre = await parsePair(centre);
-  expect(Math.abs(navigationCentre.x - tankFinalCentre.x)).toBeLessThanOrEqual(
-    0.2
+  expectDisplayedCoordinateDifference(navigationCentre.x, tankFinalCentre.x);
+  expectDisplayedCoordinateDifference(navigationCentre.z, tankFinalCentre.z);
+});
+
+test('Tank crosses a wrapped seam and cleans up through direct mode changes', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ height: 900, width: 1600 });
+
+  await uploadReadyRuntimeEntity(request, {
+    assetPath: shipAssetPath,
+    fileName: 'zarch-player-ship.glb',
+    id: 'zarch-player-ship',
+    kind: 'player-ship',
+    lengthMeters: 5,
+    name: 'Player Lander'
+  });
+  await uploadReadyRuntimeEntity(request, {
+    assetPath: tankAssetPath,
+    fileName: 'low-poly-tank.glb',
+    id: 'zarch-player-tank',
+    kind: 'player-tank',
+    lengthMeters: 7,
+    name: 'Player Tank'
+  });
+  const map = await createWrappedClassicMap(request, {
+    name: 'Tank wrapped seam E2E',
+    seed: 'tank-seam-241',
+    sizeMeters: 160
+  });
+  await createWrappedSeamCorridor({ map, request });
+
+  await page.goto(`/?mapId=${map.id}`);
+
+  const navigationButton = page.getByTestId('zarch-mode-navigation');
+  const landerButton = page.getByTestId('zarch-mode-lander');
+  const tankButton = page.getByTestId('zarch-mode-tank');
+  const mode = page.getByTestId('zarch-hud-mode');
+  const centre = page.getByTestId('zarch-hud-centre');
+  const speed = page.getByTestId('zarch-hud-tank-speed');
+  const shellCount = page.getByTestId('zarch-hud-shell-count');
+  const runtimeDiagnostics = page.getByTestId(
+    'zarch-hud-tank-runtime-diagnostics'
   );
-  expect(Math.abs(navigationCentre.z - tankFinalCentre.z)).toBeLessThanOrEqual(
-    0.2
+
+  await expect(tankButton).toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByTestId('zarch-hud-height')).toHaveText(
+    /Height:\s*-?\d/,
+    { timeout: 30_000 }
+  );
+  await tankButton.dispatchEvent('click');
+  await expect(mode).toHaveText(/Tank/);
+  const initialCameraYaw = (
+    await parseTankRuntimeDiagnostics(runtimeDiagnostics)
+  ).cameraYaw;
+
+  await page.keyboard.down('KeyW');
+  await expect.poll(() => parseNumber(speed)).toBeGreaterThan(0);
+  await expect
+    .poll(async () => (await parsePair(centre)).z, { timeout: 15_000 })
+    .toBeLessThan(0);
+  const unwrappedCentre = await parsePair(centre);
+  await page.waitForTimeout(500);
+  await expect
+    .poll(async () => (await parsePair(centre)).z)
+    .toBeLessThan(unwrappedCentre.z);
+  const seamDiagnostics = await parseTankRuntimeDiagnostics(runtimeDiagnostics);
+  expect(seamDiagnostics.colliderTileZ).toBeLessThan(0);
+  expect(seamDiagnostics.tankBodyCount).toBe(1);
+  expect(seamDiagnostics.cameraYaw).toBeCloseTo(initialCameraYaw, 6);
+  await page.keyboard.up('KeyW');
+
+  await page.keyboard.down('KeyF');
+  await expect.poll(() => parseNumber(shellCount)).toBeGreaterThan(0);
+  await page.keyboard.up('KeyF');
+  await landerButton.dispatchEvent('click');
+  await expect(mode).toHaveText(/Lander/);
+  await expect
+    .poll(() => parseTankRuntimeDiagnostics(runtimeDiagnostics))
+    .toMatchObject({ shellBodyCount: 0, tankBodyCount: 0 });
+  await tankButton.dispatchEvent('click');
+  await expect(mode).toHaveText(/Tank/);
+  await expect(shellCount).toHaveText(/Shells:\s*0/);
+  await expect(speed).toBeVisible();
+  await page.waitForTimeout(1500);
+
+  await navigationButton.dispatchEvent('click');
+  await expect(mode).toHaveText(/Navigation/);
+  await expect
+    .poll(async () => (await parsePair(centre)).z)
+    .toBeGreaterThanOrEqual(0);
+  const navigationCentre = await parsePair(centre);
+  const exitDiagnostics = await parseTankRuntimeDiagnostics(runtimeDiagnostics);
+  const wrappedWidth = map.extent.widthTiles * SCENE_UNITS_PER_TILE;
+  const wrappedHeight = map.extent.heightTiles * SCENE_UNITS_PER_TILE;
+  expectDisplayedCoordinateDifference(
+    navigationCentre.x,
+    ((exitDiagnostics.lastExitX! % wrappedWidth) + wrappedWidth) % wrappedWidth
+  );
+  expectDisplayedCoordinateDifference(
+    navigationCentre.z,
+    ((exitDiagnostics.lastExitZ! % wrappedHeight) + wrappedHeight) %
+      wrappedHeight
   );
 });

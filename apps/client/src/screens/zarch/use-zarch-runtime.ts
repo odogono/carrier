@@ -69,6 +69,16 @@ export type ZarchTankState = {
   z: number;
 };
 
+export type ZarchTankRuntimeDiagnostics = {
+  cameraYaw: number;
+  colliderCenterTileX: number | null;
+  colliderCenterTileZ: number | null;
+  lastExitX: number | null;
+  lastExitZ: number | null;
+  shellBodyCount: number;
+  tankBodyCount: number;
+};
+
 export type ZarchRuntimeState = {
   bullets: ZarchBulletState[];
   camera: ZarchCameraState;
@@ -80,6 +90,7 @@ export type ZarchRuntimeState = {
   tank: ZarchTankState | null;
   tankAvailability: 'error' | 'loading' | 'ready';
   tankError: string | null;
+  tankRuntimeDiagnostics: ZarchTankRuntimeDiagnostics;
 };
 
 export type ZarchInputState = {
@@ -152,7 +163,16 @@ export const useZarchRuntime = ({
     score: 0,
     tank: null,
     tankAvailability: 'loading',
-    tankError: null
+    tankError: null,
+    tankRuntimeDiagnostics: {
+      cameraYaw: 0,
+      colliderCenterTileX: null,
+      colliderCenterTileZ: null,
+      lastExitX: null,
+      lastExitZ: null,
+      shellBodyCount: 0,
+      tankBodyCount: 0
+    }
   });
   const inputRef = useRef<ZarchInputState>({
     codes: {},
@@ -452,6 +472,11 @@ export const useZarchRuntime = ({
     enterNavigationMode: () => {
       const runtime = runtimeRef.current;
       const leavingTank = runtime.mode === 'tank';
+
+      if (leavingTank) {
+        runtime.tankRuntimeDiagnostics.lastExitX = runtime.navigation.x;
+        runtime.tankRuntimeDiagnostics.lastExitZ = runtime.navigation.z;
+      }
 
       runtime.mode = 'navigation';
       if (!leavingTank) {

@@ -357,12 +357,33 @@ export const destroyPlayerTankSimulation = (
   physics: ZarchPhysicsWorld,
   simulation: PlayerTankSimulation
 ) => {
+  const shellBodyIds = simulation.shells.map(shell => shell.bodyId);
   removeBody(physics, simulation.bodyId);
   for (const shell of simulation.shells) {
     removeBody(physics, shell.bodyId);
   }
   simulation.shells = [];
+  return {
+    shellBodyCount: shellBodyIds.filter(bodyId =>
+      Boolean(rigidBody.get(physics.world, bodyId))
+    ).length,
+    tankBodyCount: Number(
+      Boolean(rigidBody.get(physics.world, simulation.bodyId))
+    )
+  };
 };
+
+export const getPlayerTankTrackedBodyCounts = (
+  physics: ZarchPhysicsWorld,
+  simulation: PlayerTankSimulation
+) => ({
+  shellBodyCount: simulation.shells.filter(shell =>
+    Boolean(rigidBody.get(physics.world, shell.bodyId))
+  ).length,
+  tankBodyCount: Number(
+    Boolean(rigidBody.get(physics.world, simulation.bodyId))
+  )
+});
 
 export const updatePlayerTankAim = ({
   aimWorld,

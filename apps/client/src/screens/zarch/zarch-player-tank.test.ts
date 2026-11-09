@@ -43,6 +43,23 @@ describe('zarch player tank', () => {
     expect(spawn).toEqual({ x: 36, y: 8.6, z: 12 });
   });
 
+  test('declines to spawn when no loaded land tile is valid', () => {
+    const spawn = findNearestTankSpawn({
+      isObstacleFree: () => true,
+      surface: {
+        isTileLoaded: () => true,
+        isWaterTile: () => true,
+        sampleHeightAtWorld: () => 0,
+        sampleNormalAtWorld: () => ({ x: 0, y: 1, z: 0 })
+      },
+      tileMeters: 24,
+      x: 1,
+      z: 1
+    });
+
+    expect(spawn).toBeNull();
+  });
+
   test('drives a dynamic upright body in the shared physics world', () => {
     const physics = createZarchPhysicsWorld();
     physics.replaceStaticBoxBody(

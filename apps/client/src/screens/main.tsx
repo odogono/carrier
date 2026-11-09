@@ -615,8 +615,12 @@ const MainInner = () => {
           z: focus.z
         });
         if (!spawn) {
+          runtimeRef.current.tankError =
+            'No valid loaded Tank spawn is available';
+          containerElement?.focus();
           return;
         }
+        runtimeRef.current.tankError = null;
         const sceneScale = getSceneMetersScale(map);
         enterTankMode({
           activeShellCount: 0,
